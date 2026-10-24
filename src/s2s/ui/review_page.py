@@ -288,6 +288,7 @@ class ReviewPage(QWidget):
         self.ctx = ctx
         self._busy = False
         self._locked = False
+        self.replacement = False  # True while showing only declined tracks ("find another source")
         self.model = ReviewModel(self)
         # The view shows the model through a sort proxy (header click sorting). All row logic below works on
         # SOURCE rows (model.rows); never use a view index's row() directly.
@@ -346,7 +347,13 @@ class ReviewPage(QWidget):
 
     # ------------------------------------------------------------ loading
 
-    def load(self, results: list[MatchResult], destination: str, *, locked: bool = False) -> None:
+    def load_replacement(self, plan) -> None:
+        """Replacement mode: ONLY the declined tracks, with the declining peers' files marked unusable.
+        Same checkboxes, same confirmation dialog, and a NEW approval on confirm; nothing is queued here."""
+        self.load(plan.results, plan.destination, replacement=True, without_source=len(plan.without_source))
+
+    def load(self, results: list[MatchResult], destination: str, *, locked: bool = False,
+             replacement: bool = False, without_source: int = 0) -> None:
         """Populate off the UI thread (library lookups touch the filesystem, read-only)."""
         self.banner.setText("Checking the destination library...")
         tracks = [r.track for r in results]
@@ -363,27 +370,44 @@ class ReviewPage(QWidget):
             return existing
 
         def done(existing):
-            self.set_results(results, destination, existing, locked=locked)
+            self.set_results(results, destination, existing, locked=locked, replacement=replacement,
+                             without_source=without_source)
 
-        run_async(self, work, done, lambda exc: self.set_results(results, destination, {}, locked=locked))
+        run_async(self, work, done, lambda exc: self.set_results(
+            results, destination, {}, locked=locked, replacement=replacement, without_source=without_source))
 
     def set_results(self, results: list[MatchResult], destination: str,
-                    existing: dict[str, list[str]] | None = None, *, locked: bool = False) -> None:
+                    existing: dict[str, list[str]] | None = None, *, locked: bool = False,
+                    replacement: bool = False, without_source: int = 0) -> None:
         self._locked = locked
+        self.replacement = replacement
         self.model.skip_flagged = bool(self.ctx.settings.match_policy.skip_flagged_by_default)
         self.model.set_locked(locked)
         self.model.set_results(results, destination, existing)
         self.model.set_locked(locked)
         self.view.resizeColumnsToContents()
         self.view.setColumnWidth(C_PATH, 380)
+        if replacement and not locked:
+            note = (f" {without_source} of these tracks have no other eligible source: run the search again later, "
+                    "or enable sharing in Settings and retry." if without_source else "")
+            self.banner.setText(
+                f"Another source for {len(results)} declined track{'s' if len(results) != 1 else ''}. Only the "
+                "declined tracks are shown; files from the user who declined are marked unusable. Tick what you "
+                "want, then confirm: this creates a NEW approval and queues only those files. Flagged (amber) "
+                "rows are " + ("unchecked by default." if self.model.skip_flagged else "ticked like the others.")
+                + note)
+        else:
+            self._set_default_banner(locked, destination)
+        self.detail.setRowCount(0)
+        self._update_footer()
+
+    def _set_default_banner(self, locked: bool, destination: str) -> None:
         self.banner.setText(
             "This selection was approved and queued. It can no longer be edited; run a new search for a new review."
             if locked else
             f"Review every row, then confirm. Destination: {destination}. Flagged (amber) rows are "
             + ("unchecked by default; inspect the candidates below before ticking them."
                if self.model.skip_flagged else "ticked like the others (your rules); inspect them anyway."))
-        self.detail.setRowCount(0)
-        self._update_footer()
 
     # ------------------------------------------------------------ detail
 

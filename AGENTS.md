@@ -106,6 +106,7 @@ Proposed native screens:
 2. Search with progress and cancellation. Display one row per requested track, including unresolved/skipped entries.
 3. Review requested recording versus proposed remote file: peer username, full remote path, matched version/fallback reason, format, bitrate, size, duration if available, availability/queue, and existing-library status. Allow alternatives, deselection, and inspection of other candidates.
 4. Explicit confirmation queues only the reviewed selection. Bind approval to exact peer/file/size and destination, not just a track title. A changed selection or replacement file requires fresh review. No automatic fallback download after approval.
+   A download declined by its uploader (e.g. "share files first") is never replaced automatically: "Find another source" reopens Review for the declined tracks only (the declining peer's files marked unusable; `approval.create_approval` also refuses that peer for that track), and a replacement needs its own confirmation and a NEW approval; the original approval stays immutable. Classification lives in `src/s2s/rejections.py`; the exact slskd/Soulseek rejection texts are unverified.
 5. Show transfer progress, queue states, errors, retry/cancel controls, and partial completion.
 6. Verify successful downloads, then organize into the chosen flat library with a persistent import record.
 

@@ -32,7 +32,7 @@ from .models import (
     TransferStatus,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE imports (
@@ -147,6 +147,27 @@ CREATE TABLE archives (
 );
 """
 
+# v3: peers that declined us (requires sharing / banned), remembered across searches. rejection_events makes
+# recording idempotent: the same transfer is counted once however often the transfer list is refreshed.
+_SCHEMA_V3 = """
+CREATE TABLE peer_rejections (
+    username TEXT NOT NULL COLLATE NOCASE,
+    kind TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (username, kind)
+);
+CREATE TABLE rejection_events (
+    approval_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (approval_id, apple_id)
+);
+"""
+
 
 class StoreError(Exception):
     pass
@@ -205,20 +226,21 @@ class Store:
 
     def _migrate(self) -> None:
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
-        if version == 0:
-            with self._conn:
-                for stmt in (_SCHEMA + _SCHEMA_V2).split(";"):
-                    if stmt.strip():
-                        self._conn.execute(stmt)
-                self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-        elif version == 1:
-            with self._conn:
-                for stmt in _SCHEMA_V2.split(";"):
-                    if stmt.strip():
-                        self._conn.execute(stmt)
-                self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-        elif version > SCHEMA_VERSION:
+        if version > SCHEMA_VERSION:
             raise StoreError(f"database schema {version} is newer than supported {SCHEMA_VERSION}")
+        if version == SCHEMA_VERSION:
+            return
+        steps = {0: _SCHEMA, 1: _SCHEMA_V2, 2: _SCHEMA_V3}  # each step upgrades to the next version
+        with self._conn:
+            if version == 0:
+                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3]
+            else:
+                scripts = [steps[v] for v in range(version, SCHEMA_VERSION)]
+            for script in scripts:
+                for stmt in script.split(";"):
+                    if stmt.strip():
+                        self._conn.execute(stmt)
+            self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     # ------------------------------------------------------------ imports / tracks
 
@@ -367,7 +389,23 @@ class Store:
         )
         return Approval(a["id"], a["import_id"], a["fingerprint"], items, a["created_at"])
 
+    def approvals_for_import(self, import_id: str) -> list[Approval]:
+        """Every approval of an import, oldest first (a replacement review adds further approvals)."""
+        with self._lock:
+            ids = [r["id"] for r in self._conn.execute(
+                "SELECT id FROM approvals WHERE import_id=? ORDER BY created_at, rowid", (import_id,)).fetchall()]
+        return [a for a in (self.get_approval(i) for i in ids) if a is not None]
+
     # ------------------------------------------------------------ transfers
+
+    def transfers_for_import(self, import_id: str) -> list[TransferRecord]:
+        """Transfers of all approvals of an import, oldest approval first."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT t.* FROM transfers t JOIN approvals a ON a.id = t.approval_id
+                   WHERE a.import_id=? ORDER BY a.created_at, a.rowid, t.apple_id""", (import_id,)
+            ).fetchall()
+        return [_transfer(r) for r in rows]
 
     def upsert_transfer(self, approval_id: str, apple_id: str, status: TransferStatus) -> None:
         with self._lock, self._conn:
@@ -465,6 +503,36 @@ class Store:
             if r["state"] == TransferState.SUCCEEDED.value and r["outcome"] not in done:
                 return True
         return False
+
+    # ------------------------------------------------------------ peers that declined us
+
+    def record_peer_rejection(self, username: str, kind: str, approval_id: str, apple_id: str) -> bool:
+        """Remember that `username` declined us (kind: 'requires_sharing' / 'banned'). Idempotent per
+        (approval, track): returns True only the first time this transfer is recorded."""
+        now = utc_now()
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO rejection_events VALUES (?,?,?,?,?)",
+                (approval_id, apple_id, username, kind, now))
+            if cur.rowcount == 0:
+                return False
+            self._conn.execute(
+                """INSERT INTO peer_rejections VALUES (?,?,?,?,1)
+                   ON CONFLICT(username, kind) DO UPDATE SET last_seen=excluded.last_seen, count=count+1""",
+                (username, kind, now, now))
+        return True
+
+    def peer_rejections(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM peer_rejections ORDER BY username, kind").fetchall()
+        return [dict(r) for r in rows]
+
+    def declining_peers(self) -> dict[str, set[str]]:
+        """casefolded username -> set of remembered rejection kinds."""
+        out: dict[str, set[str]] = {}
+        for r in self.peer_rejections():
+            out.setdefault(r["username"].casefold(), set()).add(r["kind"])
+        return out
 
     def completed_apple_ids(self, destination: str) -> set[str]:
         """Apple ids already copied into (or identical to a file already in) this destination."""

@@ -80,6 +80,23 @@ every successful one was imported cleanly (copied or already present), slskd rep
 transfer for that peer, and no other approval still needs that peer's folder. A conflict or invalid import keeps
 the folder where it is so you can inspect it. Each archive is recorded, so reruns never archive twice.
 
+### Declined downloads
+
+Many Soulseek users refuse uploads to people who share nothing (S2S shares nothing by default), and some
+decline for other reasons (queue full, file gone, blocked). A refused transfer is classified in plain English in
+the Transfers table (**Problem** column; the raw slskd text is in its tooltip and the **Error (raw)** column).
+The wording slskd and peers use is not verified against live traffic, so the classification matches keywords and
+falls back to "Transfer failed" with the raw text.
+
+When a file was declined, a banner says "N files were declined by their uploader." with **Find another
+source...**. That opens Review showing only the declined tracks, with the declining user's files marked
+unusable ("declined by this user") and the next eligible candidate pre-selected under the normal rules (flagged
+rows start unticked). You tick and confirm as usual; confirming creates a **new** approval for just those files
+(the original approval is never changed) and Transfers then lists both, the new rows labelled "Replacement N".
+Nothing is ever replaced automatically. If no other source exists for a track, Review says so: search again
+later, or enable sharing in Settings. Peers that told you to share files or banned you are remembered in the
+local database; later searches still offer their files but flag them and rank them after equivalent ones.
+
 The most recent import can be reopened from step 1 ("Resume most recent import").
 
 ## Tests

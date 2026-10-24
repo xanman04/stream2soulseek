@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -13,6 +14,14 @@ from .. import config
 from ..models import Settings
 from ..organize import sanitize_component
 from ..secretstore import SLSKD_API_KEY
+from ..slskd.service import incomplete_dir_for, share_folder_problem
+
+SHARING_HELP = (
+    "Many Soulseek users only upload to people who share files themselves; with nothing shared, some downloads "
+    "are declined. Folders you add here are visible to and downloadable by every Soulseek user. Share only music "
+    "you are comfortable sharing (for example your DJ library or the OLD archive). S2S refuses drives, your whole "
+    "user folder, and anything containing its own data. Changes apply when slskd restarts (S2S restarts it after "
+    "you press Save).")
 from .context import AppContext
 from .matching_rules import MatchingRulesWidget
 from .util import show_error
@@ -72,15 +81,71 @@ class SettingsDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.rules)
+        self.shares = QListWidget()
+        self.shares.addItems(s.shared_folders)
+        self.add_share_btn = QPushButton("Add folder...")
+        self.remove_share_btn = QPushButton("Remove")
+        help_ = QLabel(SHARING_HELP)
+        help_.setWordWrap(True)
+        self.shares_status = QLabel("")
+        self.shares_status.setWordWrap(True)
+        srow = QHBoxLayout()
+        srow.addWidget(self.add_share_btn)
+        srow.addWidget(self.remove_share_btn)
+        srow.addStretch(1)
+        sharing = QWidget()
+        sl = QVBoxLayout(sharing)
+        sl.addWidget(help_)
+        sl.addWidget(self.shares, 1)
+        sl.addLayout(srow)
+        sl.addWidget(self.shares_status)
+        self.add_share_btn.clicked.connect(self.add_share)
+        self.remove_share_btn.clicked.connect(self.remove_share)
+        self._update_shares_status()
+
         self.tabs = QTabWidget()
         self.tabs.addTab(general, "General")
         self.tabs.addTab(scroll, "Matching rules")
+        self.tabs.addTab(sharing, "Sharing")
         if matching:
             self.tabs.setCurrentIndex(1)
         lay = QVBoxLayout(self)
         lay.addWidget(self.tabs)
         lay.addWidget(box)
         self.test_btn.clicked.connect(self.test_connection)
+
+    # ------------------------------------------------------------ sharing
+
+    def shared_folders(self) -> list[str]:
+        return [self.shares.item(i).text() for i in range(self.shares.count())]
+
+    def _share_problem(self, folder: str) -> str | None:
+        probe = dataclasses.replace(self.ctx.settings, slskd_downloads_dir=self.downloads.text().strip())
+        incomplete = incomplete_dir_for(probe) if probe.slskd_downloads_dir else None
+        return share_folder_problem(folder, incomplete_dir=incomplete, app_dir=config.app_dir_path())
+
+    def add_share(self, folder: str | None = None) -> None:
+        folder = folder or QFileDialog.getExistingDirectory(self, "Choose a folder to share")
+        if not folder:
+            return
+        folder = str(Path(folder))
+        problem = self._share_problem(folder)
+        if problem:
+            show_error(self, "Sharing", problem)
+            return
+        if any(Path(f) == Path(folder) for f in self.shared_folders()):
+            return
+        self.shares.addItem(folder)
+        self._update_shares_status()
+
+    def remove_share(self) -> None:
+        for it in self.shares.selectedItems():
+            self.shares.takeItem(self.shares.row(it))
+        self._update_shares_status()
+
+    def _update_shares_status(self) -> None:
+        n = self.shares.count()
+        self.shares_status.setText("Nothing is shared." if n == 0 else f"{n} folder{'s' if n != 1 else ''} shared.")
 
     def _with_browse(self, edit: QLineEdit, directory: bool) -> QWidget:
         w = QWidget()
@@ -133,7 +198,11 @@ class SettingsDialog(QDialog):
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
                 search_concurrency=self.concurrency.value(), match_policy=self.rules.policy(),
-                rule_layouts=dict(self.rules.layouts))
+                rule_layouts=dict(self.rules.layouts), shared_folders=self.shared_folders())
+            for f in new.shared_folders:  # the downloads folder may have changed since a folder was added
+                problem = self._share_problem(f)
+                if problem:
+                    raise ValueError(f"Sharing: {problem}")
             if not (new.slskd_url and new.slskd_downloads_dir):
                 raise ValueError("URL and the slskd downloads folder are required.")
             if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):

@@ -28,7 +28,7 @@ def store(tmp_path):
 
 
 def test_schema_and_wal(store, tmp_path):
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 3
     assert store._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     store.close()
     Store(tmp_path / "s.sqlite3").close()  # reopen ok
@@ -120,7 +120,7 @@ def test_threaded_use(store):
 
 
 def test_schema_version_is_2_with_archives_table(store):
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 3
     cols = {r[1] for r in store._conn.execute("PRAGMA table_info(archives)")}
     assert {"approval_id", "username", "archive_dir", "moved_json"} <= cols
 
@@ -142,7 +142,7 @@ def test_v1_database_migrates_without_losing_data(tmp_path):
     s = Store(path)
     try:
         assert s.get_import("i1").playlist_name == "P"
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert s.archives_for_approval("a") == []
     finally:
         s.close()
