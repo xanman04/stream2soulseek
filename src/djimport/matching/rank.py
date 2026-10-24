@@ -10,7 +10,8 @@ import re
 from dataclasses import replace
 from typing import Iterable
 
-from ..models import AppleTrack, Candidate, MatchResult, MatchStatus, RemoteFile, Tier
+from ..models import AppleTrack, Candidate, MatchPolicy, MatchResult, MatchStatus, RemoteFile, Tier
+from . import formats as _fmt
 from .versions import (
     ParsedTitle,
     normalise,
@@ -25,7 +26,6 @@ from .versions import (
 )
 
 MAX_REJECTED = 50
-DURATION_TOLERANCE_S = 15
 _PEOPLE_KINDS = {"remix", "vip", "edit", "dub", "bootleg", "instrumental", "acapella"}
 _STOP = {"dj", "the", "and", "mc"}
 
@@ -33,43 +33,25 @@ _STOP = {"dj", "the", "and", "mc"}
 # ------------------------------------------------------------------ format
 
 
-def _ext(f: RemoteFile) -> str:
-    if f.extension:
-        return f.extension.lower().lstrip(".")
-    m = re.search(r"\.([A-Za-z0-9]{2,5})$", f.filename or "")
-    return m.group(1).lower() if m else ""
-
-
-def format_rank(f: RemoteFile) -> int:
-    """1 = MP3 320 CBR, 2 = FLAC, 9 = not acceptable."""
-    ext = _ext(f)
-    if ext == "mp3":
-        if f.bitrate == 320 and f.is_vbr is not True:
-            return 1
-        return 9
-    if ext == "flac":
-        return 2
-    return 9
-
-
-def _format_desc(f: RemoteFile) -> str:
-    ext = _ext(f) or "unknown"
-    if ext == "mp3":
-        if f.bitrate is None:
-            return "mp3 with unknown bitrate"
-        return f"mp3 {f.bitrate} kbps" + (" VBR" if f.is_vbr else "") + " (need 320 CBR)"
-    return f"{ext} not accepted (only MP3 320 CBR or FLAC)"
+def format_rank(f: RemoteFile, policy: MatchPolicy | None = None) -> int:
+    """1-based position in the policy's accepted-format list (default: 1 = MP3 320 CBR, 2 = FLAC); 9 = no."""
+    return _fmt.format_rank(f, policy)
 
 
 # ------------------------------------------------------------------ request side
 
 
-def request_exclusion(track: AppleTrack) -> str | None:
-    """Excluded kind of the REQUEST itself ('radio edit' | 'live' | 'mixed'), else None."""
+def request_exclusion(track: AppleTrack, policy: MatchPolicy | None = None) -> str | None:
+    """Excluded kind of the REQUEST itself ('radio edit' | 'live' | 'mixed'), else None.
+
+    Only kinds the policy excludes count; with an exclusion switched off the request is searched and
+    only files carrying the same label can match it (the version comparison still applies).
+    """
+    on = (policy or MatchPolicy()).excluded_labels()
     ex = parse_title(track.name).excluded
-    if ex:
+    if ex and ex in on:
         return ex
-    if track.album and parse_title(track.album).excluded == "mixed":
+    if "mixed" in on and track.album and parse_title(track.album).excluded == "mixed":
         return "mixed"
     return None
 
@@ -166,13 +148,16 @@ def _pick_interpretation(f: RemoteFile, req: ParsedTitle, artists: list[str], fu
 # ------------------------------------------------------------------ evaluate
 
 
-def _evaluate(track: AppleTrack, f: RemoteFile) -> tuple[Candidate, int]:
+def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = None,
+              ignore_format: bool = False) -> tuple[Candidate, int]:
+    policy = policy or MatchPolicy()
+    on = policy.excluded_labels()
     req = parse_title(track.name)
     artists = split_names(track.artist)
     full_artist = normalise(track.artist)
     dirs, stem = split_remote_path(f.filename)
     path_norm = normalise(" ".join(dirs + [stem]))
-    fr = format_rank(f)
+    fr = 1 if ignore_format else format_rank(f, policy)
 
     reject: list[str] = []
     flags: list[str] = []
@@ -180,7 +165,7 @@ def _evaluate(track: AppleTrack, f: RemoteFile) -> tuple[Candidate, int]:
     relevance = 0
 
     if fr == 9:
-        reject.append("format: " + _format_desc(f))
+        reject.append("format: " + _fmt.describe_format(f, policy))
 
     # ---- title
     g, fp, quality = _pick_interpretation(f, req, artists, full_artist)
@@ -197,6 +182,8 @@ def _evaluate(track: AppleTrack, f: RemoteFile) -> tuple[Candidate, int]:
     skip = set(artists) | {full_artist, req.base}
     skip.discard("")
     ex = fp.excluded or scan_exclusion(strip_track_number(stem), skip) or scan_exclusion(stem, skip)
+    if ex not in on:
+        ex = None  # that label is allowed by the user's rules; version comparison below still applies
     if ex:
         reject.append(f"excluded: {ex}")
     else:
@@ -227,7 +214,7 @@ def _evaluate(track: AppleTrack, f: RemoteFile) -> tuple[Candidate, int]:
     folder = _folder_info(dirs)
     tier: Tier | None = None
     if quality is not None:
-        tier, vreasons, vflags = _compare_versions(req, fp, artists, folder)
+        tier, vreasons, vflags = _compare_versions(req, fp, artists, folder, policy)
         if tier is None:
             reject.extend(vreasons)
         else:
@@ -235,6 +222,8 @@ def _evaluate(track: AppleTrack, f: RemoteFile) -> tuple[Candidate, int]:
             info.extend(vreasons)
             flags.extend(vflags)
     for exf in folder["excluded"]:
+        if exf not in on:
+            continue
         flags.append(f"folder name has a '{exf}' label")
 
     # ---- duration
@@ -243,7 +232,7 @@ def _evaluate(track: AppleTrack, f: RemoteFile) -> tuple[Candidate, int]:
     if tier is not None and req_s is not None and f.length_s:
         diff = f.length_s - req_s
         if tier == Tier.EXACT:
-            if abs(diff) > DURATION_TOLERANCE_S:
+            if abs(diff) > policy.duration_tolerance_s:
                 flags.append(f"duration differs by {abs(diff):.0f}s (file {f.length_s}s, requested {req_s:.0f}s)")
             dur_bonus = 10.0 - min(abs(diff), 60) / 6
         else:
@@ -279,7 +268,8 @@ def reject_has(reasons: list[str], prefix: str) -> bool:
     return any(r.startswith(prefix) for r in reasons)
 
 
-def _compare_versions(req: ParsedTitle, fil: ParsedTitle, artists: list[str], folder: dict):
+def _compare_versions(req: ParsedTitle, fil: ParsedTitle, artists: list[str], folder: dict,
+                      policy: MatchPolicy | None = None):
     """Return (tier or None, reasons, flags). Rejection reasons come back in `reasons` when tier is None."""
     flags: list[str] = []
     reasons: list[str] = []
@@ -321,25 +311,31 @@ def _compare_versions(req: ParsedTitle, fil: ParsedTitle, artists: list[str], fo
         reasons.append("exact requested version")
         return Tier.EXACT, reasons, flags
     if fil_ext and not req.extended:
+        if policy is not None and policy.version_mode == "exact_only":
+            reasons.append("extended mix of the same version, but your rules accept the exact version only")
+            return None, reasons, flags
         reasons.append("extended mix of the same version (fallback)")
         return Tier.EXTENDED_FALLBACK, reasons, flags
     reasons.append("requested an extended version but file is not extended")
     return None, reasons, flags
 
 
-def evaluate(track: AppleTrack, f: RemoteFile) -> Candidate:
-    return _evaluate(track, f)[0]
+def evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = None) -> Candidate:
+    return _evaluate(track, f, policy)[0]
 
 
 # ------------------------------------------------------------------ match
 
 
-def _key(c: Candidate):
-    return (int(c.tier), c.format_rank, -c.score, c.file.username, c.file.filename)
+def _key(c: Candidate, policy: MatchPolicy):
+    if policy.tier_before_format:
+        return (int(c.tier), c.format_rank, -c.score, c.file.username, c.file.filename)
+    return (c.format_rank, int(c.tier), -c.score, c.file.username, c.file.filename)
 
 
-def match(track: AppleTrack, files: Iterable[RemoteFile]) -> MatchResult:
-    ex = request_exclusion(track)
+def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None) -> MatchResult:
+    policy = policy or MatchPolicy()
+    ex = request_exclusion(track, policy)
     if ex:
         return MatchResult(track, MatchStatus.SKIPPED, None, note=f"requested track is excluded ({ex}); not searched")
 
@@ -350,12 +346,12 @@ def match(track: AppleTrack, files: Iterable[RemoteFile]) -> MatchResult:
         if k in seen:
             continue
         seen.add(k)
-        evaluated.append(_evaluate(track, f))
+        evaluated.append(_evaluate(track, f, policy))
 
     if not evaluated:
         return MatchResult(track, MatchStatus.UNRESOLVED, None, note="no files returned")
 
-    eligible = sorted((c for c, _ in evaluated if c.tier != Tier.REJECTED), key=_key)
+    eligible = sorted((c for c, _ in evaluated if c.tier != Tier.REJECTED), key=lambda c: _key(c, policy))
     rejected_pairs = sorted(
         ((c, r) for c, r in evaluated if c.tier == Tier.REJECTED),
         key=lambda cr: (-cr[1], cr[0].format_rank, -cr[0].score, cr[0].file.username, cr[0].file.filename),
@@ -371,7 +367,7 @@ def match(track: AppleTrack, files: Iterable[RemoteFile]) -> MatchResult:
     best = eligible[0]
     note = ""
     if best.tier == Tier.EXTENDED_FALLBACK:
-        if _exact_only_in_bad_format(track, [c.file for c, _ in evaluated]):
+        if _exact_only_in_bad_format(track, [c.file for c, _ in evaluated], policy):
             best = replace(best, flagged=True, reasons=best.reasons + ("exact version exists only in an unacceptable format",))
             note = "extended fallback used; exact version found only in an unacceptable format"
         else:
@@ -379,13 +375,12 @@ def match(track: AppleTrack, files: Iterable[RemoteFile]) -> MatchResult:
     return MatchResult(track, MatchStatus.PROPOSED, best, alternatives=tuple(eligible[1:]), rejected=rejected, note=note)
 
 
-def _exact_only_in_bad_format(track: AppleTrack, files: list[RemoteFile]) -> bool:
+def _exact_only_in_bad_format(track: AppleTrack, files: list[RemoteFile], policy: MatchPolicy) -> bool:
     """True if some file is the exact version (ignoring format) but has an unacceptable format."""
     for f in files:
-        if format_rank(f) != 9:
+        if format_rank(f, policy) != 9:
             continue
-        probe = replace(f, extension="flac", bitrate=None, is_vbr=None)  # pretend acceptable, test eligibility only
-        c = _evaluate(track, probe)[0]
+        c = _evaluate(track, f, policy, ignore_format=True)[0]  # test eligibility only
         if c.tier == Tier.EXACT:
             return True
     return False

@@ -11,6 +11,8 @@ def main() -> int:
 
     # Required by Qt WebEngine (embedded Apple sign-in) when created after QApplication.
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    # Keep the web view's native window from turning every sibling widget native (repaint artifacts).
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
     app = QApplication.instance() or QApplication(sys.argv)
 
     from . import config

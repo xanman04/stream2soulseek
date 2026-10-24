@@ -16,7 +16,8 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from .models import AppleTrack, ImportOutcome, ImportResult, Tier, TransferState, TransferStatus
+from .matching.formats import EXTENSIONS, verify_downloaded
+from .models import AppleTrack, ImportOutcome, ImportResult, MatchPolicy, Tier, TransferState, TransferStatus
 
 PARTIAL_SUFFIX = ".djimport-partial"
 MAX_NAME_LEN = 180
@@ -247,7 +248,9 @@ def import_file(
     ffprobe_path: str,
     runner=subprocess.run,
     archive_name: str = "OLD",
+    policy: MatchPolicy | None = None,
 ) -> ImportResult:
+    policy = policy or MatchPolicy()
     aid = track.apple_id
 
     def invalid(detail: str, **kw) -> ImportResult:
@@ -263,17 +266,15 @@ def import_file(
     if src.stat().st_size != transfer.size:
         return invalid("size mismatch", source=str(src))
     ext = src.suffix.lower().lstrip(".")
-    if ext not in ("mp3", "flac"):
+    if not any(ext in EXTENSIONS[r.kind] for r in policy.formats):
         return invalid(f"unsupported extension .{ext}", source=str(src))
     try:
         codec, kbps, _dur = probe_audio(src, ffprobe_path, runner=runner)
     except OrganizeError as exc:
         return invalid(str(exc), source=str(src))
-    if codec != ext:
-        return invalid(f"codec {codec!r} does not match extension .{ext}", source=str(src), codec=codec,
-                       bitrate_kbps=kbps)
-    if ext == "mp3" and (kbps is None or kbps < 315):
-        return invalid(f"mp3 bitrate {kbps} kbps is below 320", source=str(src), codec=codec, bitrate_kbps=kbps)
+    problem = verify_downloaded(ext, codec, kbps, policy)
+    if problem:
+        return invalid(problem, source=str(src), codec=codec, bitrate_kbps=kbps)
 
     digest = _sha256(src)
     dest_dir = Path(destination)

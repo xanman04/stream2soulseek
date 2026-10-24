@@ -6,7 +6,7 @@ import dataclasses
 
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
@@ -14,16 +14,17 @@ from ..models import Settings
 from ..organize import sanitize_component
 from ..secretstore import SLSKD_API_KEY
 from .context import AppContext
+from .matching_rules import MatchingRulesWidget
 from .util import show_error
 from .workers import run_async
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
+    def __init__(self, ctx: AppContext, parent: QWidget | None = None, *, matching: bool = False) -> None:
         super().__init__(parent)
         self.ctx = ctx
         self.setWindowTitle("Settings")
-        self.resize(640, 360)
+        self.resize(760, 860)  # tall enough to show the whole Matching rules tab without scrolling
         s = ctx.settings
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
@@ -65,8 +66,19 @@ class SettingsDialog(QDialog):
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.accepted.connect(self.save)
         box.rejected.connect(self.reject)
+        general = QWidget()
+        general.setLayout(form)
+        self.rules = MatchingRulesWidget(s.match_policy)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.rules)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(general, "General")
+        self.tabs.addTab(scroll, "Matching rules")
+        if matching:
+            self.tabs.setCurrentIndex(1)
         lay = QVBoxLayout(self)
-        lay.addLayout(form)
+        lay.addWidget(self.tabs)
         lay.addWidget(box)
         self.test_btn.clicked.connect(self.test_connection)
 
@@ -120,7 +132,7 @@ class SettingsDialog(QDialog):
                 slskd_downloads_dir=self.downloads.text().strip(),
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
-                search_concurrency=self.concurrency.value())
+                search_concurrency=self.concurrency.value(), match_policy=self.rules.policy())
             if not (new.slskd_url and new.slskd_downloads_dir):
                 raise ValueError("URL and the slskd downloads folder are required.")
             if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):
