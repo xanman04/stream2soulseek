@@ -1,4 +1,4 @@
-"""Step 4: transfer progress, retry/cancel, and verified import into the chosen library."""
+"""Step 5: transfer progress, retry/cancel, and verified import into the chosen library."""
 
 from __future__ import annotations
 

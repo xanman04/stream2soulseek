@@ -1,4 +1,4 @@
-"""Step 3: the mandatory review gate.
+"""Step 4: the mandatory review gate.
 
 This is the ONLY place that creates an approval and calls DownloadService.enqueue_approved, and only
 after ReviewPage.ask_confirmation returned True for the exact list of files shown.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QSplitter,
@@ -19,7 +19,7 @@ from .. import config, organize
 from ..approval import create_approval
 from ..models import Candidate, MatchResult, MatchStatus, SelectionItem, Tier
 from .context import AppContext
-from .util import fmt_duration_ms, fmt_mib, fmt_seconds, item, make_table, show_error
+from .util import SORT_ROLE, fmt_duration_ms, fmt_mib, fmt_seconds, fold, item, make_table, show_error
 from .workers import run_async
 
 COLUMNS = ["Use", "#", "Title", "Artist", "Dur", "Status", "Peer", "Remote path", "Tier", "Version",
@@ -170,6 +170,24 @@ class ReviewModel(QAbstractTableModel):
         self.checks_changed.emit()
         return True
 
+    def _sort_value(self, row: ReviewRow, col: int):
+        """Header-sorting key: numbers stay numbers, text is case/accent-insensitive."""
+        t, cand = row.result.track, row.chosen
+        f = cand.file if cand is not None else None
+        if col == C_USE:
+            return (1 if row.checked else 0) if row.selectable else -1
+        if col == C_POS:
+            return t.position
+        if col == C_DUR:
+            return -1 if t.duration_ms is None else t.duration_ms
+        if col == C_SIZE:
+            return -1 if f is None else f.size
+        if col == C_LEN:
+            return -1 if f is None or f.length_s is None else f.length_s
+        if col == C_BR:
+            return -1 if f is None or f.bitrate is None else f.bitrate
+        return fold(str(self._display(row, col) or ""))
+
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
@@ -196,8 +214,14 @@ class ReviewModel(QAbstractTableModel):
             if col == C_LIB and row.existing:
                 return "\n".join(row.existing)
             return None
+        if role == SORT_ROLE:
+            return self._sort_value(row, col)
         if role != Qt.ItemDataRole.DisplayRole:
             return None
+        return self._display(row, col)
+
+    def _display(self, row: ReviewRow, col: int):
+        res, cand, t = row.result, row.chosen, row.result.track
         if col == C_POS:
             return t.position + 1
         if col == C_TITLE:
@@ -263,8 +287,15 @@ class ReviewPage(QWidget):
         self._busy = False
         self._locked = False
         self.model = ReviewModel(self)
+        # The view shows the model through a sort proxy (header click sorting). All row logic below works on
+        # SOURCE rows (model.rows); never use a view index's row() directly.
+        self.proxy = QSortFilterProxyModel(self)
+        self.proxy.setSourceModel(self.model)
+        self.proxy.setSortRole(SORT_ROLE)
         self.view = QTableView()
-        self.view.setModel(self.model)
+        self.view.setModel(self.proxy)
+        self.view.setSortingEnabled(True)
+        self.view.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)  # Apple order
         self.view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.view.horizontalHeader().setStretchLastSection(True)
@@ -305,7 +336,8 @@ class ReviewPage(QWidget):
         lay.addLayout(foot)
 
         self.model.checks_changed.connect(self._update_footer)
-        self.view.selectionModel().currentRowChanged.connect(lambda cur, _prev: self._show_detail(cur.row()))
+        self.view.selectionModel().currentRowChanged.connect(
+            lambda cur, _prev: self._show_detail(self._source_row(cur)))
         self.detail.itemSelectionChanged.connect(self._update_use_button)
         self.use_btn.clicked.connect(self._use_selected)
         self.confirm_btn.clicked.connect(self.confirm_download)
@@ -351,9 +383,14 @@ class ReviewPage(QWidget):
 
     # ------------------------------------------------------------ detail
 
+    def _source_row(self, view_index) -> int:
+        """Model (source) row of an index of the sorted view, or -1."""
+        if not view_index.isValid():
+            return -1
+        return self.proxy.mapToSource(view_index).row()
+
     def _current_row(self) -> int:
-        i = self.view.currentIndex()
-        return i.row() if i.isValid() else -1
+        return self._source_row(self.view.currentIndex())
 
     def detail_candidates(self, row: int) -> list[tuple[str, Candidate]]:
         r = self.model.rows[row]
