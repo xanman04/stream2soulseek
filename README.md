@@ -24,9 +24,10 @@ cd C:\DJ\dev
 .venv\Scripts\python -m djimport.app
 ```
 
-(`djimport` is also installed as a GUI script.) First run: set up slskd (see `docs\SETUP.md`), open
-**Settings...** and enter the slskd URL, API key and **slskd downloads folder** (required, no default; the
-app asks on first start), then sign in to Apple Music in step 1. `ffprobe` is taken from `PATH` if present,
+(`djimport` is also installed as a GUI script.) First run: install slskd (see `docs\SETUP.md`), then start
+the app. It asks for the **slskd downloads folder** (required, no default), then shows a **Soulseek login**
+popup, then the Apple Music sign-in. The app starts and stops slskd itself and reuses the saved Soulseek login
+on every later start; **File > Soulseek login...** changes it. `ffprobe` is taken from `PATH` if present,
 otherwise set its path in Settings.
 
 ## Workflow
@@ -78,9 +79,10 @@ cd C:\DJ\dev
 - Existing files in the download location are never overwritten, moved, retagged or deleted. Downloaded
   source files are only ever moved into the archive folder inside the slskd downloads folder, after their
   copy was verified; archiving never overwrites and never deletes anything except a byte-identical duplicate.
-- Secrets (Apple tokens, slskd API key) live only in Windows DPAPI-protected files under
-  `%LOCALAPPDATA%\DJImport\secrets`, never in the repository, `settings.json`, logs or error dialogs.
-  Soulseek credentials belong to slskd's own configuration, not this app.
+- Secrets (Apple tokens, Soulseek login, slskd API key) live only in Windows DPAPI-protected files under
+  `%LOCALAPPDATA%\DJImport\secrets`, never in the repository, `settings.json`, logs or error dialogs. The
+  Soulseek login is saved only after slskd actually logged in with it, and reaches slskd through environment
+  variables of the process the app starts; it is never written to `slskd.yml`.
 - Embedded Apple sign-in uses an off-the-record web profile; "Sign out" deletes stored tokens and clears it.
 - Do not commit session data, tokens, music or playlist exports. Inspect tracked files and history before
   any future publication.
