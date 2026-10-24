@@ -1,4 +1,4 @@
-"""Entry point: `python -m djimport.app` or the `djimport` gui-script."""
+"""Entry point: `python -m s2s.app` or the `s2s` gui-script."""
 
 from __future__ import annotations
 

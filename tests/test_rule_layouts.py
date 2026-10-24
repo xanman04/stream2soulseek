@@ -9,9 +9,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from djimport import config
-from djimport import layouts as L
-from djimport.models import FormatRule, MatchPolicy, Settings
+from s2s import config
+from s2s import layouts as L
+from s2s.models import FormatRule, MatchPolicy, Settings
 
 FLAC_FIRST = MatchPolicy(formats=[FormatRule("flac"), FormatRule("mp3", 320, False)])
 STRICT = MatchPolicy(version_mode="exact_only")
@@ -85,10 +85,10 @@ def ctx(tmp_path, monkeypatch):
     if QApplication is None:
         pytest.skip("Qt unavailable")
     QApplication.instance() or QApplication([])
-    from djimport.secretstore import SecretStore
-    from djimport.store import Store
-    from djimport.ui import workers
-    from djimport.ui.context import AppContext
+    from s2s.secretstore import SecretStore
+    from s2s.store import Store
+    from s2s.ui import workers
+    from s2s.ui.context import AppContext
 
     monkeypatch.setattr(workers, "RUN_INLINE", True)
     store = Store(config.db_path())
@@ -98,7 +98,7 @@ def ctx(tmp_path, monkeypatch):
 
 
 def rules_widget(policy, layouts, names=(), confirm=True):
-    from djimport.ui.matching_rules import MatchingRulesWidget
+    from s2s.ui.matching_rules import MatchingRulesWidget
 
     queue = list(names)
     return MatchingRulesWidget(policy, layouts=layouts, ask_name=lambda _p, _c: queue.pop(0) if queue else None,
@@ -107,7 +107,7 @@ def rules_widget(policy, layouts, names=(), confirm=True):
 
 def test_editor_save_load_delete(ctx):
     w = rules_widget(FLAC_FIRST, {}, names=["Lossless"])
-    from djimport.ui.matching_rules import CUSTOM
+    from s2s.ui.matching_rules import CUSTOM
 
     assert w.layout_combo.currentText() == CUSTOM  # FLAC-first matches no saved layout yet
     assert not w.load_btn.isEnabled() and not w.delete_btn.isEnabled()
@@ -137,7 +137,7 @@ def test_editor_overwrite_needs_confirmation(ctx):
 
 
 def test_settings_dialog_saves_layouts(ctx):
-    from djimport.ui.settings_dialog import SettingsDialog
+    from s2s.ui.settings_dialog import SettingsDialog
 
     dlg = SettingsDialog(ctx, matching=True)
     dlg.rules._ask_name = lambda _p, _c: "Lossless"
@@ -149,7 +149,7 @@ def test_settings_dialog_saves_layouts(ctx):
 
 
 def test_search_step_layout_picker_switches_rules(ctx):
-    from djimport.ui.search_page import SearchPage
+    from s2s.ui.search_page import SearchPage
 
     ctx.settings.rule_layouts = {"Lossless": FLAC_FIRST}
     page = SearchPage(ctx)

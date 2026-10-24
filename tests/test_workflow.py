@@ -8,14 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from djimport import workflow
-from djimport.approval import create_approval
-from djimport.models import (
+from s2s import workflow
+from s2s.approval import create_approval
+from s2s.models import (
     AppleTrack, ImportOutcome, MatchStatus, Playlist, RemoteFile, SelectionItem, Settings, TransferState,
     TransferStatus,
 )
-from djimport.slskd.client import SlskdError
-from djimport.store import Store
+from s2s.slskd.client import SlskdError
+from s2s.store import Store
 
 REMOTE = r"@@u\Music\Artist - Album\03 - Artist - Song.mp3"
 DATA = b"synthetic-audio-bytes" * 10
@@ -112,7 +112,7 @@ def test_search_never_enqueues_and_creates_no_transfers(env):
 
 
 def test_already_imported_tracks_are_skipped_without_searching(env):
-    from djimport.models import ImportResult
+    from s2s.models import ImportResult
     prev = env.store.create_import(Playlist("p.0", "Old"), str(env.root / "House"))
     env.store.record_import_result(prev, ImportResult("i.1", ImportOutcome.COPIED, "a", "b"))
     client = FakeSlskd({"song": [good_file()]})
@@ -123,7 +123,7 @@ def test_already_imported_tracks_are_skipped_without_searching(env):
 
 
 def test_other_destination_does_not_skip(env):
-    from djimport.models import ImportResult
+    from s2s.models import ImportResult
     (env.root / "Techno").mkdir()
     prev = env.store.create_import(Playlist("p.0", "Old"), str(env.root / "Techno"))
     env.store.record_import_result(prev, ImportResult("i.1", ImportOutcome.COPIED, "a", "b"))

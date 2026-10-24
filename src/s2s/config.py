@@ -1,6 +1,6 @@
 """Per-user application paths and non-secret settings.
 
-All state lives outside the repository, under %LOCALAPPDATA%\\DJImport (override with DJIMPORT_HOME
+All state lives outside the repository, under %LOCALAPPDATA%\\S2S (override with S2S_HOME
 for tests). Secrets are never written here in plain text; see secretstore.py.
 """
 
@@ -18,16 +18,37 @@ MAX_RECENT = 10
 
 def app_dir_path() -> Path:
     """The application data directory path, without creating it."""
-    override = os.environ.get("DJIMPORT_HOME")
+    override = os.environ.get("S2S_HOME")
     if override:
         base = Path(override)
     else:
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "DJImport"
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "S2S"
     return base
+
+
+LEGACY_DIR_NAME = "DJImport"  # the app's data folder before it was renamed to S2S
+
+
+def migrate_legacy_dir(base: Path) -> bool:
+    """Move %LOCALAPPDATA%\\DJImport to `base` (…\\S2S) once, if only the old folder exists.
+
+    Same volume, so this is a rename: settings, database, DPAPI secrets and the managed slskd folder keep working.
+    Returns True when a move happened. If the rename fails (e.g. a file is locked), the old folder is left intact.
+    """
+    legacy = base.parent / LEGACY_DIR_NAME
+    if base.exists() or not legacy.is_dir():
+        return False
+    try:
+        os.replace(legacy, base)
+    except OSError:
+        return False
+    return True
 
 
 def app_dir() -> Path:
     base = app_dir_path()
+    if not os.environ.get("S2S_HOME"):
+        migrate_legacy_dir(base)
     base.mkdir(parents=True, exist_ok=True)
     return base
 

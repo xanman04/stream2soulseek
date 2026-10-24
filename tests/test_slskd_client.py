@@ -4,8 +4,8 @@ import uuid
 import httpx
 import pytest
 
-from djimport.models import RemoteFile, TransferState
-from djimport.slskd.client import SlskdAuthError, SlskdClient, SlskdError, map_transfer_state
+from s2s.models import RemoteFile, TransferState
+from s2s.slskd.client import SlskdAuthError, SlskdClient, SlskdError, map_transfer_state
 
 KEY = "synthetic-test-key-0123456789"
 SID = str(uuid.uuid4())

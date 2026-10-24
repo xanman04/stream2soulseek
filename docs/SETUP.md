@@ -6,7 +6,7 @@ The app runs [slskd](https://github.com/slskd/slskd) for you; you only install i
 1. **Install slskd.** Download `slskd-<version>-win-x64.zip` from the slskd GitHub releases page, check its
    SHA-256 against the digest GitHub shows, and unpack it to `%LOCALAPPDATA%\Programs\slskd\<version>\`.
    The app picks the newest version found there. To use another location, set `"slskd_exe"` under `extra`
-   in `%LOCALAPPDATA%\DJImport\settings.json`.
+   in `%LOCALAPPDATA%\S2S\settings.json`.
 2. **Start the app.** On first start it asks for the **slskd downloads folder** (for example
    `C:\DJ\Tracks\Soulseek\complete`). Incomplete files go to a `downloading` folder beside it (override with
    `"slskd_incomplete_dir"` under `extra`).
@@ -15,7 +15,7 @@ The app runs [slskd](https://github.com/slskd/slskd) for you; you only install i
    creates a new account if the username does not exist yet. The login is stored with DPAPI only after slskd
    actually logged in, and is reused on every later start. **File > Soulseek login...** changes it.
 
-What the app configures (`%LOCALAPPDATA%\DJImport\slskd\slskd.yml`, regenerated on each start; do not edit):
+What the app configures (`%LOCALAPPDATA%\S2S\slskd\slskd.yml`, regenerated on each start; do not edit):
 
 - Web/API on `127.0.0.1:5030` only, HTTPS off, authentication on, with a random API key that only the app
   knows (stored with DPAPI).

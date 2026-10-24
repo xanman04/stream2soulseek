@@ -1,4 +1,4 @@
-# DJ Import
+# S2S — Streaming to Soulseek
 
 Personal Windows desktop app (PySide6 / Qt widgets). It reads one Apple Music playlist, searches Soulseek
 through a local [slskd](https://github.com/slskd/slskd) instance for the matching recordings, makes you
@@ -21,10 +21,10 @@ or rightsholders.
 
 ```powershell
 cd C:\DJ\dev
-.venv\Scripts\python -m djimport.app
+.venv\Scripts\python -m s2s.app
 ```
 
-(`djimport` is also installed as a GUI script.) First run: install slskd (see `docs\SETUP.md`), then start
+(`s2s` is also installed as a GUI script.) First run: install slskd (see `docs\SETUP.md`), then start
 the app. It asks for the **slskd downloads folder** (required, no default), then shows a **Soulseek login**
 popup, then the Apple Music sign-in. The app starts and stops slskd itself and reuses the saved Soulseek login
 on every later start; **File > Soulseek login...** changes it. `ffprobe` is taken from `PATH` if present,
@@ -63,7 +63,7 @@ opens by itself; step 1 shows a message with a button to it while no service is 
    With **Settings > auto import** on (the default) this happens by itself after every refresh; **Process
    completed now** does the same on demand.
 
-New playlist sources implement `djimport.sources.base.PlaylistSource` (see `sources/apple.py`) and are added to
+New playlist sources implement `s2s.sources.base.PlaylistSource` (see `sources/apple.py`) and are added to
 `AppContext.playlist_sources()`; the step 1 source selector then lists them once they are connected.
 
 ### Automatic import and archive
@@ -106,7 +106,7 @@ cd C:\DJ\dev
   source files are only ever moved into the archive folder inside the slskd downloads folder, after their
   copy was verified; archiving never overwrites and never deletes anything except a byte-identical duplicate.
 - Secrets (Apple tokens, Soulseek login, slskd API key) live only in Windows DPAPI-protected files under
-  `%LOCALAPPDATA%\DJImport\secrets`, never in the repository, `settings.json`, logs or error dialogs. The
+  `%LOCALAPPDATA%\S2S\secrets`, never in the repository, `settings.json`, logs or error dialogs. The
   Soulseek login is saved only after slskd actually logged in with it, and reaches slskd through environment
   variables of the process the app starts; it is never written to `slskd.yml`.
 - Embedded Apple sign-in uses an off-the-record web profile; "Sign out" deletes stored tokens and clears it.

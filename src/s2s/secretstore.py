@@ -19,7 +19,7 @@ APPLE_MEDIA_USER_TOKEN = "apple_media_user_token"
 SLSKD_API_KEY = "slskd_api_key"
 
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
-_ENTROPY = b"djimport/v1"
+_ENTROPY = b"djimport/v1"  # pre-rename value; changing it would make every stored secret unreadable
 
 
 class _Blob(ctypes.Structure):

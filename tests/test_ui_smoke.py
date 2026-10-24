@@ -18,15 +18,15 @@ try:
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"Qt/WebEngine unavailable: {type(exc).__name__}", allow_module_level=True)
 
-import djimport
-from djimport import config
-from djimport.models import (
+import s2s
+from s2s import config
+from s2s.models import (
     AppleTrack, Candidate, MatchResult, MatchStatus, Playlist, RemoteFile, Settings, Tier,
 )
-from djimport.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SecretStore
-from djimport.store import Store
-from djimport.ui import review_page, workers
-from djimport.ui.context import AppContext
+from s2s.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SecretStore
+from s2s.store import Store
+from s2s.ui import review_page, workers
+from s2s.ui.context import AppContext
 
 
 @pytest.fixture(scope="module")
@@ -48,14 +48,14 @@ def mk_cand(user, name, tier=Tier.EXACT, rank=1, flagged=False, reasons=()):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch, qapp):
-    monkeypatch.setenv("DJIMPORT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("S2S_HOME", str(tmp_path / "home"))
     root = tmp_path / "Tracks"
     for n in ("DnB", "House", "Soulseek"):
         (root / n).mkdir(parents=True)
     store = Store(config.db_path())
     secrets = SecretStore(tmp_path / "sec", protect=lambda b: b, unprotect=lambda b: b)
     settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"))
-    from djimport.ui.main_window import MainWindow
+    from s2s.ui.main_window import MainWindow
 
     win = MainWindow(store, secrets, settings, autostart=False)
     yield win, store, secrets, root
@@ -150,7 +150,7 @@ def test_first_start_with_session_opens_step_one(env, monkeypatch):
     win, _s, secrets, _root = env
     secrets.set(APPLE_DEVELOPER_TOKEN, "d")
     secrets.set(APPLE_MEDIA_USER_TOKEN, "u")
-    from djimport.ui import playlist_page
+    from s2s.ui import playlist_page
 
     monkeypatch.setattr(playlist_page.PlaylistPage, "load_playlists", lambda self: None)
     win.startup()
@@ -206,7 +206,7 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
 
 
 def make_fake_source(monkeypatch, calls, n=3):
-    from djimport.sources import apple
+    from s2s.sources import apple
 
     class FakeApple:
         def __init__(self, *_a, **_k): ...
@@ -372,7 +372,7 @@ def test_sorting_and_filtering_do_not_change_what_is_searched(env):
 
 def test_browse_picks_any_folder_and_validates(env, monkeypatch, tmp_path):
     win, _s, _sec, root = env
-    from djimport.ui import destination_page
+    from s2s.ui import destination_page
 
     page = win.destination
     chosen = tmp_path / "Anywhere" / "My New Library"  # does not exist: created only at import
@@ -428,8 +428,8 @@ def test_recent_destinations_listed_selectable_and_remembered_on_approval(env, t
     # confirming an approval moves that folder to the front of the saved list
     iid, dest, results, c = synthetic(store, root)
     f = c["good"].file
-    from djimport.approval import create_approval
-    from djimport.models import SelectionItem
+    from s2s.approval import create_approval
+    from s2s.models import SelectionItem
 
     ap = create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, str(older))],
                          downloads_dir=win.ctx.settings.slskd_downloads_dir)
@@ -449,7 +449,7 @@ def test_remember_destination_dedupes_and_caps_at_ten(tmp_path):
 
 
 def test_settings_defaults_and_old_settings_json_migrates(tmp_path, monkeypatch):
-    monkeypatch.setenv("DJIMPORT_HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("S2S_HOME", str(tmp_path / "h"))
     d = Settings()
     assert d.slskd_downloads_dir == "" and d.archive_dir_name == "OLD" and d.auto_import is True
     assert not hasattr(d, "tracks_root") and d.recent_destinations == []
@@ -584,7 +584,7 @@ def test_confirm_with_nothing_checked_does_not_even_ask(env, monkeypatch):
 
 
 def test_enqueue_approved_only_called_from_review_page():
-    ui_dir = Path(djimport.__file__).parent / "ui"
+    ui_dir = Path(s2s.__file__).parent / "ui"
     offenders = [p.name for p in ui_dir.glob("*.py")
                  if "enqueue_approved" in p.read_text(encoding="utf-8") and p.name != "review_page.py"]
     assert offenders == []
@@ -604,7 +604,7 @@ def test_sign_out_clears_stored_session(env):
 
 def test_settings_save_keeps_api_key_out_of_settings_json(env, monkeypatch):
     win, _store, secrets, root = env
-    from djimport.ui.settings_dialog import SettingsDialog
+    from s2s.ui.settings_dialog import SettingsDialog
 
     dlg = SettingsDialog(win.ctx, win)
     dlg.key.setText("synthetic-api-key-abcdef")
@@ -675,7 +675,7 @@ def test_search_page_reports_unreachable_slskd(env, monkeypatch):
     ctx.tracks = [AppleTrack("i.0", "Song 0", "Artist")]
 
     def no_key(self, **k):
-        from djimport.slskd.client import SlskdError
+        from s2s.slskd.client import SlskdError
         raise SlskdError("slskd not reachable at http://127.0.0.1:5030")
 
     monkeypatch.setattr(AppContext, "slskd_client", no_key)
@@ -687,8 +687,8 @@ def test_search_page_reports_unreachable_slskd(env, monkeypatch):
 def test_resume_most_recent_import_locks_when_approved(env, monkeypatch):
     win, store, _sec, root = env
     iid, dest, results, c = synthetic(store, root)
-    from djimport.approval import create_approval
-    from djimport.models import SelectionItem
+    from s2s.approval import create_approval
+    from s2s.models import SelectionItem
 
     f = c["good"].file
     create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, dest)], downloads_dir=str(root / "Soulseek" / "complete"))
@@ -704,14 +704,14 @@ def test_resume_most_recent_import_locks_when_approved(env, monkeypatch):
 
 
 def _transfers_setup(env, monkeypatch, *, auto_import):
-    from djimport import workflow
-    from djimport.models import ArchiveResult
+    from s2s import workflow
+    from s2s.models import ArchiveResult
 
     win, store, _sec, root = env
     iid, dest, results, c = synthetic(store, root)
     f = c["good"].file
-    from djimport.approval import create_approval
-    from djimport.models import SelectionItem, TransferState, TransferStatus
+    from s2s.approval import create_approval
+    from s2s.models import SelectionItem, TransferState, TransferStatus
 
     ap = create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, dest)],
                          downloads_dir=win.ctx.settings.slskd_downloads_dir)

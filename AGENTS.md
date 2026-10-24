@@ -1,4 +1,4 @@
-# DJ desktop app: development instructions and handoff
+# S2S (Streaming to Soulseek): development instructions and handoff
 
 Updated: 2026-10-24. Owner: Xander. Development workspace: `C:\DJ\dev`.
 
@@ -33,7 +33,7 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 - The user wants Apple sign-in contained inside the app window, then playlist browsing/selection in native controls. Do not silently substitute an external browser or require a share link as the normal workflow.
 - Public/open-source release on GitHub was considered and then deferred because of music-download legal concerns. Develop locally first; do not publish, push, or create a public repository without new authorization.
 - The app must stay general, not tailored to the owner's folders: the user picks any download location, and personal paths are never defaults or requirements.
-- Spotify and SoundCloud are planned as further playlist sources (metadata only, through `src/djimport/sources/`). Research, blockers and a suggested order are in `docs/research/streaming-services.md`.
+- Spotify and SoundCloud are planned as further playlist sources (metadata only, through `src/s2s/sources/`). Research, blockers and a suggested order are in `docs/research/streaming-services.md`.
 - Other website sources are a later phase. Initially report tracks unavailable on Soulseek rather than adding external downloading.
 - AI is optional. Deterministic matching and review should enforce the rules; no paid AI dependency is required for the core workflow.
 
@@ -161,7 +161,7 @@ Local setup:
 
 - Python 3.13.1 was confirmed. `ffprobe` exists at `C:\ffmpeg\bin\ffprobe.exe`.
 - Docker CLI is installed; its Linux engine was not running when checked on October 15. slskd can also run as native Windows binaries. Choose after checking current prerequisites; do not require Docker unnecessarily.
-- 2026-10-24: slskd 0.26.2 (win-x64, SHA-256 verified against GitHub's digest) is installed at `%LOCALAPPDATA%\Programs\slskd\0.26.2`. The app now manages it (`src/djimport/slskd/service.py`): on start it regenerates `%LOCALAPPDATA%\DJImport\slskd\slskd.yml`, launches slskd with `--app-dir` and no console window, and stops it on exit. The API runs on 127.0.0.1:5030 only, with HTTPS disabled, no shares and file retention off. Downloads go to `<downloads>\<username>\<source dir>` (`Tracks\Soulseek\complete` for the owner), and incomplete files to a sibling `downloading` folder. The Soulseek login is asked for once in a popup, saved with DPAPI only after slskd logs in, reused on later starts, and passed to slskd via `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD`. A live check confirmed the managed launch, the loopback-only listener and a clean stop. A real Soulseek login, search and download have not been run yet.
+- 2026-10-24: slskd 0.26.2 (win-x64, SHA-256 verified against GitHub's digest) is installed at `%LOCALAPPDATA%\Programs\slskd\0.26.2`. The app now manages it (`src/s2s/slskd/service.py`): on start it regenerates `%LOCALAPPDATA%\S2S\slskd\slskd.yml`, launches slskd with `--app-dir` and no console window, and stops it on exit. The API runs on 127.0.0.1:5030 only, with HTTPS disabled, no shares and file retention off. Downloads go to `<downloads>\<username>\<source dir>` (`Tracks\Soulseek\complete` for the owner), and incomplete files to a sibling `downloading` folder. The Soulseek login is asked for once in a popup, saved with DPAPI only after slskd logs in, reused on later starts, and passed to slskd via `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD`. A live check confirmed the managed launch, the loopback-only listener and a clean stop. A real Soulseek login, search and download have not been run yet.
 - The live OpenAPI definition (0.26.2) confirmed the search, transfer, enqueue and cancel paths, the `remove` query flag, the transfer state flag names, and that `GET /application` returns `server.isLoggedIn`. Search response field shapes are still unverified until a logged-in search runs.
 - A GitHub release lookup was blocked first by sandbox DNS, then by GitHub API rate limiting after approved external access. This was not an installation failure; nothing was installed. Recheck current release rather than assuming a version.
 

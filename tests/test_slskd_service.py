@@ -7,10 +7,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from djimport.models import Settings
-from djimport.secretstore import SLSKD_API_KEY, SecretStore
-from djimport.slskd.client import SlskdError
-from djimport.slskd.service import (
+from s2s.models import Settings
+from s2s.secretstore import SLSKD_API_KEY, SecretStore
+from s2s.slskd.client import SlskdError
+from s2s.slskd.service import (
     SlskdService, SlskdServiceError, SoulseekCredentials, SoulseekLoginError, clear_credentials,
     find_slskd_exe, incomplete_dir_for, load_credentials, render_config, save_credentials, validate_credentials,
 )
@@ -140,10 +140,10 @@ def test_start_passes_login_only_via_environment(tmp_path, settings, store):
     assert "test-secret-pw" not in cfg and "test-user" not in cfg
     assert store.get(SLSKD_API_KEY) in cfg  # API key generated once and reused
     assert (tmp_path / "Soulseek" / "downloading").is_dir()
-    assert (tmp_path / "app" / "djimport-slskd.pid").read_text() == "4242"
+    assert (tmp_path / "app" / "s2s-slskd.pid").read_text() == "4242"
     assert svc.running
     svc.stop()
-    assert not svc.running and not (tmp_path / "app" / "djimport-slskd.pid").exists()
+    assert not svc.running and not (tmp_path / "app" / "s2s-slskd.pid").exists()
 
 
 def test_failed_login_raises_and_stops_process(tmp_path, settings, store):

@@ -222,7 +222,7 @@ class SlskdClient:
     def enqueue_downloads(self, username: str, files: list[RemoteFile]) -> None:
         """Queue downloads from one peer.
 
-        ONLY djimport.download may call this: it is the review/approval boundary. Searching,
+        ONLY s2s.download may call this: it is the review/approval boundary. Searching,
         matching and UI code must never call it. Every file must belong to `username`.
         """
         if not files:

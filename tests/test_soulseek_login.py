@@ -13,10 +13,10 @@ try:
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"Qt unavailable: {type(exc).__name__}", allow_module_level=True)
 
-from djimport.secretstore import SecretStore
-from djimport.slskd.service import SoulseekCredentials, SoulseekLoginError, load_credentials, save_credentials
-from djimport.ui import workers
-from djimport.ui.soulseek_login import SoulseekLoginDialog, SoulseekSession
+from s2s.secretstore import SecretStore
+from s2s.slskd.service import SoulseekCredentials, SoulseekLoginError, load_credentials, save_credentials
+from s2s.ui import workers
+from s2s.ui.soulseek_login import SoulseekLoginDialog, SoulseekSession
 
 
 @pytest.fixture(scope="module")

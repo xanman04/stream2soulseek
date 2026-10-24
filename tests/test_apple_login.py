@@ -18,7 +18,7 @@ def qapp():
 @pytest.fixture
 def widget(qapp):
     try:
-        from djimport.apple.login import AppleLoginWidget
+        from s2s.apple.login import AppleLoginWidget
         w = AppleLoginWidget()
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"WebEngine cannot initialise headless: {type(exc).__name__}")
@@ -31,7 +31,7 @@ def test_profile_ua_and_script(widget):
     assert prof.isOffTheRecord()
     assert "QtWebEngine" not in prof.httpUserAgent()
     names = [s.name() for s in prof.scripts().toList()]
-    assert "djimport-token-hook" in names
+    assert "s2s-token-hook" in names
     src = widget._script.sourceCode()
     assert "MusicKit" in src and "musicUserToken" in src
     from PySide6.QtWebEngineCore import QWebEngineScript
@@ -39,7 +39,7 @@ def test_profile_ua_and_script(widget):
 
 
 def test_ua_strip_function():
-    from djimport.apple.login import _strip_qtwebengine
+    from s2s.apple.login import _strip_qtwebengine
     ua = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/1.0 QtWebEngine/6.12.0 Safari/537.36"
     assert "QtWebEngine" not in _strip_qtwebengine(ua)
     assert "Chrome/1.0" in _strip_qtwebengine(ua)

@@ -22,8 +22,8 @@ USER_TOKEN_COOKIE = "media-user-token"
 
 _PAGE_JS = r"""
 (function () {
-  if (window.__djimportHook || location.origin !== "https://music.apple.com") return;
-  window.__djimportHook = true;
+  if (window.__s2sHook || location.origin !== "https://music.apple.com") return;
+  window.__s2sHook = true;
   function start() {
     new QWebChannel(qt.webChannelTransport, function (channel) {
       var bridge = channel.objects.djBridge;
@@ -150,7 +150,7 @@ class AppleLoginWidget(QWidget):
         self._bridge.captured.connect(self._on_captured)
 
         self._script = QWebEngineScript()
-        self._script.setName("djimport-token-hook")
+        self._script.setName("s2s-token-hook")
         self._script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
         self._script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         self._script.setRunsOnSubFrames(False)
