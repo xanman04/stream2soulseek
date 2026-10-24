@@ -70,8 +70,11 @@ def _validate_destination(dest: str, downloads_dir: str, archive_name: str = "OL
         raise ApprovalError("the slskd downloads folder is not set; open Settings and choose it first")
     dl = Path(downloads_dir).resolve()
     if _same_or_inside(nres, dl):  # also covers the archive folder inside it
-        raise ApprovalError("destination must not be the slskd downloads folder or inside it "
-                            f"(including its {archive_name} archive)")
+        raise ApprovalError(
+            f'The tracklist folder "{resolved}" is inside or identical to the Soulseek downloads folder "{dl}". '
+            f'Choose a separate tracklist folder outside it (including its {archive_name} archive), '
+            'or change the Soulseek downloads folder in Settings.'
+        )
     if _same_or_inside(nres, config.app_dir_path().resolve()):
         raise ApprovalError("destination must not be inside the application's data folder")
     if resolved.exists():

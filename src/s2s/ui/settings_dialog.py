@@ -37,7 +37,12 @@ class SettingsDialog(QDialog):
         s = ctx.settings
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
-        self.downloads.setPlaceholderText("Required: the folder slskd downloads into")
+        self.downloads.setPlaceholderText("Incoming downloads, kept in user/album folders")
+        self.folder_help = QLabel(
+            "Soulseek downloads keep their user/album folders here. In Step 2, choose a separate "
+            "tracklist folder for the track files alone. Originals are kept in the archive subfolder after copying."
+        )
+        self.folder_help.setWordWrap(True)
         self.archive = QLineEdit(s.archive_dir_name)
         self.auto_import = QCheckBox("Import finished downloads and archive each peer folder automatically")
         self.auto_import.setChecked(bool(s.auto_import))
@@ -65,8 +70,9 @@ class SettingsDialog(QDialog):
         form.addRow("slskd URL (loopback):", self.url)
         form.addRow("slskd API key:", self.key)
         form.addRow("", self.clear_key)
-        form.addRow("slskd downloads folder:", self._with_browse(self.downloads, True))
-        form.addRow("Archive subfolder:", self.archive)
+        form.addRow(self.folder_help)
+        form.addRow("Soulseek downloads folder:", self._with_browse(self.downloads, True))
+        form.addRow("Originals archive subfolder:", self.archive)
         form.addRow("", self.auto_import)
         form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
         form.addRow("Search timeout (s):", self.timeout)
@@ -204,7 +210,7 @@ class SettingsDialog(QDialog):
                 if problem:
                     raise ValueError(f"Sharing: {problem}")
             for value, edit, label in ((new.slskd_url, self.url, "slskd URL"),
-                                       (new.slskd_downloads_dir, self.downloads, "slskd downloads folder")):
+                                       (new.slskd_downloads_dir, self.downloads, "Soulseek downloads folder")):
                 if not value:
                     self.tabs.setCurrentIndex(0)
                     edit.setFocus()

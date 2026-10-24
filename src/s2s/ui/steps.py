@@ -9,14 +9,13 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 STEPS = [
     ("Choose playlist", "Choose a playlist",
      "Pick one playlist from a connected streaming service; its tracks are listed so you can check them."),
-    ("Choose download location", "Choose a download location",
-     "Pick the folder that finished tracks are copied into; nothing is written there until you approve downloads."),
+    ("Choose tracklist folder", "Choose your tracklist folder", ""),
     ("Find on Soulseek", "Find on Soulseek",
      "The app searches Soulseek for every track in the playlist. This only searches; nothing is downloaded."),
     ("Review & confirm", "Review & confirm",
      "Check every proposed file, change or untick any of them, then confirm: only the files you confirm are downloaded."),
     ("Downloads & import", "Downloads & import",
-     "Watch the downloads, then verified files are copied into your download location."),
+     "Watch the downloads, then verified files are copied into your chosen library folder."),
 ]
 
 
@@ -29,11 +28,9 @@ class StepFrame(QWidget):
         super().__init__(parent)
         self.index = index
         self.content = content
-        _name, title, explanation = STEPS[index]
+        _name, title, _explanation = STEPS[index]
         self.title_label = QLabel(f"Step {index + 1}: {title}")
         self.title_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
-        self.explain_label = QLabel(explanation)
-        self.explain_label.setWordWrap(True)
         self.hint_label = QLabel("")
         self.hint_label.setStyleSheet("color: #666;")
         self.next_btn = QPushButton("")
@@ -49,7 +46,6 @@ class StepFrame(QWidget):
         foot.addWidget(self.next_btn)
         lay = QVBoxLayout(self)
         lay.addWidget(self.title_label)
-        lay.addWidget(self.explain_label)
         lay.addWidget(content, 1)
         lay.addLayout(foot)
         self.next_btn.clicked.connect(self.next_clicked)

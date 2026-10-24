@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
 from ..sources import AppleSource
@@ -24,10 +24,6 @@ class ServicePage(QWidget):
 
         self.title_label = QLabel("Apple Music")
         self.title_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
-        self.explain_label = QLabel(
-            "Sign in here once. The session stays on this PC; your Apple password is typed into Apple's own "
-            "page, never into this app.")
-        self.explain_label.setWordWrap(True)
         self.status = QLabel("Apple Music: not signed in")
         self.status.setWordWrap(True)
         self.sign_out_btn = QPushButton("Sign out")
@@ -35,28 +31,38 @@ class ServicePage(QWidget):
         top.addWidget(self.status, 1)
         top.addWidget(self.sign_out_btn)
 
-        self.connected_label = QLabel("You are signed in. Continue with step 1 to choose a playlist.")
-        self.connected_label.setWordWrap(True)
-        self.to_playlists_btn = QPushButton("Go to step 1: Choose playlist")
-        done = QWidget()
-        dl = QVBoxLayout(done)
-        dl.addWidget(self.connected_label)
-        dl.addWidget(self.to_playlists_btn)
+        self.account_card = QFrame()
+        self.account_card.setFrameShape(QFrame.Shape.StyledPanel)
+        self.account_card.setMaximumWidth(650)
+        self.connection_value = QLabel("Signed in")
+        self.session_value = QLabel("Saved on this PC, protected by Windows")
+        self.session_value.setWordWrap(True)
+        self.access_value = QLabel("Read playlists and track details")
+        form = QFormLayout(self.account_card)
+        form.addRow("Connection", self.connection_value)
+        form.addRow("Session", self.session_value)
+        form.addRow("Access", self.access_value)
+        self.reconnect_btn = QPushButton("Reconnect Apple Music...")
+        form.addRow(self.reconnect_btn)
+        self.account_page = QWidget()
+        dl = QVBoxLayout(self.account_page)
+        dl.setContentsMargins(0, 12, 0, 0)
+        dl.addWidget(self.account_card)
         dl.addStretch(1)
         self.login_holder = QWidget()
         self.login_layout = QVBoxLayout(self.login_holder)
         self.login_layout.setContentsMargins(0, 0, 0, 0)
         self.stack = QStackedWidget()
-        self.stack.addWidget(done)  # 0 signed in
+        self.stack.addWidget(self.account_page)  # 0 native account/status page
         self.stack.addWidget(self.login_holder)  # 1 sign-in page
 
         lay = QVBoxLayout(self)
         lay.addWidget(self.title_label)
-        lay.addWidget(self.explain_label)
         lay.addLayout(top)
         lay.addWidget(self.stack, 1)
 
         self.sign_out_btn.clicked.connect(self.sign_out)
+        self.reconnect_btn.clicked.connect(self.reconnect)
         self.refresh_state()
 
     # ------------------------------------------------------------ state
@@ -83,6 +89,12 @@ class ServicePage(QWidget):
             self.show_login("Sign in to Apple Music in the page below.")
 
     # ------------------------------------------------------------ sign-in
+
+    def reconnect(self) -> None:
+        """Start a fresh embedded login; replace the saved session only after capture succeeds."""
+        if self._login is not None:
+            self._login.clear_session()
+        self.show_login("Reconnect to Apple Music in the page below.")
 
     def _ensure_login(self):
         if self._login is None:
