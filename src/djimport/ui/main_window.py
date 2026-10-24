@@ -5,18 +5,20 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QHBoxLayout, QListWidget, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QListWidget, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .. import workflow
 from ..models import Playlist, Settings
 from ..secretstore import SecretStore
+from ..slskd.service import SlskdService
 from ..store import Store
 from .apple_page import ApplePage
 from .context import AppContext
 from .review_page import ReviewPage
 from .search_page import SearchPage
 from .settings_dialog import SettingsDialog
+from .soulseek_login import SoulseekSession
 from .transfers_page import TransfersPage
 from .util import show_error
 from .workers import run_async
@@ -25,11 +27,13 @@ STEPS = ["1. Apple Music", "2. Search", "3. Review", "4. Transfers"]
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, store: Store, secrets: SecretStore, settings: Settings, *, autostart: bool = True) -> None:
+    def __init__(self, store: Store, secrets: SecretStore, settings: Settings, *, autostart: bool = True,
+                 slskd_service: SlskdService | None = None) -> None:
         super().__init__()
         self.setWindowTitle("DJ Import")
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
+        self.soulseek = SoulseekSession(slskd_service or SlskdService(settings, secrets), secrets, self)
 
         self.steps = QListWidget()
         self.steps.addItems(STEPS)
@@ -56,9 +60,17 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("Local app. Nothing is downloaded without your explicit confirmation.")
 
+        self.soulseek_status = QLabel("Soulseek: not logged in")
+        self.statusBar().addPermanentWidget(self.soulseek_status)
+        self.soulseek.status_changed.connect(self.soulseek_status.setText)
+
+        file_menu = self.menuBar().addMenu("&File")
         act = QAction("Settings...", self)
         act.triggered.connect(self.open_settings)
-        self.menuBar().addMenu("&File").addAction(act)
+        file_menu.addAction(act)
+        login_act = QAction("Soulseek login...", self)
+        login_act.triggered.connect(lambda: self.soulseek.prompt())
+        file_menu.addAction(login_act)
 
         self.steps.currentRowChanged.connect(self.go)
         self.settings_btn.clicked.connect(self.open_settings)
@@ -69,7 +81,7 @@ class MainWindow(QMainWindow):
         self.steps.setCurrentRow(0)
         if autostart:
             QTimer.singleShot(0, self.apple.startup)
-            QTimer.singleShot(0, self.prompt_if_unconfigured)
+            QTimer.singleShot(0, self.startup_checks)
 
     # ------------------------------------------------------------ navigation
 
@@ -96,6 +108,12 @@ class MainWindow(QMainWindow):
     def _approved(self) -> None:
         self.go(3)
 
+    def startup_checks(self) -> None:
+        """Downloads folder first (slskd needs it), then the stored Soulseek login or a login popup."""
+        self.prompt_if_unconfigured()
+        if self.ctx.settings.slskd_downloads_dir.strip():
+            self.soulseek.connect_on_startup()
+
     def prompt_if_unconfigured(self) -> None:
         """First run: the slskd downloads folder has no default and must be chosen in Settings."""
         if not self.ctx.settings.slskd_downloads_dir.strip():
@@ -103,9 +121,12 @@ class MainWindow(QMainWindow):
             self.open_settings()
 
     def open_settings(self) -> None:
+        before = self.ctx.settings.slskd_downloads_dir
         dlg = SettingsDialog(self.ctx, self)
         if dlg.exec():
             self.apple.refresh_destinations()
+            if self.soulseek.is_connected and self.ctx.settings.slskd_downloads_dir != before:
+                self.soulseek.connect_on_startup()  # slskd must restart to use the new folder
 
     # ------------------------------------------------------------ resume
 
@@ -150,4 +171,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         self.transfers.stop()
         self.search.cancel()
+        self.soulseek.shutdown()  # stop the slskd this app started
         super().closeEvent(event)

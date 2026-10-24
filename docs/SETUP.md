@@ -1,48 +1,33 @@
 # slskd setup on Windows
 
-Every slskd detail below is **verify against your installed version** (slskd changes its options and API;
-check its `docs/config.md` and the Swagger page of your own instance). Nothing here has been run against a
-live slskd yet.
+The app runs [slskd](https://github.com/slskd/slskd) for you; you only install it once. Verified with slskd
+0.26.2 (win-x64). Other versions may change options or the API.
 
-1. **Get slskd.** Download the current Windows release from the slskd GitHub releases page (native binary,
-   no Docker needed) and unpack it outside this repository, e.g. `C:\Tools\slskd`. Verify against your
-   installed version: release asset names and the start command.
-2. **Application directory outside the repo.** Start with `--app-dir`, e.g.
-   `slskd.exe --app-dir C:\DJ\slskd-data` (not under `C:\DJ\dev`). Config (`slskd.yml`), logs and its
-   database live there. A `--config` path can select a different file. Verify against your installed version.
-3. **Configuration.** Copy `config\slskd.example.yml` into the app directory as `slskd.yml` and replace every
-   placeholder. Do not put real values in this repository.
-4. **Soulseek login belongs to slskd.** Set your Soulseek username/password in slskd's own config (or its
-   environment/secret mechanism), never in this app. If another Soulseek client uses the same account,
-   it may be disconnected when slskd logs in; decide deliberately. Verify the option names.
-5. **API on loopback with a key.** Bind the web/API to `127.0.0.1` (default port 5030), keep authentication
-   on, and create an API key with the `readwrite` role (e.g. `web.authentication.api_keys`). Generate a long
-   random key. The app talks to `http://127.0.0.1:5030/api/v0` and sends the key in `X-API-Key`. The app
-   refuses non-loopback hosts. Enter the key in this app's **Settings...**; it is stored with DPAPI.
-   Verify against your installed version.
-6. **Directories.** Map `directories.downloads` to the folder in this app's Settings ("slskd downloads
-   folder", required, no default; e.g. `C:\DJ\Tracks\Soulseek\complete`) and `directories.incomplete` to a
-   separate folder, e.g. `C:\DJ\Tracks\Soulseek\downloading`. Create both before starting slskd. This app
-   copies finished tracks out of the downloads folder into the download location you pick in the app, then
-   moves each finished peer's folder into `<downloads folder>\OLD\<peer>` (merging with what is already
-   there; nothing is overwritten; the subfolder name is a Setting). Existing contents of `OLD` are never
-   deleted or replaced. Do not point the download location at the downloads folder or inside it. Verify against your installed
-   version how it lays out peer folders: the importer expects `<downloads>\<peer username>\<remote folder>\<file>`
-   and falls back to `<downloads>\<remote folder>\<file>` and then a unique exact-size match outside `OLD`.
-7. **Sharing is a deliberate choice.** Do not share `C:\DJ\dev`, the whole `C:\DJ\Tracks`, or your libraries
-   by default; decide which folders (if any) you want to share and why. Verify against your installed
-   version the option names and what it shares when `shares.directories` is empty.
-8. **Swagger for contract checks.** Enable `feature.swagger` (verify the option name) temporarily and open
-   `http://127.0.0.1:5030/swagger` to confirm the search, transfer and application payloads and the transfer
-   state strings that `src\djimport\slskd\client.py` assumes (especially the `server` state used for the
-   "connected" check). Turn it off afterwards. Leave remote configuration and file-management features
-   disabled unless you need them.
-9. **Peer port.** Soulseek peers connect to the listening port (documented default 50300; verify against
-   your installed version). API reachability and Soulseek connectivity are separate; the app's Settings
-   "Test connection" reports whether slskd is logged in. Opening the port in your router/firewall is your
-   decision; this app changes neither.
-10. **Check in the app.** Start slskd, open **Settings...**, enter the URL and key, press **Test connection**.
-    Then run a small (2-3 track) playlist end to end and inspect the results before trusting bigger runs.
+1. **Install slskd.** Download `slskd-<version>-win-x64.zip` from the slskd GitHub releases page, check its
+   SHA-256 against the digest GitHub shows, and unpack it to `%LOCALAPPDATA%\Programs\slskd\<version>\`.
+   The app picks the newest version found there. To use another location, set `"slskd_exe"` under `extra`
+   in `%LOCALAPPDATA%\DJImport\settings.json`.
+2. **Start the app.** On first start it asks for the **slskd downloads folder** (for example
+   `C:\DJ\Tracks\Soulseek\complete`). Incomplete files go to a `downloading` folder beside it (override with
+   `"slskd_incomplete_dir"` under `extra`).
+3. **Log in to Soulseek once.** The login popup appears when no login is saved. Close SoulseekQt or any other
+   client using the same account first, because two clients on one account disconnect each other. Soulseek
+   creates a new account if the username does not exist yet. The login is stored with DPAPI only after slskd
+   actually logged in, and is reused on every later start. **File > Soulseek login...** changes it.
 
-`ffprobe` is needed for import verification. It is found on `PATH` automatically; otherwise set its path
-in Settings.
+What the app configures (`%LOCALAPPDATA%\DJImport\slskd\slskd.yml`, regenerated on each start; do not edit):
+
+- Web/API on `127.0.0.1:5030` only, HTTPS off, authentication on, with a random API key that only the app
+  knows (stored with DPAPI).
+- The Soulseek login is passed through the `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD` environment
+  variables of the slskd process, never written to the file.
+- Downloads go to `<downloads>\<peer username>\<remote folder>\<file>`. When a name already exists, slskd
+  renames the new file instead of overwriting it.
+- **Nothing is shared** (`shares.directories: []`). Soulseek users often expect sharing; choosing folders to
+  share is a deliberate decision and is not automated yet.
+- Automatic file deletion (`retention.files`) is off, so slskd never removes downloaded files.
+- Remote configuration and remote file management are off.
+- Soulseek peers connect on port 50300 by default. Forwarding it in your router or firewall improves transfers
+  but is your decision; the app changes neither.
+
+`ffprobe` (from FFmpeg) is needed to verify downloads; the app finds it on `PATH` or uses the path in Settings.
