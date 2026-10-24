@@ -203,8 +203,13 @@ class SettingsDialog(QDialog):
                 problem = self._share_problem(f)
                 if problem:
                     raise ValueError(f"Sharing: {problem}")
-            if not (new.slskd_url and new.slskd_downloads_dir):
-                raise ValueError("URL and the slskd downloads folder are required.")
+            for value, edit, label in ((new.slskd_url, self.url, "slskd URL"),
+                                       (new.slskd_downloads_dir, self.downloads, "slskd downloads folder")):
+                if not value:
+                    self.tabs.setCurrentIndex(0)
+                    edit.setFocus()
+                    raise ValueError(f'The "{label}" field on the General tab is empty. Fill it in, or press '
+                                     "Cancel to keep your saved settings.")
             if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):
                 raise ValueError("The archive subfolder must be a plain folder name such as OLD.")
             config.save_settings(new)

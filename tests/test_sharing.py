@@ -109,3 +109,24 @@ def test_settings_sharing_tab_add_remove_save(layout, tmp_path, monkeypatch):
     dlg.remove_share()
     assert dlg.shared_folders() == []
     store.close()
+
+
+def test_empty_required_field_names_it_and_shows_general_tab(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+    from s2s.store import Store
+    from s2s.ui import settings_dialog
+    from s2s.ui.context import AppContext
+
+    errors = []
+    monkeypatch.setattr(settings_dialog, "show_error", lambda _w, _t, msg: errors.append(msg))
+    store = Store(config.db_path())
+    ctx = AppContext(store, SecretStore(tmp_path / "s", protect=lambda b: b, unprotect=lambda b: b),
+                     Settings(slskd_downloads_dir=str(tmp_path / "dl")))
+    dlg = settings_dialog.SettingsDialog(ctx, matching=True)
+    dlg.downloads.setText("")
+    dlg.save()
+    assert errors and "slskd downloads folder" in errors[0] and dlg.tabs.currentIndex() == 0
+    assert ctx.settings.slskd_downloads_dir == str(tmp_path / "dl")  # nothing saved
+    store.close()
