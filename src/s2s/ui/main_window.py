@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
         self.search.state_changed.connect(self.refresh_navigation)
         self.search.search_finished.connect(self._search_finished)
         self.review.approved.connect(self._approved)
+        self.transfers.find_another_source.connect(self.start_replacement)
         self.go_step(STEP_PLAYLIST)
         if autostart:
             QTimer.singleShot(0, self.startup)
@@ -181,6 +182,27 @@ class MainWindow(QMainWindow):
         if not cancelled:
             self.go_step(STEP_REVIEW)
 
+    def start_replacement(self) -> None:
+        """'Find another source...': open Review showing only the declined tracks. Queues nothing; the
+        user ticks files and confirms through the normal dialog, which makes a new approval."""
+        ctx = self.ctx
+        iid = ctx.import_id
+        if not iid:
+            return
+
+        def work():
+            return workflow.build_replacement_plan(ctx.store, iid, ctx.settings)
+
+        def done(plan) -> None:
+            if not plan.results:
+                self.statusBar().showMessage("No declined downloads need another source.")
+                return
+            self.review.load_replacement(plan)
+            self.refresh_navigation()
+            self.go_step(STEP_REVIEW)
+
+        run_async(self, work, done, lambda e: show_error(self, "Find another source", ctx.describe(e)))
+
     def _approved(self) -> None:
         self.refresh_navigation()
         self.go_step(STEP_TRANSFERS)
@@ -198,12 +220,16 @@ class MainWindow(QMainWindow):
             self.open_settings()
 
     def open_settings(self) -> None:
-        before = self.ctx.settings.slskd_downloads_dir
+        def slskd_inputs():  # settings that only take effect when slskd restarts with a new config
+            s = self.ctx.settings
+            return s.slskd_downloads_dir, list(s.shared_folders)
+
+        before = slskd_inputs()
         dlg = SettingsDialog(self.ctx, self)
         if dlg.exec():
             self.destination.refresh_destinations()
-            if self.soulseek.is_connected and self.ctx.settings.slskd_downloads_dir != before:
-                self.soulseek.connect_on_startup()  # slskd must restart to use the new folder
+            if self.soulseek.is_connected and slskd_inputs() != before:
+                self.soulseek.connect_on_startup()  # restart slskd so it uses the new folders/shares
 
     # ------------------------------------------------------------ resume
 

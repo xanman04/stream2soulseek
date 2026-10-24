@@ -23,8 +23,10 @@ What the app configures (`%LOCALAPPDATA%\S2S\slskd\slskd.yml`, regenerated on ea
   variables of the slskd process, never written to the file.
 - Downloads go to `<downloads>\<peer username>\<remote folder>\<file>`. When a name already exists, slskd
   renames the new file instead of overwriting it.
-- **Nothing is shared** (`shares.directories: []`). Soulseek users often expect sharing; choosing folders to
-  share is a deliberate decision and is not automated yet.
+- **Nothing is shared by default** (`shares.directories: []`). Many Soulseek users only upload to people who
+  share, so some downloads may be declined. Add folders in **Settings > Sharing**: they are visible to every
+  Soulseek user. S2S refuses drive roots, your whole user folder, the unfinished-downloads folder and anything
+  containing its own data folder (saved logins), and re-checks this every time it starts slskd.
 - Automatic file deletion (`retention.files`) is off, so slskd never removes downloaded files.
 - Remote configuration and remote file management are off.
 - Soulseek peers connect on port 50300 by default. Forwarding it in your router or firewall improves transfers

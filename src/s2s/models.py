@@ -306,6 +306,7 @@ class Settings:
     auto_import: bool = True
     match_policy: MatchPolicy = field(default_factory=MatchPolicy)
     rule_layouts: dict[str, MatchPolicy] = field(default_factory=dict)  # saved rule sets by name (see layouts.py)
+    shared_folders: list[str] = field(default_factory=list)  # folders slskd shares with Soulseek; none by default
     extra: dict = field(default_factory=dict)
 
 

@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .models import Approval, SelectionItem, Tier
+from .rejections import declined_transfers
 from .store import Store, utc_now
 
 
@@ -96,6 +97,7 @@ def create_approval(store: Store, import_id: str, items: list[SelectionItem], *,
         raise ApprovalError("unknown import")
     if not items:
         raise ApprovalError("selection is empty")
+    declined = {(d.apple_id, d.username.casefold()) for d in declined_transfers(store, import_id)}
     seen: set[str] = set()
     dests: set[str] = set()
     resolved_items: list[SelectionItem] = []
@@ -108,6 +110,9 @@ def create_approval(store: Store, import_id: str, items: list[SelectionItem], *,
             raise ApprovalError(f"file is not a stored candidate for track {it.apple_id}")
         if cand.tier == Tier.REJECTED or cand.format_rank == 9:
             raise ApprovalError(f"candidate for track {it.apple_id} is not eligible")
+        if (it.apple_id, it.username.casefold()) in declined:
+            raise ApprovalError(f"{it.username} already declined this track; choose another source "
+                                "(or retry the original transfer)")
         dest = _validate_destination(it.destination, downloads_dir, archive_name)
         dests.add(os.path.normcase(dest))
         resolved_items.append(replace(it, destination=dest))

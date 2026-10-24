@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from collections.abc import Mapping
 from typing import Iterable
 
 from ..models import AppleTrack, Candidate, MatchPolicy, MatchResult, MatchStatus, RemoteFile, Tier
@@ -333,7 +334,34 @@ def _key(c: Candidate, policy: MatchPolicy):
     return (c.format_rank, int(c.tier), -c.score, c.file.username, c.file.filename)
 
 
-def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None) -> MatchResult:
+def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str], policy: MatchPolicy) -> list[Candidate]:
+    """Flag candidates from peers that declined us before and order them AFTER otherwise-equal candidates.
+
+    `declined_peers` maps casefolded username -> reason text. Only the order inside an equal
+    (tier, format) bucket changes, and the candidate stays eligible (flagged, never hidden); no version
+    or format rule is touched. Returns the candidates best first.
+    """
+    out: list[tuple[bool, Candidate]] = []
+    for c in eligible:
+        reason = declined_peers.get(c.file.username.casefold())
+        if reason:
+            if reason not in c.reasons:
+                c = replace(c, flagged=True, reasons=c.reasons + (reason,))
+            out.append((True, c))
+        else:
+            out.append((False, c))
+
+    def key(pair: tuple[bool, Candidate]):
+        penalised, c = pair
+        if policy.tier_before_format:
+            return (int(c.tier), c.format_rank, penalised, -c.score, c.file.username, c.file.filename)
+        return (c.format_rank, int(c.tier), penalised, -c.score, c.file.username, c.file.filename)
+
+    return [c for _, c in sorted(out, key=key)]
+
+
+def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None,
+          declined_peers: Mapping[str, str] | None = None) -> MatchResult:
     policy = policy or MatchPolicy()
     ex = request_exclusion(track, policy)
     if ex:
@@ -352,6 +380,8 @@ def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | 
         return MatchResult(track, MatchStatus.UNRESOLVED, None, note="no files returned")
 
     eligible = sorted((c for c, _ in evaluated if c.tier != Tier.REJECTED), key=lambda c: _key(c, policy))
+    if declined_peers:
+        eligible = penalise_peers(eligible, declined_peers, policy)
     rejected_pairs = sorted(
         ((c, r) for c, r in evaluated if c.tier == Tier.REJECTED),
         key=lambda cr: (-cr[1], cr[0].format_rank, -cr[0].score, cr[0].file.username, cr[0].file.filename),

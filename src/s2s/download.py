@@ -15,6 +15,7 @@ from dataclasses import replace
 from typing import Protocol
 
 from .approval import ApprovalError, verify_approval
+from .rejections import classify
 from .models import RemoteFile, SelectionItem, TransferState, TransferStatus
 from .store import Store
 
@@ -111,7 +112,16 @@ class DownloadService:
                 match = index.get((local.username, local.filename, local.size))
                 if match is not None:
                     self._store.upsert_transfer(approval_id, rec.apple_id, match)
+                    self._remember_rejection(approval_id, rec.apple_id, match)
             return [r.status for r in self._store.transfers_for_approval(approval_id)]
+
+    def _remember_rejection(self, approval_id: str, apple_id: str, status: TransferStatus) -> None:
+        """Peers that refused us (needs sharing / banned) are remembered so later searches flag them."""
+        if status.state != TransferState.FAILED:
+            return
+        rej = classify(status.raw_state, status.error)
+        if rej is not None and rej.remembered:
+            self._store.record_peer_rejection(status.username, rej.kind.value, approval_id, apple_id)
 
     # -------------------------------------------------------------- retry / cancel
 

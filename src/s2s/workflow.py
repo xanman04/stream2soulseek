@@ -11,20 +11,23 @@ import subprocess
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import archive, organize
-from .matching import match
+from .matching import match, penalise_peers
 from .models import (
     AppleTrack,
     ArchiveResult,
+    Candidate,
     ImportOutcome,
     ImportResult,
     MatchResult,
     MatchStatus,
     Settings,
+    Tier,
     TransferState,
 )
+from .rejections import RejectionKind, declined_transfers, pending_declined, peer_reason
 from .slskd.search import SearchCancelled, run_search
 from .store import Store
 
@@ -51,6 +54,16 @@ def _unresolved(track: AppleTrack, note: str) -> MatchResult:
     return MatchResult(track, MatchStatus.UNRESOLVED, None, note=note)
 
 
+def declined_peer_reasons(store: Store) -> dict[str, str]:
+    """casefolded username -> review flag text, for peers that declined us before (see Store peer memory)."""
+    out: dict[str, str] = {}
+    for user, kinds in store.declining_peers().items():
+        reason = peer_reason({RejectionKind(k) for k in kinds})
+        if reason:
+            out[user] = reason
+    return out
+
+
 def search_and_match(
     store: Store,
     client,
@@ -70,6 +83,7 @@ def search_and_match(
     if imp is None:
         raise ValueError("unknown import")
     done_ids = store.completed_apple_ids(imp.destination)
+    declined_peers = declined_peer_reasons(store)
     total = len(tracks)
     results: list[MatchResult] = []
     done = 0
@@ -103,7 +117,7 @@ def search_and_match(
         except Exception as exc:  # network/API errors must not abort the whole run
             return _unresolved(track, f"search failed: {type(exc).__name__}: {scrub(exc)}")
         try:
-            return match(track, files, settings.match_policy)
+            return match(track, files, settings.match_policy, declined_peers)
         except Exception as exc:  # pragma: no cover - defensive
             return _unresolved(track, f"matching failed: {type(exc).__name__}")
 
@@ -147,6 +161,83 @@ def latest_approval_id(store: Store, import_id: str) -> str | None:
             (import_id,),
         ).fetchone()
     return row["id"] if row else None
+
+
+def approval_ids(store: Store, import_id: str) -> list[str]:
+    """All approvals of an import, oldest first (the original one plus any replacement approvals)."""
+    return [a.id for a in store.approvals_for_import(import_id)]
+
+
+# ---------------------------------------------------------------- replacement review
+
+NO_OTHER_SOURCE = ("no other eligible source in the last search; run the search again later, or enable "
+                   "sharing in Settings and retry")
+DECLINED_BY_USER = "declined by this user"
+
+
+@dataclass(frozen=True)
+class ReplacementPlan:
+    """What the Review step shows in 'find another source' mode. Built in memory only: stored candidates
+    and the original approval are never modified, and nothing here is queued."""
+
+    results: list[MatchResult]  # one row per declined track
+    destination: str
+    declined: list  # pending DeclinedTransfer rows this plan covers
+    without_source: list[str]  # apple ids with no other eligible candidate
+
+
+def build_replacement_plan(store: Store, import_id: str, settings: Settings) -> ReplacementPlan:
+    """Review rows for the declined tracks of an import only.
+
+    For each such track, every candidate from a peer that declined THAT track becomes REJECTED
+    ("declined by this user"); the remaining eligible candidates are re-ranked (peers that declined us
+    before sort after equivalent ones and are flagged). The user still ticks and confirms as in a normal
+    review, which creates a NEW approval.
+    """
+    pending = pending_declined(store, import_id)
+    declined_users: dict[str, set[str]] = {}
+    for d in declined_transfers(store, import_id):
+        declined_users.setdefault(d.apple_id, set()).add(d.username.casefold())
+    stored = {r.track.apple_id: r for r in store.load_match_results(import_id)}
+    tracks = {t.apple_id: t for t in store.load_tracks(import_id)}
+    peers = declined_peer_reasons(store)
+    results: list[MatchResult] = []
+    missing: list[str] = []
+    seen: set[str] = set()
+    for d in pending:
+        if d.apple_id in seen:
+            continue
+        seen.add(d.apple_id)
+        users = declined_users.get(d.apple_id, set())
+        old = stored.get(d.apple_id)
+        track = tracks.get(d.apple_id) or (old.track if old else None)
+        if track is None:
+            continue
+        usable: list[Candidate] = []
+        refused: list[Candidate] = []
+        if old is not None:
+            for c in ([old.best] if old.best else []) + list(old.alternatives):
+                if c.tier == Tier.REJECTED or c.format_rank == 9:
+                    continue
+                if c.file.username.casefold() in users:
+                    refused.append(replace(c, tier=Tier.REJECTED, flagged=False,
+                                           reasons=c.reasons + (DECLINED_BY_USER,)))
+                else:
+                    usable.append(c)
+        usable = penalise_peers(usable, peers, settings.match_policy) if usable else []
+        rejected = tuple(refused) + (old.rejected if old else ())
+        if usable:
+            results.append(MatchResult(track, MatchStatus.PROPOSED, usable[0], tuple(usable[1:]), rejected,
+                                       note=f"replacement for a declined download from {d.username}"))
+        else:
+            missing.append(d.apple_id)
+            results.append(MatchResult(track, MatchStatus.UNRESOLVED, None, (), rejected, note=NO_OTHER_SOURCE))
+    results.sort(key=lambda r: (r.track.position, r.track.apple_id))
+    dest = next((d.destination for d in pending if d.destination), "")
+    if not dest:
+        imp = store.get_import(import_id)
+        dest = imp.destination if imp else ""
+    return ReplacementPlan(results, dest, pending, missing)
 
 
 def import_completed(

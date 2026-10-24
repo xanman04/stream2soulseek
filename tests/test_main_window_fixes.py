@@ -74,3 +74,25 @@ def test_soulseek_button_says_change_login_once_logged_in(win):
     win.soulseek.is_connected = False
     win.soulseek.status_changed.emit("Soulseek: not logged in")
     assert btn.text() == "Log in..."
+
+
+def test_changing_shared_folders_restarts_slskd(win, monkeypatch):
+    from s2s.ui import main_window
+
+    restarts = []
+    win.soulseek.is_connected = True
+    monkeypatch.setattr(win.soulseek, "connect_on_startup", lambda: restarts.append(True))
+
+    class FakeDialog:
+        def __init__(self, ctx, parent):
+            self.ctx = ctx
+
+        def exec(self):
+            self.ctx.settings.shared_folders = [r"C:\Music"]
+            return True
+
+    monkeypatch.setattr(main_window, "SettingsDialog", FakeDialog)
+    win.open_settings()
+    assert restarts == [True]
+    win.open_settings()  # nothing changed this time
+    assert restarts == [True]
