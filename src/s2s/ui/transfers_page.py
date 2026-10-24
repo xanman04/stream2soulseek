@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
@@ -17,18 +19,79 @@ APPROVAL_ROLE = Qt.ItemDataRole.UserRole + 1
 (COL_TRACK, COL_SET, COL_PEER, COL_FILE, COL_SIZE, COL_STATE, COL_RAW, COL_PCT, COL_PROBLEM, COL_ERROR) = range(10)
 
 
+def completion_feedback(*, relevant_ids: set[str], states: dict[str, TransferState], outcomes: dict[str, ImportOutcome],
+                        paths: dict[str, str], refresh_error: str | None = None,
+                        process_error: str | None = None, import_errors: bool = False,
+                        archive_errors: bool = False, archive_waiting: bool = False,
+                        pending_declines: bool = False) -> tuple[str, str, str]:
+    """Return (kind, headline, detail) for the currently relevant approved tracks."""
+    total = len(relevant_ids)
+    completed = sum(states.get(track_id) == TransferState.SUCCEEDED for track_id in relevant_ids)
+    failed = sum(states.get(track_id) == TransferState.FAILED for track_id in relevant_ids)
+    active = any(states.get(track_id) in (TransferState.QUEUED, TransferState.IN_PROGRESS)
+                 for track_id in relevant_ids)
+    unknown = any(states.get(track_id) not in (TransferState.QUEUED, TransferState.IN_PROGRESS,
+                                               TransferState.SUCCEEDED, TransferState.FAILED)
+                  for track_id in relevant_ids)
+    imported = {ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT}
+    imported_ids = {track_id for track_id in relevant_ids if outcomes.get(track_id) in imported}
+    bad_outcomes = {ImportOutcome.CONFLICT, ImportOutcome.INVALID}
+    issues = bool(refresh_error or process_error or failed or import_errors or archive_errors or pending_declines
+                   or any(outcomes.get(track_id) in bad_outcomes for track_id in relevant_ids))
+    if total and completed == total and len(imported_ids) == total and not issues and not archive_waiting:
+        folders = {paths.get(track_id, "") for track_id in imported_ids} - {""}
+        location = next(iter(folders)) if len(folders) == 1 else ""
+        detail = f"{total} track{'s' if total != 1 else ''} imported"
+        if location:
+            detail += f" to {location}"
+        return "success", "Import complete", detail
+    if refresh_error or unknown:
+        return "issues", "Transfer status unavailable", "Refresh the transfers to confirm their current state."
+    if active:
+        if issues or archive_waiting:
+            return "issues", "In progress with issues", "Some transfers need attention while other downloads are still running."
+        return "progress", "Downloads are still in progress", f"{completed} of {total} downloads finished."
+    if total and completed == total and len(imported_ids) < total and not issues:
+        return "needed", "Downloads finished — import needed", "Completed downloads are waiting to be imported."
+    if issues:
+        return "issues", "Finished with issues", "Review the transfer, import and archive details below."
+    if archive_waiting:
+        return "issues", "Downloads and imports finished", "Peer folders are still waiting to be archived."
+    return "progress", "Downloads are not complete yet", f"{completed} of {total} downloads finished."
+
+
 def set_label(index: int) -> str:
     """'Original' for the first approval of an import, then 'Replacement 1', 'Replacement 2'..."""
     return "Original" if index == 0 else f"Replacement {index}"
 
 
+def latest_approval_by_track(approvals) -> dict[str, str]:
+    """Map each requested track to its newest approval in oldest-first chain order."""
+    latest = {}
+    for approval in approvals:
+        if approval is not None:
+            for approved_item in approval.items:
+                latest[approved_item.apple_id] = approval.id
+    return latest
+
+
+def can_start_another_import(*, kind: str, relevant_ids: set[str], states: dict[str, TransferState],
+                             refresh_error: str | None = None, archive_waiting: bool = False) -> bool:
+    """Offer a new import only after success or a fully terminal, refreshed issue state."""
+    terminal = bool(relevant_ids) and all(
+        states.get(track_id) in (TransferState.SUCCEEDED, TransferState.FAILED) for track_id in relevant_ids)
+    return kind == "success" or (kind == "issues" and terminal and not refresh_error and not archive_waiting)
+
+
 class TransfersPage(QWidget):
     find_another_source = Signal()  # user asked for a replacement review (nothing is queued by this)
+    new_import_requested = Signal()  # parent owns reset and navigation; this page performs no workflow mutation
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ctx = ctx
         self._inflight = False
+        self._shown_import_id: str | None = None
         self._names: dict[str, str] = {}
         self._states: dict[tuple[str, str], TransferState] = {}  # (approval id, apple id) -> state
         self._fingerprints: dict[str, str] = {}  # approval id -> fingerprint (for retry)
@@ -36,6 +99,13 @@ class TransfersPage(QWidget):
 
         self.info = QLabel("No approved downloads yet.")
         self.info.setWordWrap(True)
+        self.completion = QLabel("")
+        self.completion.setWordWrap(True)
+        self.completion.setFrameShape(QFrame.Shape.StyledPanel)
+        self.completion.setVisible(False)
+        self.new_import_btn = QPushButton("Start another import")
+        self.new_import_btn.setVisible(False)
+        self.new_import_btn.setEnabled(False)
         self.table = make_table(["Track", "Set", "Peer", "Remote file", "Size (MiB)", "State", "slskd state", "%",
                                  "Problem", "Error (raw)"])
         self.declined_label = QLabel("")
@@ -63,6 +133,10 @@ class TransfersPage(QWidget):
         row.addWidget(self.import_btn)
         lay = QVBoxLayout(self)
         lay.addWidget(self.info)
+        completion_row = QHBoxLayout()
+        completion_row.addWidget(self.completion, 1)
+        completion_row.addWidget(self.new_import_btn)
+        lay.addLayout(completion_row)
         lay.addWidget(self.declined_banner)
         lay.addWidget(self.table, 3)
         lay.addLayout(row)
@@ -76,6 +150,7 @@ class TransfersPage(QWidget):
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.refresh)
         self.declined_btn.clicked.connect(lambda *_: self.find_another_source.emit())
+        self.new_import_btn.clicked.connect(lambda *_: self.new_import_requested.emit())
         self.retry_btn.clicked.connect(self.retry_selected)
         self.cancel_btn.clicked.connect(self.cancel_selected)
         self.refresh_btn.clicked.connect(lambda *_: self.refresh())
@@ -90,6 +165,12 @@ class TransfersPage(QWidget):
 
     def start(self) -> None:
         """Begin showing/refreshing the current approval."""
+        self.completion.setVisible(False)
+        self.new_import_btn.setVisible(False)
+        self.new_import_btn.setEnabled(False)
+        if self._shown_import_id != self.ctx.import_id:
+            self._blocked, self._archive_errors = {}, {}
+            self._shown_import_id = self.ctx.import_id
         if not self.ctx.approval_id:
             self.info.setText("No approved downloads yet. Confirm a review first.")
             self.timer.stop()
@@ -110,8 +191,15 @@ class TransfersPage(QWidget):
     def refresh(self, *, process: bool | None = None) -> None:
         """Poll slskd, then (auto_import, or process=True from the button) import and archive."""
         latest, iid = self.ctx.approval_id, self.ctx.import_id
-        if not latest or self._inflight:
+        if not latest:
+            self.completion.setVisible(False)
+            self.new_import_btn.setVisible(False)
+            self.new_import_btn.setEnabled(False)
             return
+        if self._inflight:
+            return
+        self.new_import_btn.setVisible(False)
+        self.new_import_btn.setEnabled(False)
         self._inflight = True
         ctx = self.ctx
         do_process = ctx.settings.auto_import if process is None else process
@@ -141,26 +229,39 @@ class TransfersPage(QWidget):
             records = [(n, rec) for n, aid in enumerate(aids) for rec in ctx.store.transfers_for_approval(aid)]
             archives = [a for aid in aids for a in ctx.store.archives_for_approval(aid)]
             fps = {}
+            approvals = []
             for aid in aids:
                 ap = ctx.store.get_approval(aid)
+                approvals.append(ap)
                 if ap is not None:
                     fps[aid] = ap.fingerprint
+            relevant = latest_approval_by_track(approvals)
             declined = pending_declined(ctx.store, iid) if iid else []
             return (err, records, (ctx.store.import_results(iid) if iid else []), archives, reports, proc_err,
-                    aids, fps, declined)
+                    aids, fps, declined, relevant)
 
         run_async(self, work, self._refreshed, self._refresh_failed)
 
     def _refresh_failed(self, exc: object) -> None:
         self._inflight = False
         self.info.setText(f"Refresh failed: {self.ctx.describe(exc)}")
+        self.new_import_btn.setEnabled(True)
+        if self.ctx.approval_id:
+            self.completion.setText("Transfer status unavailable\nThe transfer status could not be refreshed.")
+            self.completion.setStyleSheet(
+                "QLabel { padding: 10px; font-weight: 600; color: #17212b; background: #fce8e6; }")
+            self.completion.setVisible(True)
+        else:
+            self.completion.setVisible(False)
+        self.new_import_btn.setVisible(False)
         if self._manual:
             self._manual = False
             self.import_btn.setEnabled(True)
 
     def _refreshed(self, payload: tuple) -> None:
         self._inflight = False
-        err, indexed, results, archives, reports, proc_err, aids, fps, declined = payload
+        self.new_import_btn.setEnabled(True)
+        err, indexed, results, archives, reports, proc_err, aids, fps, declined, relevant = payload
         records = [rec for _n, rec in indexed]
         if reports:
             self._blocked, self._archive_errors = {}, {}
@@ -198,6 +299,38 @@ class TransfersPage(QWidget):
                     f"already present, {counts[ImportOutcome.CONFLICT]} conflicts, "
                     f"{counts[ImportOutcome.INVALID]} invalid.")
         self.info.setText(msg)
+        latest_states = {}
+        by_transfer = {(rec.approval_id, rec.apple_id): rec for rec in records}
+        for track_id, aid in relevant.items():
+            rec = by_transfer.get((aid, track_id))
+            if rec is not None:
+                latest_states[track_id] = rec.status.state
+        archived_peers = {entry.username.casefold() for entry in archives}
+        pending_archive = any(
+            rec.status.state == TransferState.SUCCEEDED
+            and rec.status.username.casefold() not in archived_peers
+            for rec in records if relevant.get(rec.apple_id) == rec.approval_id
+        )
+        archive_waiting = bool(self._blocked) or pending_archive
+        outcome_by_track = {result.apple_id: result.outcome for result in results}
+        path_by_track = {result.apple_id: str(Path(result.final_path).parent) if result.final_path else ""
+                         for result in results}
+        kind, headline, detail = completion_feedback(
+            relevant_ids=set(relevant), states=latest_states, outcomes=outcome_by_track, paths=path_by_track,
+            refresh_error=err, process_error=proc_err,
+            import_errors=any(outcome_by_track.get(track_id) in (ImportOutcome.CONFLICT, ImportOutcome.INVALID)
+                              for track_id in relevant),
+            archive_errors=bool(self._archive_errors), archive_waiting=archive_waiting,
+            pending_declines=bool(declined),
+        )
+        self.completion.setText(f"{headline}\n{detail}")
+        colors = {"success": "#e6f4ea", "needed": "#fff4ce", "issues": "#fce8e6", "progress": "#e8f0fe"}
+        self.completion.setStyleSheet(
+            f"QLabel {{ padding: 10px; font-weight: 600; color: #17212b; background: {colors[kind]}; }}")
+        self.completion.setVisible(bool(relevant))
+        self.new_import_btn.setVisible(can_start_another_import(
+            kind=kind, relevant_ids=set(relevant), states=latest_states, refresh_error=err,
+            archive_waiting=archive_waiting))
         self._show_import_results(results)
         self._show_archives(records, archives)
         if self._manual:

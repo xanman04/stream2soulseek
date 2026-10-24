@@ -60,6 +60,7 @@ def env(tmp_path, monkeypatch, qapp):
     win = MainWindow(store, secrets, settings, autostart=False)
     yield win, store, secrets, root
     win.close()
+    win.deleteLater()
     store.close()
 
 
@@ -103,7 +104,7 @@ def test_sidebar_sections_and_disabled_future_services(env):
     flags = [bool(sb.services.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(3)]
     assert flags == [True, False, False]
     assert [t.split(". ", 1)[1] for t in sb.step_texts()] == [
-        "Choose playlist", "Choose download location", "Find on Soulseek", "Review & confirm",
+        "Choose playlist", "Choose tracklist folder", "Find on Soulseek", "Review & confirm",
         "Downloads & import"]
     assert sb.soulseek_label.text().startswith("Soulseek:") and sb.soulseek_btn.text() == "Log in..."
 
@@ -164,7 +165,7 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert [sb.step_enabled(i) for i in range(5)] == [True, False, False, False, False]
     f = win.frames
     assert not f[0].next_btn.isEnabled() and f[0].hint_label.text() == "Pick a playlist first"
-    assert f[0].next_btn.text() == "Next: Choose download location"
+    assert f[0].next_btn.text() == "Next: Choose tracklist folder"
     assert f[1].next_btn.text() == "Next: Find on Soulseek"
     assert f[3].next_btn.text() == "Next: Downloads & import"
     assert not f[4].next_btn.isVisibleTo(f[4])  # last step has no Next
@@ -178,7 +179,7 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert sb.step_texts()[0].startswith("✓")
     f[0].next_btn.click()
     assert win.stack.currentIndex() == 2 and sb.steps.currentRow() == 1
-    assert not f[1].next_btn.isEnabled() and "download location" in f[1].hint_label.text()
+    assert not f[1].next_btn.isEnabled() and "tracklist folder" in f[1].hint_label.text()
 
     win.destination.set_destination(str(root / "House"))
     assert ctx.destination == str((root / "House").resolve())
@@ -384,7 +385,7 @@ def test_browse_picks_any_folder_and_validates(env, monkeypatch, tmp_path):
 
     monkeypatch.setattr(destination_page.QFileDialog, "getExistingDirectory", staticmethod(fake_dialog))
     page.browse_btn.click()
-    assert "download location" in seen["caption"].lower()
+    assert "tracklist folder" in seen["caption"].lower()
     path, err = page.chosen_destination()
     assert err is None and path == str(chosen.resolve())
     assert page.dest_edit.text() == os.path.normpath(str(chosen)) and win.ctx.destination == path
@@ -419,7 +420,7 @@ def test_recent_destinations_listed_selectable_and_remembered_on_approval(env, t
     win.ctx.settings.recent_destinations = [str(newer), str(older)]
     page.refresh_destinations()
     assert [page.recent_combo.itemText(i) for i in range(page.recent_combo.count())] == \
-        ["-- recent locations --", str(newer), str(older)]
+        ["-- recent tracklist folders --", str(newer), str(older)]
     assert page.dest_edit.text() == ""  # listing recents never selects one
     page.recent_combo.setCurrentIndex(2)
     page.recent_combo.activated.emit(2)

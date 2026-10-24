@@ -1,1 +1,1 @@
-"""Native PySide6 widgets for S2S (Streaming to Soulseek). QtWebEngine is used only inside apple.login."""
+"""Native PySide6 widgets for S2S (Stream to Soulseek). QtWebEngine is used only inside apple.login."""

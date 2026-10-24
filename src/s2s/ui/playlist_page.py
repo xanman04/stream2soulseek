@@ -74,8 +74,13 @@ class PlaylistPage(QWidget):
         self.track_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.track_table.verticalHeader().setVisible(False)
         self.track_table.horizontalHeader().setStretchLastSection(True)
-        self.track_table.setSortingEnabled(True)  # click a header to sort, again to reverse
-        self.track_table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)  # Apple order
+        header = self.track_table.horizontalHeader()
+        header.setSortIndicatorClearable(True)  # same column cycles asc, desc, then Apple order
+        self.track_table.setSortingEnabled(True)
+        # QTableView starts with column 0 selected as the sort column. Clear both
+        # the visible indicator and proxy sort so the first click is ascending.
+        header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        self.track_proxy.sort(-1)
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.setContentsMargins(0, 0, 0, 0)

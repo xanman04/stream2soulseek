@@ -1,26 +1,40 @@
-# S2S — Streaming to Soulseek
+# S2S - Stream to Soulseek
 
 Personal Windows desktop app (PySide6 / Qt widgets). It reads one Apple Music playlist, searches Soulseek
 through a local [slskd](https://github.com/slskd/slskd) instance for the matching recordings, makes you
 review every proposed file, downloads only what you explicitly confirm, then copies verified files into a
 folder you choose (any folder, for example `C:\DJ\Tracks\House`), then tidies the downloaded peer folders away.
 
-Private, local development only. Public release is deferred (music-download legal questions and the
-unofficial Apple API both need a separate assessment). A license on a dependency is not permission from Apple
-or rightsholders.
+Development prototype, not a packaged release. Apple Music access uses an unofficial API. Download and share
+only material you are authorized to obtain or distribute; dependency licenses do not grant permission from
+Apple or music rightsholders.
 
 ## Status (v1)
 
 - Backend (matching, approval gate, download service, organizer, state store) and UI are tested **offline**
   with synthetic data and fakes.
-- **Not verified live:** Apple embedded sign-in and token capture, Apple playlist retrieval, the slskd API
-  payloads/state strings, real searches, real downloads, and real imports. Treat each as unproven until
-  you have run it once with a small playlist.
+- Live integration is still undergoing user testing. The automated suite uses synthetic data and does not
+  establish that a real Apple session, Soulseek search, download or import will succeed.
+- Latest local validation: **619 offline tests passed**, including UI and completion-state checks.
+
+## Install from source (Windows)
+
+Install Python 3.11 or newer, then run:
+
+```powershell
+git clone https://github.com/xanman04/stream2soulseek.git
+cd stream2soulseek
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+Follow [the slskd setup guide](docs/SETUP.md) to install slskd and configure its folders. FFmpeg's `ffprobe`
+is required to verify finished downloads. Each user connects their own accounts; no credentials or music
+are included in this repository.
 
 ## Run
 
 ```powershell
-cd C:\DJ\dev
 .venv\Scripts\python -m s2s.app
 ```
 
@@ -34,25 +48,26 @@ otherwise set its path in Settings.
 
 The window has a sidebar with three parts: **Streaming services** (Apple Music; Spotify and SoundCloud are
 shown greyed out as "coming soon"), the **Soulseek** login status with a **Log in...** button, and the numbered
-**Workflow**. Every workflow page starts with its title and a one-sentence explanation and ends with a
+**Workflow**. Every workflow page starts with its title and ends with a
 **Next: ...** button that is enabled only when that step is done (a short hint says what is missing). Steps whose
 earlier steps are not finished are greyed out in the sidebar; finished steps show a check mark, and you can always
 go back.
 
 **Streaming services - Apple Music.** Select it in the sidebar to sign in inside the app (Apple's own page), see
-the connection state ("signed in" / "not signed in") and sign out. On first start without a session this page
+the native account/status page, reconnect, or sign out. On first start without a session this page
 opens by itself; step 1 shows a message with a button to it while no service is connected.
 
 1. **Choose playlist** - pick the source (only connected services are listed), then a playlist. Type in the
    playlist search box to filter by name ("n of m playlists"). Clicking a playlist previews its tracks; the track
    search box filters title, artist and album ("n of m tracks"), and clicking a column header sorts by it (click
-   again to reverse; `#` and Duration sort numerically). Searching and sorting only change the preview: the
+   again to reverse, then again to restore playlist order; `#` and Duration sort numerically). Searching and sorting only change the preview: the
    playlist order that is searched and imported is always Apple's. **Resume most recent import** is also here.
-2. **Choose download location** - press **Browse...** (you may create a new folder there) or reuse one from the
+2. **Choose tracklist folder** - press **Browse...** (you may create a new folder there) or reuse one from the
    recent-locations list. There is no default. The location may be any folder except the slskd downloads folder
    (or anything inside it, including its archive folder), a drive root, or the app's own data folder. Chosen
    locations are remembered (10 most recent) once an approval is confirmed.
-3. **Find on Soulseek** - checks slskd is connected, then searches with live per-track status. Cancellable.
+3. **Find on Soulseek** - checks slskd is connected, then searches with animated activity, a per-track
+   green/red result strip and found/error counts. Cancellable.
 4. **Review & confirm** - every track gets a row (proposed / unresolved / skipped) with peer, full remote path,
    version tier, format, bitrate, size and library status; click a header to sort the table (selections stay
    with their track). Flagged rows start unchecked. Alternatives can be chosen; rejected candidates cannot.
@@ -65,6 +80,16 @@ opens by itself; step 1 shows a message with a button to it while no service is 
 
 New playlist sources implement `s2s.sources.base.PlaylistSource` (see `sources/apple.py`) and are added to
 `AppContext.playlist_sources()`; the step 1 source selector then lists them once they are connected.
+
+The final step explicitly distinguishes completed imports from pending work and errors. **Start another
+import** returns to playlist selection while keeping accounts, settings and previous import history.
+
+### Known limitations
+
+- Keep the playlist and destination unchanged while searching: a search-completion race can otherwise mix
+  an earlier search with a newer selection.
+- Archive handling needs stronger protection against pre-existing nested filesystem links/junctions.
+  Use ordinary folders for the current prototype.
 
 ### Automatic import and archive
 
@@ -102,7 +127,6 @@ The most recent import can be reopened from step 1 ("Resume most recent import")
 ## Tests
 
 ```powershell
-cd C:\DJ\dev
 .venv\Scripts\python -m pytest -q
 ```
 

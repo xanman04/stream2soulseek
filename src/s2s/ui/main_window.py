@@ -31,7 +31,7 @@ from .workers import run_async
 (STEP_PLAYLIST, STEP_DESTINATION, STEP_SEARCH, STEP_REVIEW, STEP_TRANSFERS) = range(5)
 NEXT_HINTS = {
     STEP_PLAYLIST: "Pick a playlist first",
-    STEP_DESTINATION: "Choose a download location first",
+    STEP_DESTINATION: "Choose a tracklist folder first",
     STEP_SEARCH: "Run the search first",
     STEP_REVIEW: "Confirm the download first",
 }
@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
     def __init__(self, store: Store, secrets: SecretStore, settings: Settings, *, autostart: bool = True,
                  slskd_service: SlskdService | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("S2S — Streaming to Soulseek")
+        self.setWindowTitle("S2S - Stream to Soulseek")
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
         self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
@@ -92,16 +92,17 @@ class MainWindow(QMainWindow):
         self.service.signed_in.connect(self._signed_in)
         self.service.signed_out.connect(self._signed_out)
         self.service.state_changed.connect(self.refresh_navigation)
-        self.service.to_playlists_btn.clicked.connect(lambda: self.go_step(STEP_PLAYLIST))
         self.playlists.tracks_changed.connect(self.refresh_navigation)
         self.playlists.resume_requested.connect(self.resume_last_import)
         self.playlists.open_service_requested.connect(lambda: self._open_service(APPLE_KEY))
         self.playlists.auth_failed.connect(self._auth_failed)
         self.destination.destination_changed.connect(self.refresh_navigation)
+        self.destination.settings_requested.connect(self.open_settings)
         self.search.state_changed.connect(self.refresh_navigation)
         self.search.search_finished.connect(self._search_finished)
         self.review.approved.connect(self._approved)
         self.transfers.find_another_source.connect(self.start_replacement)
+        self.transfers.new_import_requested.connect(self.start_another_import)
         self.go_step(STEP_PLAYLIST)
         if autostart:
             QTimer.singleShot(0, self.startup)
@@ -156,7 +157,7 @@ class MainWindow(QMainWindow):
     def _signed_in(self) -> None:
         self.playlists.refresh_sources()
         self.playlists.load_playlists()
-        self.go_step(STEP_PLAYLIST)
+        self.refresh_navigation()  # account page stays distinct; step 1 is selected in the sidebar
 
     def _signed_out(self) -> None:
         self.playlists.reset()
@@ -207,6 +208,30 @@ class MainWindow(QMainWindow):
         self.refresh_navigation()
         self.go_step(STEP_TRANSFERS)
 
+    def start_another_import(self) -> None:
+        """Begin a fresh selection while preserving accounts, settings and stored import history."""
+        if self.transfers._inflight:
+            return  # the completion button is disabled while a refresh is still running
+        self.transfers.stop()
+        self.ctx.reset_import()
+        self.ctx.playlist = None
+        self.ctx.tracks = []
+        self.ctx.destination = None
+        self.destination.reset()
+        self.search._set_running(False)
+        self.search.show_results([])
+        self.search.info.setText("Choose a playlist and a tracklist folder first.")
+        self.review.set_results([], "")
+        self.transfers.start()  # no approval: reset its completed banner and disable transfer actions
+        self.playlists.playlist_search.clear()
+        self.playlists.track_search.clear()
+        self.playlists.reset()
+        self.playlists.refresh_resume_button()
+        self.go_step(STEP_PLAYLIST)
+        if self.service.is_connected():
+            self.playlists.load_playlists()
+        self.statusBar().showMessage("Ready for another import. Choose a playlist.")
+
     def startup_checks(self) -> None:
         """Downloads folder first (slskd needs it), then the stored Soulseek login or a login popup."""
         self.prompt_if_unconfigured()
@@ -216,7 +241,7 @@ class MainWindow(QMainWindow):
     def prompt_if_unconfigured(self) -> None:
         """First run: the slskd downloads folder has no default and must be chosen in Settings."""
         if not self.ctx.settings.slskd_downloads_dir.strip():
-            self.statusBar().showMessage("Set the slskd downloads folder in Settings to get started.")
+            self.statusBar().showMessage("Choose the Soulseek working folder in Settings to get started.")
             self.open_settings()
 
     def open_settings(self) -> None:

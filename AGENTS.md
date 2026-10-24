@@ -1,4 +1,4 @@
-# S2S (Streaming to Soulseek): development instructions and handoff
+# S2S (Stream to Soulseek): development instructions and handoff
 
 Updated: 2026-10-24. Owner: Xander. Development workspace: `C:\DJ\dev`.
 
@@ -8,7 +8,7 @@ This file is a standalone handoff for coding in T3 Code or another agent environ
 
 Release and credentials:
 
-- Public release is deferred; develop a personal local desktop app first. Never hardcode, commit, package, log, or include real credentials in examples, screenshots, fixtures, exports, build artifacts, or releases.
+- Source publication to `https://github.com/xanman04/stream2soulseek` was authorized on 2026-10-24. Packaged releases remain deferred. Never hardcode, commit, package, log, or include real credentials in examples, screenshots, fixtures, exports, build artifacts, or releases.
 - Each user signs in independently. Never distribute a developer token harvested from a browser session, account cookies, passwords, Soulseek API keys, or an authenticated browser profile.
 - Keep authentication state outside the repository in a per-user application data directory. For Windows, use OS-protected secret storage and restrict access to any persistent browser profile; do not ship the upstream plaintext credential JSON behavior unchanged.
 - Use synthetic credentials for tests. Keep playlist exports and download/review manifests free of authentication data. Do not run live mutation tests on a user's Apple Music library.
@@ -31,7 +31,7 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 - The user explicitly wants a native app-like GUI, not a localhost website or a browser-hosted interface.
 - Agreed direction: Python backend, PySide6/Qt native widgets, and Qt WebEngine embedded only where needed for Apple authentication.
 - The user wants Apple sign-in contained inside the app window, then playlist browsing/selection in native controls. Do not silently substitute an external browser or require a share link as the normal workflow.
-- Public/open-source release on GitHub was considered and then deferred because of music-download legal concerns. Develop locally first; do not publish, push, or create a public repository without new authorization.
+- The owner authorized populating the existing GitHub repository on 2026-10-24 after initially deferring publication. This authorizes source synchronization; do not create releases or publish account/session data.
 - The app must stay general, not tailored to the owner's folders: the user picks any download location, and personal paths are never defaults or requirements.
 - Spotify and SoundCloud are planned as further playlist sources (metadata only, through `src/s2s/sources/`). Research, blockers and a suggested order are in `docs/research/streaming-services.md`.
 - Other website sources are a later phase. Initially report tracks unavailable on Soulseek rather than adding external downloading.
@@ -43,7 +43,7 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 - Preserve existing music. Do not move, rename, delete, retag, or convert the user's current library to test the app.
 - Avoid repeated permission questions for already authorized development. If permissions block work, stop and report the block; do not work around it.
 - Do not delegate to other agents unless authorized by the user or applicable instructions. T3 Code tooling and model selection have not been investigated.
-- Group commits by coherent changes; report uncommitted work. No commits have been requested for this handoff.
+- Group commits by coherent changes; report uncommitted work. Committing and pushing the current prototype to the owner's remote was requested on 2026-10-24.
 - When changing files, making a decision, or leaving work open, end the response with a short paragraph beginning `State:` describing where the work stands.
 
 ## Current filesystem and library semantics

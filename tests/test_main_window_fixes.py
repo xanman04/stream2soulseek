@@ -41,6 +41,7 @@ def win(tmp_path, monkeypatch):
                    slskd_service=FakeService())
     yield w
     w.close()
+    w.deleteLater()
     store.close()
 
 
@@ -50,6 +51,69 @@ def test_every_stacked_page_paints_its_own_background(win):
     for stack in stacks:
         for i in range(stack.count()):
             assert stack.widget(i).autoFillBackground(), stack.widget(i)
+
+
+def test_window_title_and_headers_are_concise(win):
+    assert win.windowTitle() == "S2S - Stream to Soulseek"
+    assert not hasattr(win.service, "explain_label")
+    assert all(not hasattr(frame, "explain_label") for frame in win.frames)
+
+
+def test_signed_in_account_page_is_separate_from_playlist_step(win, monkeypatch):
+    from s2s.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
+
+    win.ctx.secrets.set(APPLE_DEVELOPER_TOKEN, "synthetic-developer")
+    win.ctx.secrets.set(APPLE_MEDIA_USER_TOKEN, "synthetic-user")
+    monkeypatch.setattr(win.playlists, "load_playlists", lambda: None)
+    win.service.refresh_state()
+    win._open_service()
+    assert win.stack.currentWidget() is win.service
+    assert win.service.stack.currentWidget() is win.service.account_page
+    assert not hasattr(win.service, "to_playlists_btn")
+    assert win.service.connection_value.text() == "Signed in"
+    win._signed_in()
+    assert win.stack.currentWidget() is win.service
+    win.go_step(0)
+    assert win.stack.currentWidget() is win.frames[0]
+
+
+def test_reconnect_opens_embedded_login_without_deleting_saved_session(win, monkeypatch):
+    from s2s.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
+
+    win.ctx.secrets.set(APPLE_DEVELOPER_TOKEN, "synthetic-developer")
+    win.ctx.secrets.set(APPLE_MEDIA_USER_TOKEN, "synthetic-user")
+    shown = []
+    monkeypatch.setattr(win.service, "show_login", lambda msg: shown.append(msg))
+    win.service.reconnect_btn.click()
+    assert shown and "Reconnect" in shown[0]
+    assert win.service.is_connected()
+
+
+def test_start_another_import_resets_selection_but_keeps_accounts_and_history(win, monkeypatch):
+    from s2s.models import AppleTrack, Playlist
+    from s2s.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
+
+    win.ctx.secrets.set(APPLE_DEVELOPER_TOKEN, "synthetic-developer")
+    win.ctx.secrets.set(APPLE_MEDIA_USER_TOKEN, "synthetic-user")
+    old_import = win.ctx.store.create_import(Playlist("p.old", "Previous playlist"), r"C:\Example\Tracks")
+    win.ctx.import_id = old_import
+    win.ctx.approval_id = "previous-approval"
+    win.ctx.fingerprint = "previous-fingerprint"
+    win.ctx.playlist = Playlist("p.old", "Previous playlist")
+    win.ctx.tracks = [AppleTrack("i.old", "Old track", "Artist")]
+    win.ctx.destination = r"C:\Example\Tracks"
+    settings = win.ctx.settings
+    loads = []
+    monkeypatch.setattr(win.playlists, "load_playlists", lambda: loads.append(True))
+    win.transfers.new_import_requested.emit()
+    assert win.stack.currentWidget() is win.frames[0]
+    assert win.ctx.import_id is None and win.ctx.approval_id is None and win.ctx.fingerprint is None
+    assert win.ctx.playlist is None and win.ctx.tracks == [] and win.ctx.destination is None
+    assert not win.destination.dest_edit.text()
+    assert not win.transfers.timer.isActive()
+    assert win.ctx.settings is settings and win.service.is_connected()
+    assert win.ctx.store.get_import(old_import) is not None
+    assert loads == [True]
 
 
 def test_resumed_unconfirmed_review_must_be_searched_again(win):
