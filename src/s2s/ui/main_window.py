@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("S2S — Streaming to Soulseek")
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
-        self.soulseek = SoulseekSession(slskd_service or SlskdService(settings, secrets), secrets, self)
+        self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
 
         self.sidebar = Sidebar()
         self.service = ServicePage(self.ctx)

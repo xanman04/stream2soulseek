@@ -183,3 +183,18 @@ def test_find_slskd_exe_prefers_newest_version(tmp_path, monkeypatch):
         (d / "slskd.exe").write_bytes(b"")
     assert find_slskd_exe(Settings()).parent.name == "0.26.10"
     assert find_slskd_exe(Settings(extra={"slskd_exe": str(tmp_path / "missing.exe")})) is None
+
+
+def test_service_reads_current_settings_not_a_stale_copy(tmp_path, store):
+    current = {"s": Settings()}  # app started with no downloads folder
+    clock = Clock()
+    exe = tmp_path / "slskd.exe"
+    exe.write_bytes(b"")
+    svc = SlskdService(lambda: current["s"], store, app_dir=tmp_path / "app", exe=exe,
+                       popen=lambda args, **kw: FakeProc(), http_get=no_server,
+                       client_factory=FakeClient(["in"]), sleep=clock.sleep, clock=clock)
+    with pytest.raises(SlskdServiceError, match="downloads folder"):
+        svc.start(CREDS)
+    current["s"] = Settings(slskd_downloads_dir=str(tmp_path / "dl"))  # Settings dialog replaced the object
+    svc.start(CREDS)
+    assert svc.running and (tmp_path / "dl").is_dir()

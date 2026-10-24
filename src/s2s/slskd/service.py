@@ -207,7 +207,7 @@ class SlskdService:
 
     def __init__(
         self,
-        settings: Settings,
+        settings: Settings | Callable[[], Settings],
         secret_store: SecretStore,
         *,
         app_dir: Path | None = None,
@@ -218,7 +218,9 @@ class SlskdService:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._settings = settings
+        # A callable is read on every use, so a downloads folder or shares saved in Settings take effect
+        # without restarting the app (the Settings dialog replaces the Settings object rather than mutating it).
+        self._get_settings: Callable[[], Settings] = settings if callable(settings) else (lambda: settings)
         self._secrets = secret_store
         self._dir = app_dir or (config.app_dir() / "slskd")
         self._exe = exe
@@ -228,6 +230,10 @@ class SlskdService:
         self._sleep = sleep
         self._clock = clock
         self._proc: subprocess.Popen | None = None
+
+    @property
+    def _settings(self) -> Settings:
+        return self._get_settings()
 
     @property
     def app_dir(self) -> Path:
