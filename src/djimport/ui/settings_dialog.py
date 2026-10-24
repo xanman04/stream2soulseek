@@ -24,7 +24,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.ctx = ctx
         self.setWindowTitle("Settings")
-        self.resize(760, 860)  # tall enough to show the whole Matching rules tab without scrolling
+        self.resize(760, 960)  # tall enough to show the whole Matching rules tab without scrolling
         s = ctx.settings
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
@@ -68,7 +68,7 @@ class SettingsDialog(QDialog):
         box.rejected.connect(self.reject)
         general = QWidget()
         general.setLayout(form)
-        self.rules = MatchingRulesWidget(s.match_policy)
+        self.rules = MatchingRulesWidget(s.match_policy, layouts=s.rule_layouts)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.rules)
@@ -132,7 +132,8 @@ class SettingsDialog(QDialog):
                 slskd_downloads_dir=self.downloads.text().strip(),
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
-                search_concurrency=self.concurrency.value(), match_policy=self.rules.policy())
+                search_concurrency=self.concurrency.value(), match_policy=self.rules.policy(),
+                rule_layouts=dict(self.rules.layouts))
             if not (new.slskd_url and new.slskd_downloads_dir):
                 raise ValueError("URL and the slskd downloads folder are required.")
             if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):

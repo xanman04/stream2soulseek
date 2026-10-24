@@ -5,9 +5,10 @@ from __future__ import annotations
 import threading
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
-from .. import workflow
+from .. import config, workflow
+from .. import layouts as lay_mod
 from ..matching.formats import describe_policy
 from ..models import MatchResult, MatchStatus
 from ..slskd.client import SlskdAuthError, SlskdError
@@ -46,7 +47,11 @@ class SearchPage(QWidget):
         self.rules_btn = QPushButton("Change...")
         self.stale_label = QLabel("")
         self.stale_label.setWordWrap(True)
+        self.layout_combo = QComboBox()
+        self.layout_combo.setToolTip("Switch to a saved layout of matching rules")
         rules_row = QHBoxLayout()
+        rules_row.addWidget(QLabel("Rules:"))
+        rules_row.addWidget(self.layout_combo)
         rules_row.addWidget(self.rules_label, 1)
         rules_row.addWidget(self.rules_btn)
         row = QHBoxLayout()
@@ -62,13 +67,37 @@ class SearchPage(QWidget):
         self.start_btn.clicked.connect(self.start)
         self.cancel_btn.clicked.connect(self.cancel)
         self.rules_btn.clicked.connect(self.change_rules)
+        self.layout_combo.activated.connect(self._layout_chosen)
         self.refresh_rules()
 
     # ------------------------------------------------------------ matching rules
 
+    def _fill_layouts(self) -> None:
+        s = self.ctx.settings
+        current = lay_mod.matching_layout(s)
+        self.layout_combo.blockSignals(True)
+        self.layout_combo.clear()
+        if current is None:
+            self.layout_combo.addItem("Custom (unsaved)", None)
+        for name, _p in lay_mod.all_layouts(s.rule_layouts):
+            self.layout_combo.addItem(name, name)
+        self.layout_combo.setCurrentIndex(max(self.layout_combo.findData(current), 0))
+        self.layout_combo.setEnabled(not self._running)
+        self.layout_combo.blockSignals(False)
+
+    def _layout_chosen(self, index: int) -> None:
+        name = self.layout_combo.itemData(index)
+        if name is None or self._running:
+            return
+        s = self.ctx.settings
+        s.match_policy = lay_mod.layout_policy(s.rule_layouts, name)
+        config.save_settings(s)
+        self.refresh_rules()
+
     def refresh_rules(self) -> None:
         """Show the active rules and warn when the current results were made under different ones."""
         pol = self.ctx.settings.match_policy
+        self._fill_layouts()
         self.rules_label.setText(describe_policy(pol))
         fp = self.ctx.results_policy
         stale = bool(self.ctx.results) and fp is not None and fp != pol.fingerprint()
@@ -175,6 +204,8 @@ class SearchPage(QWidget):
         self._running = running
         self.start_btn.setEnabled(not running)
         self.cancel_btn.setEnabled(running)
+        self.layout_combo.setEnabled(not running)
+        self.rules_btn.setEnabled(not running)
         self.state_changed.emit()
 
     def _finished(self, payload: tuple) -> None:

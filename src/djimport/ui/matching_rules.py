@@ -5,12 +5,15 @@ Defaults are the owner's rules. A different remix or a VIP mismatch is never acc
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
-    QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from .. import layouts as lay_mod
 from ..matching.formats import NAMES
 from ..models import DEFAULT_MIN_KBPS, FORMAT_KINDS, LOSSY_KINDS, FormatRule, MatchPolicy
 
@@ -23,11 +26,41 @@ EXCLUSION_HELP = (
 NEVER_NOTE = "A different remix or remixer, a different version, and a VIP mismatch are never accepted."
 
 
+CUSTOM = "(unsaved rules)"
+
+
+def _ask_name(parent: QWidget, current: str) -> str | None:
+    name, ok = QInputDialog.getText(parent, "Save layout", "Layout name:", text=current)
+    return name if ok else None
+
+
+def _confirm(parent: QWidget, text: str) -> bool:
+    return QMessageBox.question(parent, "Layouts", text) == QMessageBox.StandardButton.Yes
+
+
 class MatchingRulesWidget(QWidget):
-    def __init__(self, policy: MatchPolicy, parent: QWidget | None = None) -> None:
+    def __init__(self, policy: MatchPolicy, parent: QWidget | None = None,
+                 layouts: dict[str, MatchPolicy] | None = None,
+                 ask_name: Callable[[QWidget, str], str | None] = _ask_name,
+                 confirm: Callable[[QWidget, str], bool] = _confirm) -> None:
         super().__init__(parent)
         self._lossy: dict[str, tuple[int, bool]] = {}
         self._current_kind: str | None = None
+        self.layouts: dict[str, MatchPolicy] = dict(layouts or {})  # edited copy; the dialog saves it
+        self._ask_name = ask_name
+        self._confirm = confirm
+
+        # ---- saved layouts
+        self.layout_combo = QComboBox()
+        self.load_btn = QPushButton("Load")
+        self.save_as_btn = QPushButton("Save as...")
+        self.delete_btn = QPushButton("Delete")
+        lrow = QHBoxLayout()
+        lrow.addWidget(self.layout_combo, 1)
+        for b in (self.load_btn, self.save_as_btn, self.delete_btn):
+            lrow.addWidget(b)
+        lbox = QGroupBox("Layouts (saved sets of these rules; kept when you press Save)")
+        QVBoxLayout(lbox).addLayout(lrow)
 
         # ---- formats
         self.formats = QListWidget()
@@ -94,7 +127,7 @@ class MatchingRulesWidget(QWidget):
         foot.addStretch(1)
 
         lay = QVBoxLayout(self)
-        for w in (fbox, vbox, ebox, rbox):
+        for w in (lbox, fbox, vbox, ebox, rbox):
             lay.addWidget(w)
         lay.addLayout(foot)
         lay.addStretch(1)
@@ -103,7 +136,79 @@ class MatchingRulesWidget(QWidget):
         self.up_btn.clicked.connect(lambda: self._move(-1))
         self.down_btn.clicked.connect(lambda: self._move(1))
         self.restore_btn.clicked.connect(self.restore_defaults)
+        self.load_btn.clicked.connect(self.load_selected)
+        self.save_as_btn.clicked.connect(self.save_as)
+        self.delete_btn.clicked.connect(self.delete_selected)
+        self.layout_combo.currentIndexChanged.connect(lambda _i: self._update_layout_buttons())
         self.set_policy(policy)
+        self.refresh_layouts()
+
+    # ------------------------------------------------------------ layouts
+
+    def refresh_layouts(self, select: str | None = None) -> None:
+        """Fill the combo; select `select`, else the layout equal to the shown rules, else '(unsaved rules)'."""
+        if select is None:
+            try:
+                fp = self.policy().fingerprint()
+            except ValueError:
+                fp = None
+            select = next((n for n, p in lay_mod.all_layouts(self.layouts) if p.fingerprint() == fp), CUSTOM)
+        self.layout_combo.blockSignals(True)
+        self.layout_combo.clear()
+        if select == CUSTOM:
+            self.layout_combo.addItem(CUSTOM, None)
+        for name, _p in lay_mod.all_layouts(self.layouts):
+            self.layout_combo.addItem(name, name)
+        i = self.layout_combo.findData(select if select != CUSTOM else None)
+        self.layout_combo.setCurrentIndex(max(i, 0))
+        self.layout_combo.blockSignals(False)
+        self._update_layout_buttons()
+
+    def selected_layout(self) -> str | None:
+        return self.layout_combo.currentData()
+
+    def _update_layout_buttons(self) -> None:
+        name = self.selected_layout()
+        self.load_btn.setEnabled(name is not None)
+        self.delete_btn.setEnabled(name is not None and name != lay_mod.DEFAULT_NAME)
+
+    def load_selected(self) -> None:
+        name = self.selected_layout()
+        if name is None:
+            return
+        self.set_policy(lay_mod.layout_policy(self.layouts, name))
+        self.refresh_layouts(select=name)
+
+    def save_as(self) -> None:
+        try:
+            policy = self.policy()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Layouts", str(exc))
+            return
+        current = self.selected_layout()
+        suggestion = current if current and current != lay_mod.DEFAULT_NAME else ""
+        name = self._ask_name(self, suggestion)
+        if name is None:
+            return
+        try:
+            clean = lay_mod.validate_name(name)
+        except lay_mod.LayoutError as exc:
+            QMessageBox.warning(self, "Layouts", str(exc))
+            return
+        if lay_mod.find(self.layouts, clean) is not None and not self._confirm(
+                self, f'Replace the layout "{clean}" with the rules shown?'):
+            return
+        stored = lay_mod.save_layout(self.layouts, clean, policy)
+        self.refresh_layouts(select=stored)
+
+    def delete_selected(self) -> None:
+        name = self.selected_layout()
+        if name is None or name == lay_mod.DEFAULT_NAME:
+            return
+        if not self._confirm(self, f'Delete the layout "{name}"? The rules shown stay as they are.'):
+            return
+        lay_mod.delete_layout(self.layouts, name)
+        self.refresh_layouts()
 
     # ------------------------------------------------------------ formats list
 
@@ -174,6 +279,7 @@ class MatchingRulesWidget(QWidget):
 
     def restore_defaults(self) -> None:
         self.set_policy(MatchPolicy())
+        self.refresh_layouts()
 
     def policy(self) -> MatchPolicy:
         """The policy shown. Raises ValueError when no file type is ticked."""

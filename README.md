@@ -97,7 +97,9 @@ cd C:\DJ\dev
   Search page): accepted file types in priority order with minimum bitrates and VBR switches, exact-only versus
   exact-then-extended, whether the right version outranks a better format, whether radio edits / live
   recordings / `[Mixed]` tracks are rejected, the duration tolerance, and whether flagged matches start
-  unticked. The defaults are MP3 320 CBR then FLAC, exact then extended, all three rejected. A different remix
+  unticked. Rule sets can be saved as named **layouts** (Load / Save as / Delete in that tab; the built-in
+  "Default" cannot be changed) and switched from the **Rules** dropdown on the Search page.
+  The defaults are MP3 320 CBR then FLAC, exact then extended, all three rejected. A different remix
   or remixer, a different version and a VIP mismatch are always rejected and cannot be switched off. Changing
   the rules after a search requires running the search again before confirming.
 - Existing files in the download location are never overwritten, moved, retagged or deleted. Downloaded
