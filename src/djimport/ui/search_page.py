@@ -1,4 +1,4 @@
-"""Step 2: search slskd for every requested track. Search only; nothing is ever queued here."""
+"""Step 3: search slskd for every requested track. Search only; nothing is ever queued here."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ class _Progress(QObject):
 
 class SearchPage(QWidget):
     search_finished = Signal(bool)  # cancelled?
+    state_changed = Signal()  # a search started or stopped
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -31,7 +32,7 @@ class SearchPage(QWidget):
         self._progress = _Progress(self)
         self._progress.step.connect(self._on_step)
 
-        self.info = QLabel("Fetch a playlist and choose a destination first.")
+        self.info = QLabel("Choose a playlist and a download location first.")
         self.info.setWordWrap(True)
         self.start_btn = QPushButton("Start search")
         self.cancel_btn = QPushButton("Cancel")
@@ -94,7 +95,7 @@ class SearchPage(QWidget):
             return
         ctx = self.ctx
         if not ctx.tracks or not ctx.destination or ctx.playlist is None:
-            self.info.setText("Nothing to search: fetch a playlist and choose a destination first.")
+            self.info.setText("Nothing to search: choose a playlist and a download location first.")
             return
         self.prepare()
         self._cancel = threading.Event()
@@ -138,6 +139,7 @@ class SearchPage(QWidget):
         self._running = running
         self.start_btn.setEnabled(not running)
         self.cancel_btn.setEnabled(running)
+        self.state_changed.emit()
 
     def _finished(self, payload: tuple) -> None:
         import_id, results, cancelled = payload
@@ -151,7 +153,7 @@ class SearchPage(QWidget):
         self.info.setText(
             f"{prefix}{n[MatchStatus.PROPOSED]} proposed, {n[MatchStatus.UNRESOLVED]} unresolved, "
             f"{n[MatchStatus.SKIPPED]} skipped of {len(self.ctx.tracks)}. Nothing has been downloaded; "
-            "continue to Review.")
+            "continue to Review & confirm.")
         self.search_finished.emit(cancelled)
 
     def _failed(self, exc: object) -> None:

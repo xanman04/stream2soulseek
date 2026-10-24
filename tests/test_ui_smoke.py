@@ -84,70 +84,297 @@ def synthetic(store, root):
 
 def test_window_constructs_without_network_and_destination_not_defaulted(env):
     win, store, secrets, root = env
-    page = win.apple
+    page = win.destination
     assert page.dest_edit.text() == "" and page.dest_edit.isReadOnly()
     assert page.chosen_destination()[0] is None  # no default: the user must pick
     assert not hasattr(page, "dest_combo") and not hasattr(page, "new_name")
     assert page.recent_combo.count() == 1 and not page.recent_combo.isEnabled()
-    assert win.steps.count() == 4
-    assert win.apple.sign_out_btn is not None
+    assert win.sidebar.steps.count() == 5
+    assert win.service.sign_out_btn is not None
+    assert win.ctx.destination is None
 
 
-def test_destination_requires_downloads_dir_in_settings(env):
+def test_sidebar_sections_and_disabled_future_services(env):
     win, *_ = env
-    win.ctx.settings.slskd_downloads_dir = ""
-    win.apple.dest_edit.setText(str(env[3] / "House"))
-    path, err = win.apple.chosen_destination()
-    assert path is None and "Settings" in err
-    win.apple._dest_changed()
-    assert "Settings" in win.apple.dest_error.text()
+    sb = win.sidebar
+    assert sb.services_header.text() == "Streaming services" and sb.steps_header.text() == "Workflow"
+    labels = [sb.services.item(i).text() for i in range(sb.services.count())]
+    assert labels[0].startswith("Apple Music") and labels[1:] == ["Spotify (coming soon)", "SoundCloud (coming soon)"]
+    flags = [bool(sb.services.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(3)]
+    assert flags == [True, False, False]
+    assert [t.split(". ", 1)[1] for t in sb.step_texts()] == [
+        "Choose playlist", "Choose download location", "Find on Soulseek", "Review & confirm",
+        "Downloads & import"]
+    assert sb.soulseek_label.text().startswith("Soulseek:") and sb.soulseek_btn.text() == "Log in..."
 
 
-def test_clicking_playlist_previews_tracks_and_caches(env, monkeypatch):
-    win, _store, secrets, root = env
-    from djimport.ui import apple_page
+def test_apple_state_shown_in_sidebar(env):
+    win, _store, secrets, _root = env
+    win.refresh_navigation()
+    assert win.sidebar.services.item(0).text() == "Apple Music: not signed in"
+    secrets.set(APPLE_DEVELOPER_TOKEN, "test-dev")
+    secrets.set(APPLE_MEDIA_USER_TOKEN, "test-user")
+    win.service.refresh_state()
+    assert win.sidebar.services.item(0).text() == "Apple Music: signed in"
+    assert win.service.sign_out_btn.isEnabled()
 
-    calls: list[str] = []
+
+def test_soulseek_row_updates_and_login_button_prompts(env, monkeypatch):
+    win, *_ = env
+    win.soulseek.status_changed.emit("Soulseek: logged in as someone.")
+    assert win.sidebar.soulseek_label.text() == "Soulseek: logged in as someone."
+    calls = []
+    monkeypatch.setattr(type(win.soulseek), "prompt", lambda self, message="": calls.append(1) or True)
+    win.sidebar.soulseek_btn.click()
+    assert calls == [1]
+
+
+def test_no_source_connected_step1_message_opens_service_page(env, monkeypatch):
+    win, *_ = env
+    page = win.playlists
+    assert page.stack.currentIndex() == 1 and page.source_combo.count() == 0
+    shown = []
+    monkeypatch.setattr(win.service, "show_login", lambda msg: shown.append(msg))
+    page.connect_btn.click()
+    assert win.stack.currentIndex() == 0 and shown  # opened the Apple Music page
+
+
+def test_first_start_without_session_opens_service_page(env, monkeypatch):
+    win, *_ = env
+    monkeypatch.setattr(win.service, "show_login", lambda msg: None)
+    win.startup()
+    assert win.stack.currentIndex() == 0
+
+
+def test_first_start_with_session_opens_step_one(env, monkeypatch):
+    win, _s, secrets, _root = env
+    secrets.set(APPLE_DEVELOPER_TOKEN, "d")
+    secrets.set(APPLE_MEDIA_USER_TOKEN, "u")
+    from djimport.ui import playlist_page
+
+    monkeypatch.setattr(playlist_page.PlaylistPage, "load_playlists", lambda self: None)
+    win.startup()
+    assert win.stack.currentIndex() == 1 and win.playlists.source_combo.count() == 1
+    assert win.playlists.source_combo.itemText(0) == "Apple Music"
+
+
+def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
+    win, store, _sec, root = env
+    sb, ctx = win.sidebar, win.ctx
+    assert [sb.step_enabled(i) for i in range(5)] == [True, False, False, False, False]
+    f = win.frames
+    assert not f[0].next_btn.isEnabled() and f[0].hint_label.text() == "Pick a playlist first"
+    assert f[0].next_btn.text() == "Next: Choose download location"
+    assert f[1].next_btn.text() == "Next: Find on Soulseek"
+    assert f[3].next_btn.text() == "Next: Downloads & import"
+    assert not f[4].next_btn.isVisibleTo(f[4])  # last step has no Next
+    win.go_step(2)  # locked: ignored
+    assert win.stack.currentIndex() == 1
+
+    ctx.playlist, ctx.tracks = Playlist("p", "P"), [AppleTrack("i.0", "S", "A")]
+    win.refresh_navigation()
+    assert f[0].next_btn.isEnabled() and f[0].hint_label.text() == ""
+    assert [sb.step_enabled(i) for i in range(5)] == [True, True, False, False, False]
+    assert sb.step_texts()[0].startswith("✓")
+    f[0].next_btn.click()
+    assert win.stack.currentIndex() == 2 and sb.steps.currentRow() == 1
+    assert not f[1].next_btn.isEnabled() and "download location" in f[1].hint_label.text()
+
+    win.destination.set_destination(str(root / "House"))
+    assert ctx.destination == str((root / "House").resolve())
+    assert f[1].next_btn.isEnabled() and sb.step_enabled(2) and not sb.step_enabled(3)
+    f[1].next_btn.click()
+    assert win.stack.currentIndex() == 3
+    assert not f[2].next_btn.isEnabled() and f[2].hint_label.text() == "Run the search first"
+
+    ctx.results = [MatchResult(ctx.tracks[0], MatchStatus.UNRESOLVED, None)]
+    win.refresh_navigation()
+    assert f[2].next_btn.isEnabled() and sb.step_enabled(3) and not sb.step_enabled(4)
+    assert not f[3].next_btn.isEnabled()
+    ctx.approval_id = "ap"
+    win.refresh_navigation()
+    assert f[3].next_btn.isEnabled() and sb.step_enabled(4)
+    # going back stays possible
+    win.go_step(0)
+    assert win.stack.currentIndex() == 1
+    win.transfers.stop()
+
+    # an invalid / cleared destination locks the later steps again
+    ctx.approval_id = None
+    win.destination.set_destination(win.ctx.settings.slskd_downloads_dir)
+    assert ctx.destination is None and not sb.step_enabled(2)
+
+
+def make_fake_source(monkeypatch, calls, n=3):
+    from djimport.sources import apple
 
     class FakeApple:
         def __init__(self, *_a, **_k): ...
         def __enter__(self): return self
         def __exit__(self, *_a): return False
+        def list_playlists(self):
+            return []
         def get_playlist_tracks(self, pid):
             calls.append(pid)
-            return [AppleTrack(f"{pid}.{n}", f"{pid} song {n}", "Artist", position=n) for n in range(3)]
+            return [AppleTrack(f"{pid}.{k}", f"{pid} song {k}", "Artist", position=k) for k in range(n)]
 
-    monkeypatch.setattr(apple_page, "AppleMusicClient", FakeApple)
+    monkeypatch.setattr(apple, "AppleMusicClient", FakeApple)
+
+
+def signed_in_playlist_page(win, secrets, playlists):
     secrets.set(APPLE_DEVELOPER_TOKEN, "test-dev")
     secrets.set(APPLE_MEDIA_USER_TOKEN, "test-user")
-    page = win.apple
-    page._playlists_loaded([Playlist("p.a", "A"), Playlist("p.b", "B")])
+    page = win.playlists
+    page.refresh_sources()
+    page._playlists_loaded(playlists)
+    return page
+
+
+def test_clicking_playlist_previews_tracks_and_caches(env, monkeypatch):
+    win, _store, secrets, root = env
+    calls: list[str] = []
+    make_fake_source(monkeypatch, calls)
+    page = signed_in_playlist_page(win, secrets, [Playlist("p.a", "A"), Playlist("p.b", "B")])
 
     page.playlist_list.setCurrentRow(0)  # no Fetch button: selection loads the preview
-    assert calls == ["p.a"] and page.track_table.rowCount() == 3
-    assert page.track_table.item(0, 1).text() == "p.a song 0"
-    assert not page.continue_btn.isEnabled()  # destination still required to continue
+    assert calls == ["p.a"] and page.track_proxy.rowCount() == 3
+    assert page.track_proxy.index(0, 1).data() == "p.a song 0"
+    assert win.ctx.playlist.id == "p.a" and win.frames[0].next_btn.isEnabled()
+    assert not win.frames[1].next_btn.isEnabled()  # destination still required
 
     page.playlist_list.setCurrentRow(1)
     page.playlist_list.setCurrentRow(0)
     assert calls == ["p.a", "p.b"]  # A came from the cache
-    assert page.track_table.item(0, 1).text() == "p.a song 0"
+    assert page.track_proxy.index(0, 1).data() == "p.a song 0"
 
-    page.set_destination(str(root / "House"))
-    assert page.continue_btn.isEnabled()
-    fired = []
-    page.tracks_ready.connect(lambda: fired.append(True))
-    page.continue_btn.click()
-    assert fired and win.ctx.destination == str(root / "House")
-    assert win.ctx.playlist.id == "p.a"
+    win.go_step(1)
+    win.destination.set_destination(str(root / "House"))
+    assert win.ctx.destination == str((root / "House").resolve())
+    win.frames[1].next_btn.click()
+    assert win.stack.currentIndex() == 3
+
+
+def test_stale_track_response_is_ignored(env, monkeypatch):
+    win, _s, secrets, _root = env
+    page = signed_in_playlist_page(win, secrets, [Playlist("p.a", "A"), Playlist("p.b", "B")])
+    make_fake_source(monkeypatch, [])
+    page.playlist_list.setCurrentRow(1)  # B selected now
+    src = page.current_source()
+    page._tracks_loaded(Playlist("p.a", "A"), src, [AppleTrack("x", "stale", "Z")])  # late answer for A
+    assert page.track_model.rowCount() == 3 and win.ctx.playlist.id == "p.b"  # still B's tracks
+    assert ("Apple Music", "p.a") in page._track_cache
+
+
+def test_playlist_search_filters_as_you_type(env, monkeypatch):
+    win, _s, secrets, _root = env
+    page = signed_in_playlist_page(win, secrets, [Playlist("1", "Deep House"), Playlist("2", "Drum & Bass"),
+                                                  Playlist("3", "Café Vibes"), Playlist("4", "house party")])
+    assert page.playlist_count.text() == "4 of 4 playlists"
+    page.playlist_search.setText("HOUSE")
+    shown = [page.playlist_list.item(r).text() for r in range(4) if not page.playlist_list.item(r).isHidden()]
+    assert shown == ["Deep House", "house party"] and page.playlist_count.text() == "2 of 4 playlists"
+    page.playlist_search.setText("cafe")  # accent-insensitive
+    assert page.playlist_count.text() == "1 of 4 playlists"
+    page.playlist_search.setText("")
+    assert page.playlist_count.text() == "4 of 4 playlists"
+
+
+def _tracks_for_sorting():
+    return [
+        AppleTrack("i.0", "beta Song", "Zed", "Alpha LP", 200_000, position=0),
+        AppleTrack("i.1", "Alpha Tune", "amy", None, 65_000, position=1),
+        AppleTrack("i.2", "Gamma", "Bob", "Café", 1_000_000, position=2),
+        AppleTrack("i.3", "delta", "Cat", "Omega", 9_000, position=3),
+        AppleTrack("i.4", "Epsilon", "Dan", "Alpha LP", 110_000, position=4),
+        AppleTrack("i.5", "Zeta", "Eve", None, 70_000, position=5),
+        AppleTrack("i.6", "Eta", "Fay", None, 3_600_000, position=6),
+        AppleTrack("i.7", "Theta", "Gus", None, 120_000, position=7),
+        AppleTrack("i.8", "Iota", "Hal", None, 130_000, position=8),
+        AppleTrack("i.9", "Kappa", "Ian", None, 140_000, position=9),
+        AppleTrack("i.10", "Lambda", "Jo", None, 150_000, position=10),
+    ]
+
+
+def _column(page, col):
+    p = page.track_proxy
+    return [p.index(r, col).data() for r in range(p.rowCount())]
+
+
+def test_track_search_counts_and_clear(env):
+    win, *_ = env
+    page = win.playlists
+    page._show_tracks(Playlist("p", "P"), _tracks_for_sorting())
+    assert page.track_count.text() == "11 of 11 tracks"
+    page.track_search.setText("alpha")  # title (Alpha Tune) and album (Alpha LP x2)
+    assert page.track_count.text() == "3 of 11 tracks"
+    page.track_search.setText("CAFE")  # accent-insensitive, album column
+    assert _column(page, 1) == ["Gamma"]
+    page.track_search.setText("zed")  # artist column
+    assert _column(page, 1) == ["beta Song"]
+    page.track_search.setText("nothing like this")
+    assert page.track_count.text() == "0 of 11 tracks"
+    page.track_search.setText("")
+    assert page.track_count.text() == "11 of 11 tracks" and page.track_proxy.rowCount() == 11
+
+
+def test_track_header_sort_numeric_and_text_and_ctx_order_untouched(env):
+    win, *_ = env
+    page = win.playlists
+    tracks = _tracks_for_sorting()
+    page._show_tracks(Playlist("p", "P"), tracks)
+    original_ids = [t.apple_id for t in win.ctx.tracks]
+    assert win.ctx.tracks is tracks
+
+    # '#' sorts numerically (10 and 11 after 9, not after 1)
+    page.track_proxy.sort(0, Qt.SortOrder.AscendingOrder)
+    assert _column(page, 0) == [str(n) for n in range(1, 12)]
+    page.track_proxy.sort(0, Qt.SortOrder.DescendingOrder)
+    assert _column(page, 0) == [str(n) for n in range(11, 0, -1)]
+
+    # Duration sorts by time, not by the "m:ss" text
+    page.track_proxy.sort(4, Qt.SortOrder.AscendingOrder)
+    assert _column(page, 4)[:3] == ["0:09", "1:05", "1:10"] and _column(page, 4)[-1] == "60:00"
+    page.track_proxy.sort(4, Qt.SortOrder.DescendingOrder)
+    assert _column(page, 4)[0] == "60:00" and _column(page, 4)[-1] == "0:09"
+
+    # text is case-insensitive: "Alpha" < "beta" < "delta" < "Epsilon"
+    page.track_proxy.sort(1, Qt.SortOrder.AscendingOrder)
+    assert _column(page, 1)[:4] == ["Alpha Tune", "beta Song", "delta", "Epsilon"]
+    page.track_proxy.sort(2, Qt.SortOrder.AscendingOrder)
+    assert _column(page, 2)[:3] == ["amy", "Bob", "Cat"]
+
+    # never touches the stored order
+    assert [t.apple_id for t in win.ctx.tracks] == original_ids and win.ctx.tracks is tracks
+
+
+def test_clicking_header_toggles_sort_and_shows_indicator(env):
+    win, *_ = env
+    page = win.playlists
+    page._show_tracks(Playlist("p", "P"), _tracks_for_sorting())
+    hdr = page.track_table.horizontalHeader()
+    assert hdr.sortIndicatorSection() == -1 and _column(page, 0)[:2] == ["1", "2"]  # Apple order by default
+    hdr.setSortIndicator(4, Qt.SortOrder.AscendingOrder)  # what a header click does
+    assert _column(page, 4)[0] == "0:09"
+    hdr.setSortIndicator(4, Qt.SortOrder.DescendingOrder)  # clicking again reverses
+    assert _column(page, 4)[0] == "60:00"
+    assert hdr.sortIndicatorSection() == 4 and hdr.isSortIndicatorShown()
+
+
+def test_sorting_and_filtering_do_not_change_what_is_searched(env):
+    win, *_ = env
+    page = win.playlists
+    page._show_tracks(Playlist("p", "P"), _tracks_for_sorting())
+    page.track_proxy.sort(1, Qt.SortOrder.DescendingOrder)
+    page.track_search.setText("a")
+    assert [t.position for t in win.ctx.tracks] == list(range(11))
+    assert [t.position for t in page.track_model.tracks] == list(range(11))
 
 
 def test_browse_picks_any_folder_and_validates(env, monkeypatch, tmp_path):
     win, _s, _sec, root = env
-    from djimport.ui import apple_page
+    from djimport.ui import destination_page
 
-    page = win.apple
-    page.ctx.tracks = [AppleTrack("i.0", "S", "A")]
+    page = win.destination
     chosen = tmp_path / "Anywhere" / "My New Library"  # does not exist: created only at import
     seen = {}
 
@@ -155,16 +382,16 @@ def test_browse_picks_any_folder_and_validates(env, monkeypatch, tmp_path):
         seen["caption"] = caption
         return str(chosen).replace("\\", "/")  # Qt returns forward slashes
 
-    monkeypatch.setattr(apple_page.QFileDialog, "getExistingDirectory", staticmethod(fake_dialog))
+    monkeypatch.setattr(destination_page.QFileDialog, "getExistingDirectory", staticmethod(fake_dialog))
     page.browse_btn.click()
     assert "download location" in seen["caption"].lower()
     path, err = page.chosen_destination()
     assert err is None and path == str(chosen.resolve())
-    assert page.dest_edit.text() == os.path.normpath(str(chosen)) and page.continue_btn.isEnabled()
+    assert page.dest_edit.text() == os.path.normpath(str(chosen)) and win.ctx.destination == path
     assert not chosen.exists()
 
     # a cancelled dialog changes nothing
-    monkeypatch.setattr(apple_page.QFileDialog, "getExistingDirectory", staticmethod(lambda *a: ""))
+    monkeypatch.setattr(destination_page.QFileDialog, "getExistingDirectory", staticmethod(lambda *a: ""))
     page.browse_btn.click()
     assert page.dest_edit.text() == os.path.normpath(str(chosen))
 
@@ -172,12 +399,22 @@ def test_browse_picks_any_folder_and_validates(env, monkeypatch, tmp_path):
     for bad in (win.ctx.settings.slskd_downloads_dir, str(Path(win.ctx.settings.slskd_downloads_dir) / "OLD")):
         page.set_destination(bad)
         assert page.chosen_destination()[0] is None and page.dest_error.text()
-        assert not page.continue_btn.isEnabled()
+        assert win.ctx.destination is None
+
+
+def test_destination_requires_downloads_dir_in_settings(env):
+    win, *_ = env
+    win.ctx.settings.slskd_downloads_dir = ""
+    win.destination.dest_edit.setText(str(env[3] / "House"))
+    path, err = win.destination.chosen_destination()
+    assert path is None and "Settings" in err
+    win.destination._dest_changed()
+    assert "Settings" in win.destination.dest_error.text()
 
 
 def test_recent_destinations_listed_selectable_and_remembered_on_approval(env, tmp_path):
     win, store, _sec, root = env
-    page = win.apple
+    page = win.destination
     older, newer = tmp_path / "Lib A", tmp_path / "Lib B"
     win.ctx.settings.recent_destinations = [str(newer), str(older)]
     page.refresh_destinations()
@@ -253,7 +490,7 @@ def test_rejected_candidates_not_selectable_alternatives_are(env):
     iid, dest, results, c = synthetic(store, root)
     rp = win.review
     rp.set_results(results, dest)
-    rp.view.setCurrentIndex(rp.model.index(0, 0))
+    rp.view.setCurrentIndex(rp.proxy.index(0, 0))
     roles = {}
     for r in range(rp.detail.rowCount()):
         it = rp.detail.item(r, 0)
@@ -360,8 +597,8 @@ def test_sign_out_clears_stored_session(env):
     win, _store, secrets, _root = env
     secrets.set(APPLE_DEVELOPER_TOKEN, "synthetic-dev")
     secrets.set(APPLE_MEDIA_USER_TOKEN, "synthetic-user")
-    win.apple._show_login = lambda msg: win.apple.status.setText(msg)  # avoid loading Apple
-    win.apple.sign_out()
+    win.service.show_login = lambda msg: win.service.status.setText(msg)  # avoid loading Apple
+    win.service.sign_out()
     assert secrets.get(APPLE_DEVELOPER_TOKEN) is None and secrets.get(APPLE_MEDIA_USER_TOKEN) is None
 
 
@@ -459,7 +696,7 @@ def test_resume_most_recent_import_locks_when_approved(env, monkeypatch):
     assert win.review.model.rowCount() == 5
     assert win.review.model.locked
     assert win.ctx.approval_id is not None
-    assert win.stack.currentIndex() == 3
+    assert win.stack.currentIndex() == 5  # step 5: downloads
     win.transfers.stop()
 
 
@@ -530,3 +767,75 @@ def test_transfers_auto_import_off_waits_for_manual_button(env, monkeypatch):
     win.transfers.import_btn.click()
     assert len(calls) == 1 and win.transfers.import_btn.isEnabled()
     win.transfers.stop()
+
+
+# ---------------------------------------------------------------- review table: header sorting keeps row identity
+
+
+def test_review_header_sort_keeps_checkbox_and_candidate_mapping(env, monkeypatch):
+    win, store, _sec, root = env
+    iid, dest, results, c = synthetic(store, root)
+    win.ctx.import_id = iid
+    rp = win.review
+    rp.set_results(results, dest)
+    m, px = rp.model, rp.proxy
+    assert px.rowCount() == 5
+
+    px.sort(review_page.C_TITLE, Qt.SortOrder.DescendingOrder)  # Song 4, 3, 2, 1, 0
+    assert [px.index(r, review_page.C_TITLE).data() for r in range(5)] == [f"Song {n}" for n in (4, 3, 2, 1, 0)]
+    # numeric: '#' ascending/descending and Dur
+    px.sort(review_page.C_POS, Qt.SortOrder.AscendingOrder)
+    assert [px.index(r, review_page.C_POS).data() for r in range(5)] == [1, 2, 3, 4, 5]
+    px.sort(review_page.C_TITLE, Qt.SortOrder.DescendingOrder)
+
+    # tick the flagged track (Song 1) through the sorted view: it is proxy row 3
+    idx = px.index(3, review_page.C_USE)
+    assert px.index(3, review_page.C_TITLE).data() == "Song 1"
+    assert px.setData(idx, Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
+    assert m.rows[1].checked and m.counts()["checked"] == 3
+    # an unresolved row (Song 2, proxy row 2) still cannot be ticked
+    assert not px.setData(px.index(2, review_page.C_USE), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
+
+    # choosing the detail view of a clicked sorted row shows THAT track's candidates
+    rp.view.setCurrentIndex(px.index(4, 0))  # Song 0 (has alternatives)
+    assert "Song 0" in rp.detail_title.text()
+    roles = {rp.detail.item(r, 0).text().split()[0] for r in range(rp.detail.rowCount())}
+    assert {"best", "alternative", "rejected"} <= roles
+    for r in range(rp.detail.rowCount()):
+        if rp.detail.item(r, 0).text().startswith("alternative"):
+            rp.detail.selectRow(r)
+    assert rp.use_btn.isEnabled()
+    rp.use_btn.click()
+    assert m.rows[0].chosen == c["alt"] and m.rows[1].chosen == c["flagged"]
+
+    # what would be queued is independent of the sort order and carries the right peers
+    items = {i.apple_id: i.username for i in m.selection_items()}
+    assert items == {"i.0": "u3", "i.1": "u2", "i.4": "u5"}
+    px.sort(review_page.C_USE, Qt.SortOrder.AscendingOrder)
+    assert {i.apple_id: i.username for i in m.selection_items()} == items
+    assert [r.result.track.apple_id for r in m.rows] == [f"i.{n}" for n in range(5)]  # source order unchanged
+    rp.view.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+    px.sort(-1)
+    assert [px.index(r, review_page.C_POS).data() for r in range(5)] == [1, 2, 3, 4, 5]
+
+
+def test_review_sort_confirm_uses_checked_rows_only(env, monkeypatch):
+    win, store, _sec, root = env
+    iid, dest, results, c = synthetic(store, root)
+    win.ctx.import_id = iid
+    win.review.set_results(results, dest)
+    win.review.proxy.sort(review_page.C_PEER, Qt.SortOrder.DescendingOrder)
+    svc, created, asked = wire_confirm(monkeypatch, win, True)
+    win.review.confirm_download()
+    assert [e["username"] for e in asked[0]] == ["u1", "u5"]  # source order, exactly the 2 ticked files
+    assert len(created) == 1 and len(svc.calls) == 1
+
+
+def test_resume_shows_tracks_destination_and_unlocks_steps(env):
+    win, store, _sec, root = env
+    iid, dest, results, c = synthetic(store, root)
+    win.resume_last_import()
+    assert win.ctx.destination == dest and win.destination.dest_edit.text() == dest
+    assert win.playlists.track_model.rowCount() == 5
+    assert win.stack.currentIndex() == 4  # review (results exist, no approval)
+    assert win.sidebar.step_enabled(3) and not win.sidebar.step_enabled(4)

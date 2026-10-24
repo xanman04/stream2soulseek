@@ -33,6 +33,7 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 - The user wants Apple sign-in contained inside the app window, then playlist browsing/selection in native controls. Do not silently substitute an external browser or require a share link as the normal workflow.
 - Public/open-source release on GitHub was considered and then deferred because of music-download legal concerns. Develop locally first; do not publish, push, or create a public repository without new authorization.
 - The app must stay general, not tailored to the owner's folders: the user picks any download location, and personal paths are never defaults or requirements.
+- Spotify and SoundCloud are planned as further playlist sources (metadata only, through `src/djimport/sources/`). Research, blockers and a suggested order are in `docs/research/streaming-services.md`.
 - Other website sources are a later phase. Initially report tracks unavailable on Soulseek rather than adding external downloading.
 - AI is optional. Deterministic matching and review should enforce the rules; no paid AI dependency is required for the core workflow.
 

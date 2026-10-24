@@ -32,21 +32,39 @@ otherwise set its path in Settings.
 
 ## Workflow
 
-1. **Apple Music** - sign in inside the app, pick one playlist and a **download location**: press
-   **Browse...** (you may create a new folder there) or reuse one from the recent-locations list. There is no
-   default. The location may be any folder except the slskd downloads folder (or anything inside it, including
-   its archive folder), a drive root, or the app's own data folder. Chosen locations are remembered (10 most
-   recent) once an approval is confirmed.
-2. **Search** - checks slskd is connected, then searches with live per-track status. Cancellable.
-3. **Review** - every track gets a row (proposed / unresolved / skipped) with peer, full remote path,
-   version tier, format, bitrate, size and library status. Flagged rows start unchecked. Alternatives can be
-   chosen; rejected candidates cannot. Confirming shows every file, then creates an approval and queues
-   exactly those files.
-4. **Transfers** - progress, retry (failed, same file) and cancel. **Import completed files** verifies
+The window has a sidebar with three parts: **Streaming services** (Apple Music; Spotify and SoundCloud are
+shown greyed out as "coming soon"), the **Soulseek** login status with a **Log in...** button, and the numbered
+**Workflow**. Every workflow page starts with its title and a one-sentence explanation and ends with a
+**Next: ...** button that is enabled only when that step is done (a short hint says what is missing). Steps whose
+earlier steps are not finished are greyed out in the sidebar; finished steps show a check mark, and you can always
+go back.
+
+**Streaming services - Apple Music.** Select it in the sidebar to sign in inside the app (Apple's own page), see
+the connection state ("signed in" / "not signed in") and sign out. On first start without a session this page
+opens by itself; step 1 shows a message with a button to it while no service is connected.
+
+1. **Choose playlist** - pick the source (only connected services are listed), then a playlist. Type in the
+   playlist search box to filter by name ("n of m playlists"). Clicking a playlist previews its tracks; the track
+   search box filters title, artist and album ("n of m tracks"), and clicking a column header sorts by it (click
+   again to reverse; `#` and Duration sort numerically). Searching and sorting only change the preview: the
+   playlist order that is searched and imported is always Apple's. **Resume most recent import** is also here.
+2. **Choose download location** - press **Browse...** (you may create a new folder there) or reuse one from the
+   recent-locations list. There is no default. The location may be any folder except the slskd downloads folder
+   (or anything inside it, including its archive folder), a drive root, or the app's own data folder. Chosen
+   locations are remembered (10 most recent) once an approval is confirmed.
+3. **Find on Soulseek** - checks slskd is connected, then searches with live per-track status. Cancellable.
+4. **Review & confirm** - every track gets a row (proposed / unresolved / skipped) with peer, full remote path,
+   version tier, format, bitrate, size and library status; click a header to sort the table (selections stay
+   with their track). Flagged rows start unchecked. Alternatives can be chosen; rejected candidates cannot.
+   Confirming shows every file, then creates an approval and queues exactly those files.
+5. **Downloads & import** - progress, retry (failed, same file) and cancel. **Import completed files** verifies
    (size, codec, bitrate) and copies **just that track** into the download location, renamed to
    `Title (Version) - Artist.ext`. Conflicts and invalid files are reported, never resolved automatically.
    With **Settings > auto import** on (the default) this happens by itself after every refresh; **Process
    completed now** does the same on demand.
+
+New playlist sources implement `djimport.sources.base.PlaylistSource` (see `sources/apple.py`) and are added to
+`AppContext.playlist_sources()`; the step 1 source selector then lists them once they are connected.
 
 ### Automatic import and archive
 

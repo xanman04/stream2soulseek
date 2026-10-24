@@ -1,6 +1,19 @@
 from __future__ import annotations
 
+import unicodedata
+
 from PySide6.QtWidgets import QHeaderView, QTableWidget, QTableWidgetItem, QWidget, QMessageBox
+
+
+SORT_ROLE = 0x0100 + 1  # Qt.UserRole + 1: value used for header sorting (numbers stay numbers)
+
+
+def fold(text: str | None) -> str:
+    """Case- and accent-insensitive form used for searching and text sorting."""
+    if not text:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
 
 
 def fmt_duration_ms(ms: int | None) -> str:

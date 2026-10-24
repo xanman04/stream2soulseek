@@ -53,6 +53,12 @@ class AppContext:
 
     # ---------------------------------------------------------------- services
 
+    def playlist_sources(self) -> list:
+        """All playlist sources the app knows (connected or not). Spotify/SoundCloud plug in here later."""
+        from ..sources import AppleSource
+
+        return [AppleSource(self.secrets)]
+
     def slskd_client(self, *, url: str | None = None, api_key: str | None = None) -> SlskdClient:
         key = api_key if api_key else self.secrets.get(SLSKD_API_KEY)
         if not key:
