@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from djimport import config
-from djimport.matching import evaluate, format_rank, match, request_exclusion
-from djimport.matching.formats import describe_policy
-from djimport.models import (
+from s2s import config
+from s2s.matching import evaluate, format_rank, match, request_exclusion
+from s2s.matching.formats import describe_policy
+from s2s.models import (
     AppleTrack, FormatRule, ImportOutcome, MatchPolicy, MatchStatus, RemoteFile, Settings, Tier,
     TransferState, TransferStatus,
 )
-from djimport.organize import import_file
+from s2s.organize import import_file
 
 EXACT, EXT, REJ = Tier.EXACT, Tier.EXTENDED_FALLBACK, Tier.REJECTED
 
@@ -169,7 +169,7 @@ def test_duration_tolerance_is_configurable():
 # ------------------------------------------------------------------ persistence
 
 def test_policy_round_trips_through_settings_json(tmp_path, monkeypatch):
-    monkeypatch.setenv("DJIMPORT_HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("S2S_HOME", str(tmp_path / "h"))
     p = MatchPolicy(formats=[FormatRule("flac"), FormatRule("mp3", 256, True), FormatRule("wav")],
                     version_mode="exact_only", tier_before_format=False, exclude_live=False,
                     duration_tolerance_s=30, skip_flagged_by_default=False)
@@ -181,7 +181,7 @@ def test_policy_round_trips_through_settings_json(tmp_path, monkeypatch):
 
 
 def test_old_settings_json_without_policy_loads_defaults(tmp_path, monkeypatch):
-    monkeypatch.setenv("DJIMPORT_HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("S2S_HOME", str(tmp_path / "h"))
     config.settings_path().write_text('{"slskd_downloads_dir": "D:\\\\dl"}', encoding="utf-8")
     s = config.load_settings()
     assert s.match_policy == MatchPolicy() and s.slskd_downloads_dir == "D:\\dl"

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from djimport.apple.client import AppleAuthError, AppleError, AppleMusicClient
+from s2s.apple.client import AppleAuthError, AppleError, AppleMusicClient
 
 DEV, USER = "test-dev-token", "test-user-token"
 

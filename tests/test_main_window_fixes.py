@@ -14,11 +14,11 @@ try:
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"Qt/WebEngine unavailable: {type(exc).__name__}", allow_module_level=True)
 
-from djimport import config
-from djimport.models import Settings
-from djimport.secretstore import SecretStore
-from djimport.store import Store
-from djimport.ui import workers
+from s2s import config
+from s2s.models import Settings
+from s2s.secretstore import SecretStore
+from s2s.store import Store
+from s2s.ui import workers
 
 
 class FakeService:
@@ -33,7 +33,7 @@ class FakeService:
 def win(tmp_path, monkeypatch):
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(workers, "RUN_INLINE", True)
-    from djimport.ui.main_window import MainWindow
+    from s2s.ui.main_window import MainWindow
 
     store = Store(config.db_path())
     secrets = SecretStore(tmp_path / "sec", protect=lambda b: b, unprotect=lambda b: b)
@@ -53,7 +53,7 @@ def test_every_stacked_page_paints_its_own_background(win):
 
 
 def test_resumed_unconfirmed_review_must_be_searched_again(win):
-    from djimport.models import AppleTrack, MatchResult, MatchStatus, Playlist
+    from s2s.models import AppleTrack, MatchResult, MatchStatus, Playlist
 
     store = win.ctx.store
     iid = store.create_import(Playlist("p.1", "Test"), r"C:\Somewhere\House")

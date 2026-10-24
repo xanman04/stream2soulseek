@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from djimport.models import AppleTrack, ImportOutcome, Tier, TransferState, TransferStatus
-from djimport.organize import (
+from s2s.models import AppleTrack, ImportOutcome, Tier, TransferState, TransferStatus
+from s2s.organize import (
     DownloadNotFoundError, build_final_name, find_existing, import_file, locate_download, probe_audio,
     sanitize_filename,
 )
@@ -146,7 +146,7 @@ def test_probe_audio_args_no_shell(tmp_path):
 
 
 def test_probe_failure(tmp_path):
-    from djimport.organize import ProbeError
+    from s2s.organize import ProbeError
     f = tmp_path / "a.mp3"
     f.write_bytes(b"x")
     with pytest.raises(ProbeError):
@@ -158,7 +158,7 @@ def test_find_existing(tmp_path):
     lib.mkdir()
     (lib / "Song (Bob Remix) - Some Artist.mp3").write_bytes(b"1")
     (lib / "Other - Some Artist.mp3").write_bytes(b"1")
-    (lib / "SONG (bob remix) - SOME ARTIST.flac.djimport-partial").write_bytes(b"1")
+    (lib / "SONG (bob remix) - SOME ARTIST.flac.s2s-partial").write_bytes(b"1")
     got = find_existing(str(lib), TRACK)
     assert [p.name for p in got] == ["Song (Bob Remix) - Some Artist.mp3"]
     assert find_existing(str(tmp_path / "missing"), TRACK) == []
@@ -277,7 +277,7 @@ def test_no_overwrite_semantics(tmp_path):
 def test_stale_partial_does_not_block(tmp_path):
     dl, dest, _ = make(tmp_path)
     dest.mkdir(parents=True)
-    (dest / "Song (Bob Remix) - Some Artist.mp3.djimport-partial").write_bytes(b"junk")
+    (dest / "Song (Bob Remix) - Some Artist.mp3.s2s-partial").write_bytes(b"junk")
     r = run_import(tmp_path, dl, dest)
     assert r.outcome == ImportOutcome.COPIED
     assert Path(r.final_path).read_bytes() == DATA

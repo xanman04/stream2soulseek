@@ -6,9 +6,9 @@ import uuid
 import httpx
 import pytest
 
-from djimport.models import AppleTrack
-from djimport.slskd.client import SlskdClient
-from djimport.slskd.search import SearchCancelled, build_queries, run_search
+from s2s.models import AppleTrack
+from s2s.slskd.client import SlskdClient
+from s2s.slskd.search import SearchCancelled, build_queries, run_search
 
 KEY = "synthetic-test-key-0123456789"
 
@@ -107,7 +107,7 @@ def test_busy_slskd_is_retried_until_free():
 
 
 def test_busy_beyond_wait_limit_raises():
-    from djimport.slskd.client import SlskdBusyError
+    from s2s.slskd.client import SlskdBusyError
 
     fake = BusyThenFree({}, busy_times=10_000)
     now = [0.0]

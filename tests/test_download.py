@@ -1,12 +1,12 @@
 import pytest
 
-from djimport.approval import ApprovalError, create_approval
-from djimport.download import DownloadError, DownloadService
-from djimport.models import (
+from s2s.approval import ApprovalError, create_approval
+from s2s.download import DownloadError, DownloadService
+from s2s.models import (
     AppleTrack, Candidate, MatchResult, MatchStatus, Playlist, RemoteFile, SelectionItem, Tier, TransferState,
     TransferStatus,
 )
-from djimport.store import Store
+from s2s.store import Store
 
 
 class FakeClient:

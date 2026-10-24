@@ -14,15 +14,15 @@ try:
 except Exception as exc:  # pragma: no cover
     pytest.skip(f"Qt unavailable: {type(exc).__name__}", allow_module_level=True)
 
-from djimport import config
-from djimport.models import AppleTrack, Candidate, FormatRule, MatchPolicy, MatchResult, MatchStatus, RemoteFile, Settings, Tier
-from djimport.secretstore import SecretStore
-from djimport.store import Store
-from djimport.ui import workers
-from djimport.ui.context import AppContext
-from djimport.ui.review_page import ReviewPage
-from djimport.ui.search_page import SearchPage
-from djimport.ui.settings_dialog import SettingsDialog
+from s2s import config
+from s2s.models import AppleTrack, Candidate, FormatRule, MatchPolicy, MatchResult, MatchStatus, RemoteFile, Settings, Tier
+from s2s.secretstore import SecretStore
+from s2s.store import Store
+from s2s.ui import workers
+from s2s.ui.context import AppContext
+from s2s.ui.review_page import ReviewPage
+from s2s.ui.search_page import SearchPage
+from s2s.ui.settings_dialog import SettingsDialog
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +37,7 @@ def inline_workers(monkeypatch):
 
 @pytest.fixture
 def ctx(tmp_path, monkeypatch, qapp):
-    monkeypatch.setenv("DJIMPORT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("S2S_HOME", str(tmp_path / "home"))
     store = Store(config.db_path())
     secrets = SecretStore(tmp_path / "sec", protect=lambda b: b, unprotect=lambda b: b)
     return AppContext(store, secrets, Settings(slskd_downloads_dir=str(tmp_path / "dl")))
@@ -97,7 +97,7 @@ def test_dialog_lossy_bitrate_and_vbr_per_format(ctx):
 
 def test_dialog_refuses_to_save_with_no_file_type(ctx, monkeypatch):
     errors = []
-    monkeypatch.setattr("djimport.ui.settings_dialog.show_error", lambda *a: errors.append(a))
+    monkeypatch.setattr("s2s.ui.settings_dialog.show_error", lambda *a: errors.append(a))
     dlg = SettingsDialog(ctx)
     for i in range(dlg.rules.formats.count()):
         dlg.rules.formats.item(i).setCheckState(Qt.CheckState.Unchecked)

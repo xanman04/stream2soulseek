@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from djimport.approval import ApprovalError, create_approval, fingerprint, verify_approval
-from djimport.models import AppleTrack, Candidate, MatchResult, MatchStatus, Playlist, RemoteFile, SelectionItem, Tier
-from djimport.store import Store
+from s2s.approval import ApprovalError, create_approval, fingerprint, verify_approval
+from s2s.models import AppleTrack, Candidate, MatchResult, MatchStatus, Playlist, RemoteFile, SelectionItem, Tier
+from s2s.store import Store
 
 
 def cand(user, fn, size, tier=Tier.EXACT, rank=1):
@@ -135,7 +135,7 @@ def test_downloads_dir_required(env):
 def test_inside_app_dir_rejected(env, monkeypatch, tmp_path):
     s, iid, root = env
     home = tmp_path / "apphome"
-    monkeypatch.setenv("DJIMPORT_HOME", str(home))
+    monkeypatch.setenv("S2S_HOME", str(home))
     with pytest.raises(ApprovalError, match="data folder"):
         create_approval(s, iid, [item(1, "x\\1.mp3", 10, home / "lib")], downloads_dir=str(root / DL))
 

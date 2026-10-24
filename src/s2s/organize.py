@@ -19,7 +19,7 @@ from pathlib import Path
 from .matching.formats import EXTENSIONS, verify_downloaded
 from .models import AppleTrack, ImportOutcome, ImportResult, MatchPolicy, Tier, TransferState, TransferStatus
 
-PARTIAL_SUFFIX = ".djimport-partial"
+PARTIAL_SUFFIX = ".s2s-partial"
 MAX_NAME_LEN = 180
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])$", re.IGNORECASE)

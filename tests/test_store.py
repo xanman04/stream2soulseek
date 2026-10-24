@@ -2,11 +2,11 @@ import threading
 
 import pytest
 
-from djimport.models import (
+from s2s.models import (
     AppleTrack, Approval, Candidate, ImportOutcome, ImportResult, MatchResult, MatchStatus, Playlist,
     RemoteFile, SelectionItem, Tier, TransferState, TransferStatus,
 )
-from djimport.store import Store, StoreError
+from s2s.store import Store, StoreError
 
 
 def cand(user="u1", fn=r"a\b\song.mp3", size=100, tier=Tier.EXACT, rank=1, **kw):
@@ -128,7 +128,7 @@ def test_schema_version_is_2_with_archives_table(store):
 def test_v1_database_migrates_without_losing_data(tmp_path):
     import sqlite3
 
-    from djimport.store import _SCHEMA
+    from s2s.store import _SCHEMA
 
     path = tmp_path / "old.db"
     conn = sqlite3.connect(path)
@@ -149,10 +149,23 @@ def test_v1_database_migrates_without_losing_data(tmp_path):
 
 
 def test_archive_record_roundtrip(store):
-    from djimport.models import ArchiveResult
+    from s2s.models import ArchiveResult
 
     r = ArchiveResult("peer", "src", "dst", moved=("a",), deduped=("b",), renamed=(("c", "c2"),))
     store.record_archive("ap1", r)
     store.record_archive("ap1", r)  # idempotent
     got = store.archives_for_approval("ap1")
     assert len(got) == 1 and got[0].moved == ("a",) and got[0].renamed == (("c", "c2"),)
+
+
+def test_legacy_app_dir_is_moved_once(tmp_path):
+    from s2s.config import migrate_legacy_dir
+
+    legacy = tmp_path / "DJImport"
+    (legacy / "secrets").mkdir(parents=True)
+    (legacy / "settings.json").write_text("{}")
+    new = tmp_path / "S2S"
+    assert migrate_legacy_dir(new) is True
+    assert (new / "settings.json").exists() and (new / "secrets").is_dir() and not legacy.exists()
+    legacy.mkdir()  # a stray old folder later is left alone once S2S exists
+    assert migrate_legacy_dir(new) is False and legacy.exists()

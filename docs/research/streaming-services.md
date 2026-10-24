@@ -5,7 +5,7 @@ tried against a real account yet. These services change their API rules often, s
 
 Goal: read a user's playlists and track metadata (title, artists, version text, duration) so the existing
 Soulseek search, review gate and import can run on them. The tracks themselves are never downloaded from
-these services. They plug in through the `PlaylistSource` interface in `src/djimport/sources/`.
+these services. They plug in through the `PlaylistSource` interface in `src/s2s/sources/`.
 
 ## Spotify
 
@@ -61,7 +61,7 @@ warning. Keep it as a last resort only.
 - **Sign-in:** OAuth 2.1 Authorization Code with PKCE (S256), using `secure.soundcloud.com/authorize` and
   `/oauth/token`.
   - Desktop apps are told to use a custom URL scheme as the redirect, for example
-    `djimport://soundcloud/callback`. Whether a loopback redirect is accepted needs checking.
+    `s2s://soundcloud/callback`. Whether a loopback redirect is accepted needs checking.
   - Access tokens last about 1 hour, and refresh tokens are single-use, so the app must save each new one.
   - Open question: does the token exchange require the client secret? If so, the secret can't be kept safe
     inside a desktop app sent to friends.

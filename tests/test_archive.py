@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from djimport.archive import ArchiveError, archive_peer_bundle
+from s2s.archive import ArchiveError, archive_peer_bundle
 
 NOW = lambda: datetime(2026, 10, 24, 12, 30, 5)  # noqa: E731
 
@@ -75,7 +75,7 @@ def test_non_empty_source_is_kept_when_something_cannot_move(tmp_path, monkeypat
     dl = tmp_path / "dl"
     write(dl / "peer" / "a.mp3", b"A")
     write(dl / "peer" / "b.mp3", b"B")
-    import djimport.archive as arch
+    import s2s.archive as arch
 
     real = arch._move_no_overwrite
 

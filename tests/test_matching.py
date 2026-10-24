@@ -1,11 +1,11 @@
-"""Table-driven tests for djimport.matching (offline, synthetic data only)."""
+"""Table-driven tests for s2s.matching (offline, synthetic data only)."""
 
 from __future__ import annotations
 
 import pytest
 
-from djimport.matching import evaluate, format_rank, match, normalise, parse_remote_filename, parse_title, request_exclusion
-from djimport.models import AppleTrack, MatchStatus, RemoteFile, Tier
+from s2s.matching import evaluate, format_rank, match, normalise, parse_remote_filename, parse_title, request_exclusion
+from s2s.models import AppleTrack, MatchStatus, RemoteFile, Tier
 
 EXACT, EXT, REJ = Tier.EXACT, Tier.EXTENDED_FALLBACK, Tier.REJECTED
 

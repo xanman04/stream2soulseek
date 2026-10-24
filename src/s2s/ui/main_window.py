@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
     def __init__(self, store: Store, secrets: SecretStore, settings: Settings, *, autostart: bool = True,
                  slskd_service: SlskdService | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("DJ Import")
+        self.setWindowTitle("S2S — Streaming to Soulseek")
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
         self.soulseek = SoulseekSession(slskd_service or SlskdService(settings, secrets), secrets, self)

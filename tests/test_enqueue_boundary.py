@@ -2,16 +2,16 @@ from pathlib import Path
 
 import pytest
 
-import djimport
-from djimport.approval import ApprovalError, create_approval
-from djimport.download import DownloadService
-from djimport.models import AppleTrack, Candidate, MatchResult, MatchStatus, Playlist, RemoteFile, SelectionItem, Tier
-from djimport.store import Store
+import s2s
+from s2s.approval import ApprovalError, create_approval
+from s2s.download import DownloadService
+from s2s.models import AppleTrack, Candidate, MatchResult, MatchStatus, Playlist, RemoteFile, SelectionItem, Tier
+from s2s.store import Store
 from test_download import FakeClient
 
 
 def test_enqueue_only_in_allowed_modules():
-    src = Path(djimport.__file__).parent
+    src = Path(s2s.__file__).parent
     allowed = {src / "download.py", src / "slskd" / "client.py"}
     offenders = [
         p for p in src.rglob("*.py")
