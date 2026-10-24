@@ -1,4 +1,4 @@
-# This repository has its own ignores; C:\DJ\.gitignore does not protect it.
+# All project files live in this repository (C:\DJ\dev); C:\DJ itself holds only music and DJ folders.
 
 # Music and personal audio must never enter this repository
 *.mp3

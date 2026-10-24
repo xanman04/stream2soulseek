@@ -2,7 +2,27 @@
 
 Updated: 2026-10-24. Owner: Xander. Development workspace: `C:\DJ\dev`.
 
-This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. Parent instructions in `C:\DJ\AGENTS.md` also apply. This is a development plan, not evidence that the integrations work.
+This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. All project files live under `C:\DJ\dev`; the rest of `C:\DJ` is the user's music and DJ workspace, not part of the project. This is a development plan, not evidence that the integrations work.
+
+## Project-wide rules (formerly `C:\DJ\AGENTS.md`)
+
+Release and credentials:
+
+- Public release is deferred; develop a personal local desktop app first. Never hardcode, commit, package, log, or include real credentials in examples, screenshots, fixtures, exports, build artifacts, or releases.
+- Each user signs in independently. Never distribute a developer token harvested from a browser session, account cookies, passwords, Soulseek API keys, or an authenticated browser profile.
+- Keep authentication state outside the repository in a per-user application data directory. For Windows, use OS-protected secret storage and restrict access to any persistent browser profile; do not ship the upstream plaintext credential JSON behavior unchanged.
+- Use synthetic credentials for tests. Keep playlist exports and download/review manifests free of authentication data. Do not run live mutation tests on a user's Apple Music library.
+- Keep local session data and music out of Git. Ignores are only a first layer: before publishing, inspect tracked files, Git history, and the actual release package for secrets and personal data. Use an explicit release file allowlist; never archive the whole workspace or user profile.
+- If a credential enters Git history, remove it from the publication and revoke/rotate it; deleting the working copy alone is insufficient.
+- Preserve dependency license notices. Unofficial Apple API access needs a separate terms/legal assessment; an MIT license does not grant permission from Apple or music rightsholders.
+
+File workflow:
+
+- `C:\DJ\Tracks` contains separate flat libraries. New non-DnB playlists belong in a chosen sibling library, not automatically in `Tracks\DnB`.
+- Treat `Tracks\Soulseek` as raw download staging/archive. `collect_songs.sh` is deprecated and must not define the new workflow.
+- Search first and show every proposed file, version, format, bitrate, and unresolved track for review. Queue no downloads until the user explicitly confirms the reviewed selection. Changed selections need fresh confirmation.
+- Prefer exact requested versions, with an extended mix of the same remix only as fallback. Reject different remixes, radio edits, live recordings, and `[Mixed]` tracks. Prefer MP3 320 then FLAC within eligible version tiers.
+- Do not claim live authentication, complete playlist retrieval, downloading, or file organization works until independently verified. Preserve existing music during development.
 
 ## Goal and scope
 
@@ -27,10 +47,8 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 ## Current filesystem and library semantics
 
 ```text
-C:\DJ\
-  AGENTS.md
-  .gitignore
-  dev\                         application source and this handoff
+C:\DJ\                          user's DJ workspace; no project files at this level
+  dev\                         Git repo: all application source, docs, tests and this handoff
   Tracks\
     DnB\                       one existing flat music library
     Soulseek\
@@ -167,7 +185,7 @@ The user explicitly requires that personal credentials never become hardcoded or
 - Store secrets outside the repo in per-user app data with Windows-protected storage (e.g. Credential Manager/DPAPI). Restrict access to session/browser-profile files as well. Do not claim encryption without verification.
 - Never log tokens, cookies, Authorization headers, passwords or Soulseek keys. Scrub errors, diagnostic dumps, HTTP traces, screenshots and test fixtures.
 - Use synthetic accounts/tokens for automated tests. No real authenticated profiles, playlist exports, downloads or personal audio in source control or build packages.
-- `C:\DJ\.gitignore` already excludes current music, common credentials, sessions and artifacts. If `C:\DJ\dev` becomes its own repository, add its own exclusions: parent ignores do not protect a separate repository automatically.
+- `C:\DJ\dev` is its own Git repository; `C:\DJ\dev\.gitignore` excludes audio, credentials, sessions, local state and build artifacts. There is deliberately no repository or `.gitignore` at `C:\DJ`.
 - Use placeholder-only templates. Review tracked files, history and explicit release contents before any future publication; ignore rules are not retroactive or sufficient alone.
 - Public release and legal review are deferred. Do not imply that private development makes unauthorized downloading/sharing lawful, or treat a disclaimer as legal protection.
 
