@@ -29,6 +29,8 @@ class ApplePage(QWidget):
         self._login = None  # AppleLoginWidget, created lazily (WebEngine)
         self._playlists: list[Playlist] = []
         self._busy = False
+        self._track_cache: dict[str, list[AppleTrack]] = {}  # playlist id -> tracks, cleared on reload
+        self._resumed_dest: str | None = None  # destination of a resumed import shown in the table
 
         self.status = QLabel("Not signed in.")
         self.status.setWordWrap(True)
@@ -50,7 +52,6 @@ class ApplePage(QWidget):
         self.new_name.setVisible(False)
         self.dest_error = QLabel("")
         self.dest_error.setStyleSheet("color: #b00020;")
-        self.fetch_btn = QPushButton("Fetch tracks")
         self.continue_btn = QPushButton("Continue to Search")
         self.continue_btn.setEnabled(False)
 
@@ -62,9 +63,8 @@ class ApplePage(QWidget):
         ll.addWidget(self.dest_combo)
         ll.addWidget(self.new_name)
         ll.addWidget(self.dest_error)
-        ll.addWidget(self.fetch_btn)
 
-        self.track_info = QLabel("No tracks fetched yet.")
+        self.track_info = QLabel("Click a playlist to preview its tracks.")
         self.track_table = make_table(["#", "Title", "Artist", "Album", "Duration"])
         right = QWidget()
         rl = QVBoxLayout(right)
@@ -91,8 +91,8 @@ class ApplePage(QWidget):
         self.sign_out_btn.clicked.connect(self.sign_out)
         self.reload_btn.clicked.connect(self.load_playlists)
         self.resume_btn.clicked.connect(self.resume_requested)
-        self.fetch_btn.clicked.connect(self.fetch_tracks)
-        self.continue_btn.clicked.connect(self.tracks_ready)
+        self.playlist_list.currentItemChanged.connect(lambda *_: self.preview_tracks())
+        self.continue_btn.clicked.connect(self._continue)
         self.dest_combo.currentIndexChanged.connect(self._dest_changed)
         self.new_name.textChanged.connect(self._dest_changed)
         self.refresh_libraries()
@@ -114,6 +114,7 @@ class ApplePage(QWidget):
         self.new_name.setVisible(self.dest_combo.currentData() == NEW_LIBRARY)
         _, err = self.chosen_destination()
         self.dest_error.setText(err or "")
+        self._update_continue()
 
     def chosen_destination(self) -> tuple[str | None, str | None]:
         """(absolute path, None) or (None, error/hint). No default: the user must choose."""
@@ -153,6 +154,7 @@ class ApplePage(QWidget):
             return
         self.status.setText("Loading playlists...")
         self.reload_btn.setEnabled(False)
+        self._track_cache.clear()
 
         def work():
             with AppleMusicClient(dev, usr) as c:
@@ -221,9 +223,11 @@ class ApplePage(QWidget):
         if self._login is not None:
             self._login.clear_session()
         self._playlists = []
+        self._track_cache.clear()
+        self._resumed_dest = None
         self.playlist_list.clear()
         self.track_table.setRowCount(0)
-        self.track_info.setText("No tracks fetched yet.")
+        self.track_info.setText("Click a playlist to preview its tracks.")
         self.continue_btn.setEnabled(False)
         self.ctx.playlist = None
         self.ctx.tracks = []
@@ -235,64 +239,84 @@ class ApplePage(QWidget):
         it = self.playlist_list.currentItem()
         return it.data(Qt.ItemDataRole.UserRole) if it else None
 
-    def fetch_tracks(self) -> None:
+    def preview_tracks(self) -> None:
+        """Show the selected playlist's tracks; fetched in the background once, then cached."""
         pl = self.selected_playlist()
         if pl is None:
-            show_error(self, "Fetch tracks", "Choose a playlist first.")
             return
-        dest, err = self.chosen_destination()
-        if dest is None:
-            show_error(self, "Fetch tracks", err or "Choose a destination library.")
+        self._resumed_dest = None
+        cached = self._track_cache.get(pl.id)
+        if cached is not None:
+            self._show_tracks(pl, cached)
             return
         try:
             dev, usr = self._tokens()
         except Exception as exc:  # noqa: BLE001
-            show_error(self, "Fetch tracks", self.ctx.describe(exc))
+            show_error(self, "Load tracks", self.ctx.describe(exc))
             return
         if not (dev and usr):
             self._show_login("Sign in first.")
             return
-        self.fetch_btn.setEnabled(False)
-        self.track_info.setText("Fetching tracks...")
+        self.ctx.playlist, self.ctx.tracks = None, []
+        self.track_table.setRowCount(0)
+        self.track_info.setText(f"Loading tracks of '{pl.name}'...")
+        self._update_continue()
 
         def work():
             with AppleMusicClient(dev, usr) as c:
                 return c.get_playlist_tracks(pl.id)
 
-        run_async(self, work, lambda tr: self._tracks_loaded(pl, dest, tr), self._tracks_failed)
+        run_async(self, work, lambda tr: self._tracks_loaded(pl, tr), lambda e: self._tracks_failed(pl, e))
 
-    def _tracks_loaded(self, pl: Playlist, dest: str, tracks: list[AppleTrack]) -> None:
-        self.fetch_btn.setEnabled(True)
+    def _is_selected(self, pl: Playlist) -> bool:
+        cur = self.selected_playlist()
+        return cur is not None and cur.id == pl.id
+
+    def _tracks_loaded(self, pl: Playlist, tracks: list[AppleTrack]) -> None:
+        self._track_cache[pl.id] = tracks
+        if self._is_selected(pl):  # the user may have clicked another playlist meanwhile
+            self._show_tracks(pl, tracks)
+
+    def _show_tracks(self, pl: Playlist, tracks: list[AppleTrack]) -> None:
         self.ctx.playlist = pl
         self.ctx.tracks = tracks
-        self.ctx.destination = dest
         self.ctx.reset_import()
+        self._fill_table(tracks)
+        self.track_info.setText(f"{len(tracks)} tracks in '{pl.name}'.")
+        self._update_continue()
+
+    def _tracks_failed(self, pl: Playlist, exc: object) -> None:
+        if not self._is_selected(pl):
+            return
+        self.track_info.setText(f"Loading tracks of '{pl.name}' failed.")
+        if isinstance(exc, AppleAuthError):
+            self._playlists_failed(exc)
+        else:
+            show_error(self, "Load tracks", self.ctx.describe(exc))
+
+    def _fill_table(self, tracks: list[AppleTrack]) -> None:
         self.track_table.setRowCount(len(tracks))
         for r, t in enumerate(tracks):
             for c, text in enumerate([str(t.position + 1), t.name, t.artist, t.album or "",
                                       fmt_duration_ms(t.duration_ms)]):
                 self.track_table.setItem(r, c, item(text))
         self.track_table.resizeColumnsToContents()
-        self.track_info.setText(f"{len(tracks)} tracks in '{pl.name}'. Destination: {dest}")
-        self.continue_btn.setEnabled(bool(tracks))
 
-    def _tracks_failed(self, exc: object) -> None:
-        self.fetch_btn.setEnabled(True)
-        self.track_info.setText("Fetching tracks failed.")
-        if isinstance(exc, AppleAuthError):
-            self._playlists_failed(exc)
-        else:
-            show_error(self, "Fetch tracks", self.ctx.describe(exc))
+    def _update_continue(self) -> None:
+        has_tracks = bool(self.ctx.tracks)
+        has_dest = self._resumed_dest is not None or self.chosen_destination()[0] is not None
+        self.continue_btn.setEnabled(has_tracks and has_dest)
+
+    def _continue(self) -> None:
+        dest = self._resumed_dest or self.chosen_destination()[0]
+        if not self.ctx.tracks or dest is None:
+            return
+        self.ctx.destination = dest
+        self.tracks_ready.emit()
 
     def show_resumed(self, pl: Playlist, tracks: list[AppleTrack], dest: str) -> None:
         """Display a resumed import's tracks without contacting Apple."""
-        self._tracks_loaded_view(pl, tracks, dest)
-
-    def _tracks_loaded_view(self, pl: Playlist, tracks: list[AppleTrack], dest: str) -> None:
-        self.track_table.setRowCount(len(tracks))
-        for r, t in enumerate(tracks):
-            for c, text in enumerate([str(t.position + 1), t.name, t.artist, t.album or "",
-                                      fmt_duration_ms(t.duration_ms)]):
-                self.track_table.setItem(r, c, item(text))
+        self._resumed_dest = dest
+        self._fill_table(tracks)
         self.track_info.setText(f"Resumed: {len(tracks)} tracks in '{pl.name}'. Destination: {dest}")
-        self.continue_btn.setEnabled(bool(tracks))
+        self._update_continue()

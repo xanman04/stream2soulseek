@@ -94,6 +94,46 @@ def test_window_constructs_without_network_and_destination_not_defaulted(env):
     assert win.apple.sign_out_btn is not None
 
 
+def test_clicking_playlist_previews_tracks_and_caches(env, monkeypatch):
+    win, _store, secrets, root = env
+    from djimport.ui import apple_page
+
+    calls: list[str] = []
+
+    class FakeApple:
+        def __init__(self, *_a, **_k): ...
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+        def get_playlist_tracks(self, pid):
+            calls.append(pid)
+            return [AppleTrack(f"{pid}.{n}", f"{pid} song {n}", "Artist", position=n) for n in range(3)]
+
+    monkeypatch.setattr(apple_page, "AppleMusicClient", FakeApple)
+    secrets.set(APPLE_DEVELOPER_TOKEN, "test-dev")
+    secrets.set(APPLE_MEDIA_USER_TOKEN, "test-user")
+    page = win.apple
+    page._playlists_loaded([Playlist("p.a", "A"), Playlist("p.b", "B")])
+
+    page.playlist_list.setCurrentRow(0)  # no Fetch button: selection loads the preview
+    assert calls == ["p.a"] and page.track_table.rowCount() == 3
+    assert page.track_table.item(0, 1).text() == "p.a song 0"
+    assert not page.continue_btn.isEnabled()  # destination still required to continue
+
+    page.playlist_list.setCurrentRow(1)
+    page.playlist_list.setCurrentRow(0)
+    assert calls == ["p.a", "p.b"]  # A came from the cache
+    assert page.track_table.item(0, 1).text() == "p.a song 0"
+
+    combo = page.dest_combo
+    combo.setCurrentIndex(combo.findData("House"))
+    assert page.continue_btn.isEnabled()
+    fired = []
+    page.tracks_ready.connect(lambda: fired.append(True))
+    page.continue_btn.click()
+    assert fired and win.ctx.destination == str(root / "House")
+    assert win.ctx.playlist.id == "p.a"
+
+
 def test_new_library_name_is_validated_and_not_created(env):
     win, _s, _sec, root = env
     combo = win.apple.dest_combo
