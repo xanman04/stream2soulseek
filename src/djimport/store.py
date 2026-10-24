@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .models import (
     AppleTrack,
+    ArchiveResult,
     Approval,
     Candidate,
     ImportOutcome,
@@ -31,7 +32,7 @@ from .models import (
     TransferStatus,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE imports (
@@ -130,6 +131,22 @@ CREATE TABLE import_results (
 );
 """
 
+# v2: record of archived peer bundles (so a peer folder is never archived twice and the UI can show it)
+_SCHEMA_V2 = """
+CREATE TABLE archives (
+    approval_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    source_dir TEXT NOT NULL,
+    archive_dir TEXT NOT NULL,
+    moved_json TEXT NOT NULL,
+    deduped_json TEXT NOT NULL,
+    renamed_json TEXT NOT NULL,
+    nothing_to_archive INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (approval_id, username)
+);
+"""
+
 
 class StoreError(Exception):
     pass
@@ -190,7 +207,13 @@ class Store:
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if version == 0:
             with self._conn:
-                for stmt in _SCHEMA.split(";"):
+                for stmt in (_SCHEMA + _SCHEMA_V2).split(";"):
+                    if stmt.strip():
+                        self._conn.execute(stmt)
+                self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        elif version == 1:
+            with self._conn:
+                for stmt in _SCHEMA_V2.split(";"):
                     if stmt.strip():
                         self._conn.execute(stmt)
                 self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -396,6 +419,52 @@ class Store:
                 "SELECT * FROM import_results WHERE import_id=? ORDER BY rowid", (import_id,)
             ).fetchall()
         return [_import_result(r) for r in rows]
+
+    # ------------------------------------------------------------ archives
+
+    def record_archive(self, approval_id: str, result: ArchiveResult) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO archives VALUES (?,?,?,?,?,?,?,?,?)",
+                (approval_id, result.username, result.source_dir, result.archive_dir,
+                 json.dumps(list(result.moved)), json.dumps(list(result.deduped)),
+                 json.dumps([list(r) for r in result.renamed]), int(result.nothing_to_archive), utc_now()),
+            )
+
+    def archives_for_approval(self, approval_id: str) -> list[ArchiveResult]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM archives WHERE approval_id=? ORDER BY username", (approval_id,)
+            ).fetchall()
+        return [
+            ArchiveResult(
+                username=r["username"], source_dir=r["source_dir"], archive_dir=r["archive_dir"],
+                moved=tuple(json.loads(r["moved_json"])), deduped=tuple(json.loads(r["deduped_json"])),
+                renamed=tuple((a, b) for a, b in json.loads(r["renamed_json"])),
+                nothing_to_archive=bool(r["nothing_to_archive"]), source_removed=True,
+            )
+            for r in rows
+        ]
+
+    def peer_busy_elsewhere(self, username: str, exclude_approval_id: str) -> bool:
+        """True if another approval has a transfer for this peer that is unfinished, or finished but not
+        yet imported (its files may still be needed in the peer's folder)."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT t.state, r.outcome FROM transfers t
+                   JOIN approvals a ON a.id = t.approval_id
+                   LEFT JOIN import_results r ON r.import_id = a.import_id AND r.apple_id = t.apple_id
+                   WHERE t.approval_id <> ? AND t.username = ? COLLATE NOCASE""",
+                (exclude_approval_id, username),
+            ).fetchall()
+        done = (ImportOutcome.COPIED.value, ImportOutcome.ALREADY_PRESENT.value)
+        for r in rows:
+            if r["state"] in (TransferState.QUEUED.value, TransferState.IN_PROGRESS.value,
+                              TransferState.UNKNOWN.value, TransferState.NOT_QUEUED.value):
+                return True
+            if r["state"] == TransferState.SUCCEEDED.value and r["outcome"] not in done:
+                return True
+        return False
 
     def completed_apple_ids(self, destination: str) -> set[str]:
         """Apple ids already copied into (or identical to a file already in) this destination."""

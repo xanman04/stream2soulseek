@@ -54,7 +54,7 @@ def env(tmp_path, monkeypatch, qapp):
         (root / n).mkdir(parents=True)
     store = Store(config.db_path())
     secrets = SecretStore(tmp_path / "sec", protect=lambda b: b, unprotect=lambda b: b)
-    settings = Settings(tracks_root=str(root), slskd_downloads_dir=str(tmp_path / "dl"))
+    settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"))
     from djimport.ui.main_window import MainWindow
 
     win = MainWindow(store, secrets, settings, autostart=False)
@@ -84,14 +84,23 @@ def synthetic(store, root):
 
 def test_window_constructs_without_network_and_destination_not_defaulted(env):
     win, store, secrets, root = env
-    combo = win.apple.dest_combo
-    labels = [combo.itemText(i) for i in range(combo.count())]
-    assert "Soulseek" not in labels and "DnB" in labels and "House" in labels
-    assert labels[-1].startswith("New library")
-    assert combo.currentData() is None  # DnB is NOT the default
-    assert win.apple.chosen_destination()[0] is None
+    page = win.apple
+    assert page.dest_edit.text() == "" and page.dest_edit.isReadOnly()
+    assert page.chosen_destination()[0] is None  # no default: the user must pick
+    assert not hasattr(page, "dest_combo") and not hasattr(page, "new_name")
+    assert page.recent_combo.count() == 1 and not page.recent_combo.isEnabled()
     assert win.steps.count() == 4
     assert win.apple.sign_out_btn is not None
+
+
+def test_destination_requires_downloads_dir_in_settings(env):
+    win, *_ = env
+    win.ctx.settings.slskd_downloads_dir = ""
+    win.apple.dest_edit.setText(str(env[3] / "House"))
+    path, err = win.apple.chosen_destination()
+    assert path is None and "Settings" in err
+    win.apple._dest_changed()
+    assert "Settings" in win.apple.dest_error.text()
 
 
 def test_clicking_playlist_previews_tracks_and_caches(env, monkeypatch):
@@ -124,8 +133,7 @@ def test_clicking_playlist_previews_tracks_and_caches(env, monkeypatch):
     assert calls == ["p.a", "p.b"]  # A came from the cache
     assert page.track_table.item(0, 1).text() == "p.a song 0"
 
-    combo = page.dest_combo
-    combo.setCurrentIndex(combo.findData("House"))
+    page.set_destination(str(root / "House"))
     assert page.continue_btn.isEnabled()
     fired = []
     page.tracks_ready.connect(lambda: fired.append(True))
@@ -134,18 +142,87 @@ def test_clicking_playlist_previews_tracks_and_caches(env, monkeypatch):
     assert win.ctx.playlist.id == "p.a"
 
 
-def test_new_library_name_is_validated_and_not_created(env):
+def test_browse_picks_any_folder_and_validates(env, monkeypatch, tmp_path):
     win, _s, _sec, root = env
-    combo = win.apple.dest_combo
-    combo.setCurrentIndex(combo.count() - 1)
-    win.apple.new_name.setText("Soulseek")
-    assert win.apple.chosen_destination()[0] is None
-    win.apple.new_name.setText("a/b")
-    assert win.apple.chosen_destination()[0] is None
-    win.apple.new_name.setText("Garage")
-    path, err = win.apple.chosen_destination()
-    assert err is None and path == str(root / "Garage")
-    assert not (root / "Garage").exists()  # created only at import
+    from djimport.ui import apple_page
+
+    page = win.apple
+    page.ctx.tracks = [AppleTrack("i.0", "S", "A")]
+    chosen = tmp_path / "Anywhere" / "My New Library"  # does not exist: created only at import
+    seen = {}
+
+    def fake_dialog(parent, caption, start):
+        seen["caption"] = caption
+        return str(chosen).replace("\\", "/")  # Qt returns forward slashes
+
+    monkeypatch.setattr(apple_page.QFileDialog, "getExistingDirectory", staticmethod(fake_dialog))
+    page.browse_btn.click()
+    assert "download location" in seen["caption"].lower()
+    path, err = page.chosen_destination()
+    assert err is None and path == str(chosen.resolve())
+    assert page.dest_edit.text() == os.path.normpath(str(chosen)) and page.continue_btn.isEnabled()
+    assert not chosen.exists()
+
+    # a cancelled dialog changes nothing
+    monkeypatch.setattr(apple_page.QFileDialog, "getExistingDirectory", staticmethod(lambda *a: ""))
+    page.browse_btn.click()
+    assert page.dest_edit.text() == os.path.normpath(str(chosen))
+
+    # the slskd downloads folder (and its archive) are refused
+    for bad in (win.ctx.settings.slskd_downloads_dir, str(Path(win.ctx.settings.slskd_downloads_dir) / "OLD")):
+        page.set_destination(bad)
+        assert page.chosen_destination()[0] is None and page.dest_error.text()
+        assert not page.continue_btn.isEnabled()
+
+
+def test_recent_destinations_listed_selectable_and_remembered_on_approval(env, tmp_path):
+    win, store, _sec, root = env
+    page = win.apple
+    older, newer = tmp_path / "Lib A", tmp_path / "Lib B"
+    win.ctx.settings.recent_destinations = [str(newer), str(older)]
+    page.refresh_destinations()
+    assert [page.recent_combo.itemText(i) for i in range(page.recent_combo.count())] == \
+        ["-- recent locations --", str(newer), str(older)]
+    assert page.dest_edit.text() == ""  # listing recents never selects one
+    page.recent_combo.setCurrentIndex(2)
+    page.recent_combo.activated.emit(2)
+    assert page.dest_edit.text() == os.path.normpath(str(older))
+
+    # confirming an approval moves that folder to the front of the saved list
+    iid, dest, results, c = synthetic(store, root)
+    f = c["good"].file
+    from djimport.approval import create_approval
+    from djimport.models import SelectionItem
+
+    ap = create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, str(older))],
+                         downloads_dir=win.ctx.settings.slskd_downloads_dir)
+    win.review._queued(ap)
+    assert win.ctx.settings.recent_destinations[0] == str(older.resolve())
+    assert config.load_settings().recent_destinations[0] == str(older.resolve())
+    assert len(win.ctx.settings.recent_destinations) == 2
+
+
+def test_remember_destination_dedupes_and_caps_at_ten(tmp_path):
+    s = Settings()
+    for n in range(14):
+        config.remember_destination(s, str(tmp_path / f"d{n}"))
+    config.remember_destination(s, str(tmp_path / "D5"))  # case-insensitive duplicate on Windows
+    assert len(s.recent_destinations) == 10 and s.recent_destinations[0] == str(tmp_path / "D5")
+    assert len({os.path.normcase(d) for d in s.recent_destinations}) == 10
+
+
+def test_settings_defaults_and_old_settings_json_migrates(tmp_path, monkeypatch):
+    monkeypatch.setenv("DJIMPORT_HOME", str(tmp_path / "h"))
+    d = Settings()
+    assert d.slskd_downloads_dir == "" and d.archive_dir_name == "OLD" and d.auto_import is True
+    assert not hasattr(d, "tracks_root") and d.recent_destinations == []
+    config.settings_path().write_text(
+        '{"tracks_root": "C:\\\\DJ\\\\Tracks", "slskd_downloads_dir": "D:\\\\dl", "ffprobe_path": "", "bogus": 1}',
+        encoding="utf-8")
+    s = config.load_settings()
+    assert s.slskd_downloads_dir == "D:\\dl" and s.auto_import and s.archive_dir_name == "OLD"
+    import shutil
+    assert s.ffprobe_path == (shutil.which("ffprobe") or "")
 
 
 def test_review_defaults_and_selection_rules(env):
@@ -377,10 +454,79 @@ def test_resume_most_recent_import_locks_when_approved(env, monkeypatch):
     from djimport.models import SelectionItem
 
     f = c["good"].file
-    create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, dest)], tracks_root=str(root))
+    create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, dest)], downloads_dir=str(root / "Soulseek" / "complete"))
     win.resume_last_import()
     assert win.review.model.rowCount() == 5
     assert win.review.model.locked
     assert win.ctx.approval_id is not None
     assert win.stack.currentIndex() == 3
+    win.transfers.stop()
+
+
+# ---------------------------------------------------------------- transfers page: auto import + archive
+
+
+def _transfers_setup(env, monkeypatch, *, auto_import):
+    from djimport import workflow
+    from djimport.models import ArchiveResult
+
+    win, store, _sec, root = env
+    iid, dest, results, c = synthetic(store, root)
+    f = c["good"].file
+    from djimport.approval import create_approval
+    from djimport.models import SelectionItem, TransferState, TransferStatus
+
+    ap = create_approval(store, iid, [SelectionItem("i.0", f.username, f.filename, f.size, dest)],
+                         downloads_dir=win.ctx.settings.slskd_downloads_dir)
+    store.upsert_transfer(ap.id, "i.0", TransferStatus(f.username, f.filename, f.size, TransferState.SUCCEEDED))
+    ctx = win.ctx
+    ctx.settings.auto_import = auto_import
+    ctx.import_id, ctx.approval_id, ctx.fingerprint = iid, ap.id, ap.fingerprint
+
+    class FakeSvc:
+        def refresh(self, _aid):
+            return []
+
+    @contextlib.contextmanager
+    def fake_service(self):
+        yield FakeSvc()
+
+    class FakeClient:
+        closed = False
+
+        def close(self):
+            FakeClient.closed = True
+
+    calls = []
+
+    def fake_process(store_, approval_id, settings, *, client=None, **_k):
+        calls.append(client)
+        rep = workflow.ProcessReport()
+        rep.archived.append(ArchiveResult(f.username, "s", "d", moved=("a", "b")))
+        store_.record_archive(approval_id, rep.archived[0])
+        return rep
+
+    monkeypatch.setattr(AppContext, "download_service", fake_service)
+    monkeypatch.setattr(AppContext, "slskd_client", lambda self, **k: FakeClient())
+    monkeypatch.setattr(workflow, "process_completed", fake_process)
+    return win, calls, FakeClient
+
+
+def test_transfers_refresh_auto_processes_and_shows_archive_status(env, monkeypatch):
+    win, calls, FakeClient = _transfers_setup(env, monkeypatch, auto_import=True)
+    win.transfers.refresh()
+    assert len(calls) == 1 and calls[0] is not None and FakeClient.closed
+    t = win.transfers.archive_table
+    assert t.rowCount() == 1 and "Archived to OLD" in t.item(0, 1).text() and "2 moved" in t.item(0, 1).text()
+    win.transfers.stop()
+
+
+def test_transfers_auto_import_off_waits_for_manual_button(env, monkeypatch):
+    win, calls, _ = _transfers_setup(env, monkeypatch, auto_import=False)
+    win.transfers.refresh()
+    assert calls == []
+    assert win.transfers.import_btn.text() == "Process completed now"
+    win.transfers.import_btn.setEnabled(True)
+    win.transfers.import_btn.click()
+    assert len(calls) == 1 and win.transfers.import_btn.isEnabled()
     win.transfers.stop()

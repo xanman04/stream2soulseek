@@ -101,30 +101,30 @@ def test_build_final_name_fallback():
 
 def test_locate_primary_and_fallback(tmp_path):
     dl, _, p = make(tmp_path)
-    assert locate_download(str(dl), REMOTE, len(DATA)) == p.resolve()
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == p.resolve()
     other = dl / "deep" / "x" / "01 Song.mp3"
     other.parent.mkdir(parents=True)
     other.write_bytes(b"different-size")
-    assert locate_download(str(dl), REMOTE, len(DATA)) == p.resolve()
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == p.resolve()
     # layout differs: only recursive search finds it
     p.rename(dl / "moved.tmp")
     (dl / "moved.tmp").rename(dl / "deep" / "01 Song.mp3")
-    assert locate_download(str(dl), REMOTE, len(DATA)) == (dl / "deep" / "01 Song.mp3").resolve()
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == (dl / "deep" / "01 Song.mp3").resolve()
 
 
 def test_locate_errors(tmp_path):
     dl, _, p = make(tmp_path)
     with pytest.raises(DownloadNotFoundError):
-        locate_download(str(dl), REMOTE, len(DATA) + 1)
+        locate_download(str(dl), "user", REMOTE, len(DATA) + 1)
     with pytest.raises(DownloadNotFoundError):
-        locate_download(str(dl), "a\\..", 1)
+        locate_download(str(dl), "user", "a\\..", 1)
     (dl / "Album Dir" / "01 Song.mp3").unlink()
     (dl / "a").mkdir()
     (dl / "b").mkdir()
     (dl / "a" / "01 Song.mp3").write_bytes(DATA)
     (dl / "b" / "01 Song.mp3").write_bytes(DATA)
     with pytest.raises(DownloadNotFoundError):  # ambiguous
-        locate_download(str(dl), REMOTE, len(DATA))
+        locate_download(str(dl), "user", REMOTE, len(DATA))
 
 
 def test_locate_traversal_remote_name(tmp_path):
@@ -132,7 +132,7 @@ def test_locate_traversal_remote_name(tmp_path):
     outside = tmp_path / "secret.mp3"
     outside.write_bytes(DATA)
     with pytest.raises(DownloadNotFoundError):
-        locate_download(str(dl), "..\\secret.mp3", len(DATA))
+        locate_download(str(dl), "user", "..\\secret.mp3", len(DATA))
 
 
 def test_probe_audio_args_no_shell(tmp_path):
@@ -282,3 +282,50 @@ def test_stale_partial_does_not_block(tmp_path):
     assert r.outcome == ImportOutcome.COPIED
     assert Path(r.final_path).read_bytes() == DATA
     assert len(list(dest.iterdir())) == 1
+
+
+# ---------------------------------------------------------------- username layout / archive exclusion
+
+
+def test_locate_username_layout_preferred(tmp_path):
+    dl = tmp_path / "dl"
+    mine = dl / "user" / "Album Dir" / "01 Song.mp3"
+    old_style = dl / "Album Dir" / "01 Song.mp3"
+    for p in (mine, old_style):
+        p.parent.mkdir(parents=True)
+        p.write_bytes(DATA)
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == mine.resolve()
+    # another peer's folder with the same file name does not confuse the lookup
+    other = dl / "someone" / "Album Dir" / "01 Song.mp3"
+    other.parent.mkdir(parents=True)
+    other.write_bytes(DATA)
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == mine.resolve()
+
+
+def test_locate_old_layout_when_username_folder_missing(tmp_path):
+    dl, _, p = make(tmp_path)
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == p.resolve()
+
+
+def test_locate_recursive_excludes_archive(tmp_path):
+    dl = tmp_path / "dl"
+    archived = dl / "OLD" / "user" / "Album Dir" / "01 Song.mp3"
+    archived.parent.mkdir(parents=True)
+    archived.write_bytes(DATA)
+    with pytest.raises(DownloadNotFoundError):  # only an archived copy exists: not a download
+        locate_download(str(dl), "user", REMOTE, len(DATA))
+    live = dl / "elsewhere" / "deep" / "01 Song.mp3"
+    live.parent.mkdir(parents=True)
+    live.write_bytes(DATA)
+    assert locate_download(str(dl), "user", REMOTE, len(DATA)) == live.resolve()  # no ambiguity with OLD
+    # a peer literally named like the archive folder is never read from the archive via the fast path
+    assert locate_download(str(dl), "OLD", REMOTE, len(DATA)) == live.resolve()
+
+
+def test_locate_custom_archive_name(tmp_path):
+    dl = tmp_path / "dl"
+    archived = dl / "Done" / "user" / "Album Dir" / "01 Song.mp3"
+    archived.parent.mkdir(parents=True)
+    archived.write_bytes(DATA)
+    with pytest.raises(DownloadNotFoundError):
+        locate_download(str(dl), "user", REMOTE, len(DATA), archive_name="Done")

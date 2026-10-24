@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from .. import config
 from ..models import Settings
+from ..organize import sanitize_component
 from ..secretstore import SLSKD_API_KEY
 from .context import AppContext
 from .util import show_error
@@ -26,7 +27,10 @@ class SettingsDialog(QDialog):
         s = ctx.settings
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
-        self.tracks = QLineEdit(s.tracks_root)
+        self.downloads.setPlaceholderText("Required: the folder slskd downloads into")
+        self.archive = QLineEdit(s.archive_dir_name)
+        self.auto_import = QCheckBox("Import finished downloads and archive each peer folder automatically")
+        self.auto_import.setChecked(bool(s.auto_import))
         self.ffprobe = QLineEdit(s.ffprobe_path)
         self.timeout = QSpinBox()
         self.timeout.setRange(5, 300)
@@ -52,7 +56,8 @@ class SettingsDialog(QDialog):
         form.addRow("slskd API key:", self.key)
         form.addRow("", self.clear_key)
         form.addRow("slskd downloads folder:", self._with_browse(self.downloads, True))
-        form.addRow("Tracks root:", self._with_browse(self.tracks, True))
+        form.addRow("Archive subfolder:", self.archive)
+        form.addRow("", self.auto_import)
         form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
         form.addRow("Search timeout (s):", self.timeout)
         form.addRow("Parallel searches:", self.concurrency)
@@ -112,11 +117,14 @@ class SettingsDialog(QDialog):
         try:
             new: Settings = dataclasses.replace(
                 self.ctx.settings, slskd_url=self.url.text().strip(),
-                slskd_downloads_dir=self.downloads.text().strip(), tracks_root=self.tracks.text().strip(),
+                slskd_downloads_dir=self.downloads.text().strip(),
+                archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
                 search_concurrency=self.concurrency.value())
-            if not (new.slskd_url and new.slskd_downloads_dir and new.tracks_root):
-                raise ValueError("URL, downloads folder and tracks root are required.")
+            if not (new.slskd_url and new.slskd_downloads_dir):
+                raise ValueError("URL and the slskd downloads folder are required.")
+            if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):
+                raise ValueError("The archive subfolder must be a plain folder name such as OLD.")
             config.save_settings(new)
             if self.clear_key.isChecked():
                 self.ctx.secrets.delete(SLSKD_API_KEY)

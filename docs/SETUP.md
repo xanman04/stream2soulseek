@@ -21,10 +21,14 @@ live slskd yet.
    refuses non-loopback hosts. Enter the key in this app's **Settings...**; it is stored with DPAPI.
    Verify against your installed version.
 6. **Directories.** Map `directories.downloads` to the folder in this app's Settings ("slskd downloads
-   folder", default `C:\DJ\Tracks\Soulseek\complete`) and `directories.incomplete` to e.g.
-   `C:\DJ\Tracks\Soulseek\downloading`. Create both before starting slskd. This app only reads the downloads
-   folder and copies out of it; existing files such as `OLD` are not touched. Verify against your installed
-   version how it lays out peer folders (the importer locates files by their trailing path components).
+   folder", required, no default; e.g. `C:\DJ\Tracks\Soulseek\complete`) and `directories.incomplete` to a
+   separate folder, e.g. `C:\DJ\Tracks\Soulseek\downloading`. Create both before starting slskd. This app
+   copies finished tracks out of the downloads folder into the download location you pick in the app, then
+   moves each finished peer's folder into `<downloads folder>\OLD\<peer>` (merging with what is already
+   there; nothing is overwritten; the subfolder name is a Setting). Existing contents of `OLD` are never
+   deleted or replaced. Do not point the download location at the downloads folder or inside it. Verify against your installed
+   version how it lays out peer folders: the importer expects `<downloads>\<peer username>\<remote folder>\<file>`
+   and falls back to `<downloads>\<remote folder>\<file>` and then a unique exact-size match outside `OLD`.
 7. **Sharing is a deliberate choice.** Do not share `C:\DJ\dev`, the whole `C:\DJ\Tracks`, or your libraries
    by default; decide which folders (if any) you want to share and why. Verify against your installed
    version the option names and what it shares when `shares.directories` is empty.
@@ -40,4 +44,5 @@ live slskd yet.
 10. **Check in the app.** Start slskd, open **Settings...**, enter the URL and key, press **Test connection**.
     Then run a small (2-3 track) playlist end to end and inspect the results before trusting bigger runs.
 
-`ffprobe` (default `C:\ffmpeg\bin\ffprobe.exe`) is needed for import verification; set its path in Settings.
+`ffprobe` is needed for import verification. It is found on `PATH` automatically; otherwise set its path
+in Settings.

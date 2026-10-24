@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from djimport.approval import ApprovalError, create_approval, fingerprint, verify_approval
@@ -34,11 +36,11 @@ def item(n, fn, size, dest, user="u"):
 def test_create_and_verify(env):
     s, iid, root = env
     d = root / "House"
-    a = create_approval(s, iid, [item(2, "y\\2.mp3", 20, d, "v"), item(1, "x\\1.mp3", 10, d)], tracks_root=str(root))
+    a = create_approval(s, iid, [item(2, "y\\2.mp3", 20, d, "v"), item(1, "x\\1.mp3", 10, d)], downloads_dir=str(root / "Soulseek" / "complete"))
     assert verify_approval(s, a.id, a.fingerprint) == a
     assert a.fingerprint == fingerprint(a.items)
     d2 = root / "Techno"
-    a2 = create_approval(s, iid, [item(1, "x\\1.mp3", 10, d2)], tracks_root=str(root))
+    a2 = create_approval(s, iid, [item(1, "x\\1.mp3", 10, d2)], downloads_dir=str(root / "Soulseek" / "complete"))
     assert not d2.exists() and a2.id != a.id
 
 
@@ -50,7 +52,7 @@ def test_fingerprint_order_independent_and_sensitive():
 
 def test_verify_failures(env):
     s, iid, root = env
-    a = create_approval(s, iid, [item(1, "x\\1.mp3", 10, root / "House")], tracks_root=str(root))
+    a = create_approval(s, iid, [item(1, "x\\1.mp3", 10, root / "House")], downloads_dir=str(root / "Soulseek" / "complete"))
     with pytest.raises(ApprovalError, match="selection changed"):
         verify_approval(s, a.id, "0" * 64)
     with pytest.raises(ApprovalError):
@@ -73,50 +75,84 @@ def test_candidate_validation(env, bad):
     users = {"i.3": "v"}
     items = [SelectionItem(a, users.get(a, "u"), f, z, str(root / "House")) for a, f, z in bad]
     with pytest.raises(ApprovalError):
-        create_approval(s, iid, items, tracks_root=str(root))
+        create_approval(s, iid, items, downloads_dir=str(root / "Soulseek" / "complete"))
 
 
 def test_duplicate_track_rejected(env):
     s, iid, root = env
     d = root / "House"
     with pytest.raises(ApprovalError, match="more than one"):
-        create_approval(s, iid, [item(1, "x\\1.mp3", 10, d), item(1, "x\\1b.mp3", 11, d)], tracks_root=str(root))
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, d), item(1, "x\\1b.mp3", 11, d)], downloads_dir=str(root / "Soulseek" / "complete"))
 
 
 def test_mixed_destinations_rejected(env):
     s, iid, root = env
     with pytest.raises(ApprovalError, match="one destination"):
         create_approval(s, iid, [item(1, "x\\1.mp3", 10, root / "House"), item(2, "y\\2.mp3", 20, root / "Other", "v")],
-                        tracks_root=str(root))
+                        downloads_dir=str(root / "Soulseek" / "complete"))
 
 
 def test_unknown_import(env):
     s, iid, root = env
     with pytest.raises(ApprovalError):
-        create_approval(s, "nope", [item(1, "x\\1.mp3", 10, root / "House")], tracks_root=str(root))
+        create_approval(s, "nope", [item(1, "x\\1.mp3", 10, root / "House")], downloads_dir=str(root / "Soulseek" / "complete"))
+
+
+DL = "Soulseek\\complete"
 
 
 @pytest.mark.parametrize("rel", [
-    "..\\Outside", "House\\..\\..\\Outside", "Soulseek", "Soulseek\\complete", "soulseek\\complete\\x", "SOULSEEK",
+    "..\\Outside", "House\\..\\..\\Outside",
+    DL, DL + "\\OLD", DL + "\\someone\\album", "soulseek\\COMPLETE\\x",  # downloads dir, archive, inside, case
 ])
 def test_bad_destinations(env, rel):
     s, iid, root = env
     dest = str(root) + "\\" + rel
     with pytest.raises(ApprovalError):
-        create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], tracks_root=str(root))
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], downloads_dir=str(root / DL))
+
+
+def test_relative_destination_rejected(env):
+    s, iid, root = env
+    with pytest.raises(ApprovalError, match="absolute"):
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, "House")], downloads_dir=str(root / DL))
+
+
+def test_drive_root_rejected(env):
+    s, iid, root = env
+    drive = Path(root).anchor
+    for dest in (drive, drive.rstrip("\\")):
+        with pytest.raises(ApprovalError):
+            create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], downloads_dir=str(root / DL))
+
+
+def test_downloads_dir_required(env):
+    s, iid, root = env
+    with pytest.raises(ApprovalError, match="downloads folder"):
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, root / "House")], downloads_dir="")
+
+
+def test_inside_app_dir_rejected(env, monkeypatch, tmp_path):
+    s, iid, root = env
+    home = tmp_path / "apphome"
+    monkeypatch.setenv("DJIMPORT_HOME", str(home))
+    with pytest.raises(ApprovalError, match="data folder"):
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, home / "lib")], downloads_dir=str(root / DL))
+
+
+def test_arbitrary_folders_accepted(env, tmp_path):
+    s, iid, root = env
+    for dest in (tmp_path / "Other" / "Deep" / "New", root / "Soulseek", tmp_path / "Music" / "House"):
+        existed = dest.exists()
+        a = create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], downloads_dir=str(root / DL))
+        assert a.items[0].destination == str(dest.resolve())
+        assert dest.exists() == existed  # approval never creates the folder
 
 
 def test_empty_destination(env):
     s, iid, root = env
     with pytest.raises(ApprovalError):
-        create_approval(s, iid, [item(1, "x\\1.mp3", 10, "")], tracks_root=str(root))
-
-
-def test_destination_root_and_outside(env, tmp_path):
-    s, iid, root = env
-    for dest in (root, str(root) + "\\", tmp_path / "Other", tmp_path / "Tracks2"):
-        with pytest.raises(ApprovalError):
-            create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], tracks_root=str(root))
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, "")], downloads_dir=str(root / "Soulseek" / "complete"))
 
 
 def test_destination_is_file(env):
@@ -124,4 +160,4 @@ def test_destination_is_file(env):
     f = root / "afile"
     f.write_text("x")
     with pytest.raises(ApprovalError):
-        create_approval(s, iid, [item(1, "x\\1.mp3", 10, f)], tracks_root=str(root))
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, f)], downloads_dir=str(root / "Soulseek" / "complete"))

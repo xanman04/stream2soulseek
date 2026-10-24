@@ -36,25 +36,43 @@ def fingerprint(items: Iterable[SelectionItem]) -> str:
     return hashlib.sha256(blob.encode("ascii")).hexdigest()
 
 
-def _validate_destination(dest: str, tracks_root: str) -> str:
-    """Return the resolved destination path, or raise ApprovalError."""
+def _same_or_inside(path: str, root: Path) -> bool:
+    """True if normalised `path` equals `root` or lies inside it."""
+    nroot = os.path.normcase(str(root))
+    try:
+        Path(path).relative_to(Path(nroot))
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_destination(dest: str, downloads_dir: str, archive_name: str = "OLD") -> str:
+    """Return the resolved destination path, or raise ApprovalError.
+
+    Any absolute folder is fine (existing, or creatable) except a drive root, anything at/inside the
+    slskd downloads folder (or its archive folder), and anything inside the app's own data folder.
+    """
+    from . import config
+
     if not dest or not dest.strip():
         raise ApprovalError("destination is empty")
     parts = dest.replace("/", "\\").split("\\")
     if ".." in parts:
         raise ApprovalError("destination must not contain '..'")
-    root = Path(tracks_root).resolve()
+    if not os.path.isabs(dest) or not Path(dest).is_absolute():
+        raise ApprovalError("destination must be an absolute path")
     resolved = Path(dest).resolve()
-    nroot = os.path.normcase(str(root))
+    if resolved == Path(resolved.anchor):
+        raise ApprovalError("destination must not be a drive root; choose or create a folder")
     nres = os.path.normcase(str(resolved))
-    if nres == nroot:
-        raise ApprovalError("destination must be a library folder inside the tracks root, not the root itself")
-    try:
-        rel = Path(nres).relative_to(Path(nroot))
-    except ValueError:
-        raise ApprovalError("destination is outside the tracks root") from None
-    if rel.parts and rel.parts[0] == os.path.normcase("Soulseek"):
-        raise ApprovalError("destination must not be inside the Soulseek download area")
+    if not downloads_dir or not downloads_dir.strip():
+        raise ApprovalError("the slskd downloads folder is not set; open Settings and choose it first")
+    dl = Path(downloads_dir).resolve()
+    if _same_or_inside(nres, dl):  # also covers the archive folder inside it
+        raise ApprovalError("destination must not be the slskd downloads folder or inside it "
+                            f"(including its {archive_name} archive)")
+    if _same_or_inside(nres, config.app_dir_path().resolve()):
+        raise ApprovalError("destination must not be inside the application's data folder")
     if resolved.exists():
         if not resolved.is_dir():
             raise ApprovalError("destination exists but is not a directory")
@@ -67,7 +85,13 @@ def _validate_destination(dest: str, tracks_root: str) -> str:
     return str(resolved)
 
 
-def create_approval(store: Store, import_id: str, items: list[SelectionItem], *, tracks_root: str) -> Approval:
+def check_destination(dest: str, downloads_dir: str, archive_name: str = "OLD") -> str:
+    """Public form of the destination rules; returns the resolved path or raises ApprovalError."""
+    return _validate_destination(dest, downloads_dir, archive_name)
+
+
+def create_approval(store: Store, import_id: str, items: list[SelectionItem], *, downloads_dir: str,
+                    archive_name: str = "OLD") -> Approval:
     if store.get_import(import_id) is None:
         raise ApprovalError("unknown import")
     if not items:
@@ -84,7 +108,7 @@ def create_approval(store: Store, import_id: str, items: list[SelectionItem], *,
             raise ApprovalError(f"file is not a stored candidate for track {it.apple_id}")
         if cand.tier == Tier.REJECTED or cand.format_rank == 9:
             raise ApprovalError(f"candidate for track {it.apple_id} is not eligible")
-        dest = _validate_destination(it.destination, tracks_root)
+        dest = _validate_destination(it.destination, downloads_dir, archive_name)
         dests.add(os.path.normcase(dest))
         resolved_items.append(replace(it, destination=dest))
     if len(dests) != 1:

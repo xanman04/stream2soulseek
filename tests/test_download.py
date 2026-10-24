@@ -41,7 +41,7 @@ def env(tmp_path):
         for n, (a, u, f, z) in enumerate(specs)
     ])
     items = [SelectionItem(a, u, f, z, str(root / "House")) for a, u, f, z in specs]
-    ap = create_approval(s, iid, items, tracks_root=str(root))
+    ap = create_approval(s, iid, items, downloads_dir=str(root / "Soulseek" / "complete"))
     c = FakeClient()
     yield s, ap, c, DownloadService(s, c)
     s.close()

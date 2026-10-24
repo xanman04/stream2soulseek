@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         self.steps.setCurrentRow(0)
         if autostart:
             QTimer.singleShot(0, self.apple.startup)
+            QTimer.singleShot(0, self.prompt_if_unconfigured)
 
     # ------------------------------------------------------------ navigation
 
@@ -95,10 +96,16 @@ class MainWindow(QMainWindow):
     def _approved(self) -> None:
         self.go(3)
 
+    def prompt_if_unconfigured(self) -> None:
+        """First run: the slskd downloads folder has no default and must be chosen in Settings."""
+        if not self.ctx.settings.slskd_downloads_dir.strip():
+            self.statusBar().showMessage("Set the slskd downloads folder in Settings to get started.")
+            self.open_settings()
+
     def open_settings(self) -> None:
         dlg = SettingsDialog(self.ctx, self)
         if dlg.exec():
-            self.apple.refresh_libraries()
+            self.apple.refresh_destinations()
 
     # ------------------------------------------------------------ resume
 

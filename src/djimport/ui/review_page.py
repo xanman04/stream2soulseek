@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QTableView, QVBoxLayout, QWidget,
 )
 
-from .. import organize
+from .. import config, organize
 from ..approval import create_approval
 from ..models import Candidate, MatchResult, MatchStatus, SelectionItem, Tier
 from .context import AppContext
@@ -457,14 +457,15 @@ class ReviewPage(QWidget):
         if not import_id:
             show_error(self, "Confirm", "No import is active; run a search first.")
             return
-        tracks_root = ctx.settings.tracks_root
+        downloads_dir, archive_name = ctx.settings.slskd_downloads_dir, ctx.settings.archive_dir_name
         self._busy = True
         self.confirm_btn.setEnabled(False)
         self.banner.setText("Queuing the approved files...")
 
         def work():
             with ctx.download_service() as svc:  # client built first: a missing API key fails before any approval
-                approval = create_approval(ctx.store, import_id, items, tracks_root=tracks_root)
+                approval = create_approval(ctx.store, import_id, items, downloads_dir=downloads_dir,
+                                           archive_name=archive_name)
                 svc.enqueue_approved(approval.id, approval.fingerprint)
             return approval
 
@@ -473,6 +474,10 @@ class ReviewPage(QWidget):
     def _queued(self, approval) -> None:
         self._busy = False
         self._locked = True
+        try:
+            config.remember_destination(self.ctx.settings, approval.items[0].destination)
+        except Exception:  # noqa: BLE001 - remembering is a convenience only
+            pass
         self.ctx.approval_id = approval.id
         self.ctx.fingerprint = approval.fingerprint
         self.model.set_locked(True)

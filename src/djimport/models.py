@@ -6,6 +6,7 @@ None of these types may hold credentials. They are safe to persist and export.
 from __future__ import annotations
 
 import enum
+import shutil
 from dataclasses import dataclass, field
 
 
@@ -158,16 +159,42 @@ class ImportResult:
     sha256: str | None = None
 
 
+def default_ffprobe_path() -> str:
+    """ffprobe found on PATH at load time, or "" when absent."""
+    return shutil.which("ffprobe") or ""
+
+
 @dataclass
 class Settings:
     """Non-secret settings, persisted as JSON in the app data dir. Secrets live in SecretStore."""
 
     slskd_url: str = "http://127.0.0.1:5030"
-    slskd_downloads_dir: str = r"C:\DJ\Tracks\Soulseek\complete"
-    tracks_root: str = r"C:\DJ\Tracks"
-    ffprobe_path: str = r"C:\ffmpeg\bin\ffprobe.exe"
+    slskd_downloads_dir: str = ""  # must be set by the user (Settings); the folder slskd downloads into
+    ffprobe_path: str = field(default_factory=default_ffprobe_path)
     search_timeout_s: int = 30
     search_concurrency: int = 2
     response_limit: int = 100
     file_limit: int = 10000
+    recent_destinations: list[str] = field(default_factory=list)  # most recent first, max 10
+    archive_dir_name: str = "OLD"  # subfolder of the downloads dir that receives finished peer folders
+    auto_import: bool = True
     extra: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ArchiveResult:
+    """Outcome of moving one peer's download folder into the archive folder (e.g. OLD)."""
+
+    username: str
+    source_dir: str
+    archive_dir: str
+    moved: tuple[str, ...] = ()  # relative paths moved as-is
+    deduped: tuple[str, ...] = ()  # relative paths whose identical copy already existed (incoming deleted)
+    renamed: tuple[tuple[str, str], ...] = ()  # (original relative path, new relative path): bytes differed
+    errors: tuple[str, ...] = ()
+    nothing_to_archive: bool = False  # the peer folder did not exist
+    source_removed: bool = False  # the (now empty) peer folder was removed
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors

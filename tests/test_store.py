@@ -28,7 +28,7 @@ def store(tmp_path):
 
 
 def test_schema_and_wal(store, tmp_path):
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 2
     assert store._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     store.close()
     Store(tmp_path / "s.sqlite3").close()  # reopen ok
@@ -117,3 +117,42 @@ def test_threaded_use(store):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert not errs and len(store.load_tracks(iid)) == 80
+
+
+def test_schema_version_is_2_with_archives_table(store):
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    cols = {r[1] for r in store._conn.execute("PRAGMA table_info(archives)")}
+    assert {"approval_id", "username", "archive_dir", "moved_json"} <= cols
+
+
+def test_v1_database_migrates_without_losing_data(tmp_path):
+    import sqlite3
+
+    from djimport.store import _SCHEMA
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    for stmt in _SCHEMA.split(";"):
+        if stmt.strip():
+            conn.execute(stmt)
+    conn.execute("INSERT INTO imports VALUES ('i1','p','P','C:\\x','2026-01-01T00:00:00+00:00')")
+    conn.execute("PRAGMA user_version=1")
+    conn.commit()
+    conn.close()
+    s = Store(path)
+    try:
+        assert s.get_import("i1").playlist_name == "P"
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert s.archives_for_approval("a") == []
+    finally:
+        s.close()
+
+
+def test_archive_record_roundtrip(store):
+    from djimport.models import ArchiveResult
+
+    r = ArchiveResult("peer", "src", "dst", moved=("a",), deduped=("b",), renamed=(("c", "c2"),))
+    store.record_archive("ap1", r)
+    store.record_archive("ap1", r)  # idempotent
+    got = store.archives_for_approval("ap1")
+    assert len(got) == 1 and got[0].moved == ("a",) and got[0].renamed == (("c", "c2"),)
