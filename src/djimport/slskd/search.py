@@ -9,7 +9,10 @@ import uuid
 from collections.abc import Callable
 
 from ..models import AppleTrack, RemoteFile
-from .client import SlskdClient, SlskdError
+from .client import SlskdBusyError, SlskdClient, SlskdError
+
+_SEARCH_LOCK = threading.Lock()
+BUSY_WAIT_S = 120  # how long to keep retrying while slskd answers 429 "busy"
 
 _FEAT_BRACKET = re.compile(r"[\(\[][^\)\]]*\b(?:feat|ft|featuring)\b\.?[^\)\]]*[\)\]]", re.I)
 _FEAT_TAIL = re.compile(r"\b(?:feat|ft|featuring)\b\.?\s+[^\(\[]*", re.I)
@@ -90,10 +93,35 @@ def run_search(
 
 
 def _run_one(client, query, cancel, timeout_s, response_limit, file_limit, poll_interval, sleep, new_id, clock):
+    # slskd permits only one search operation at a time, so searches from all worker threads are serialised.
+    with _SEARCH_LOCK:
+        return _run_one_locked(client, query, cancel, timeout_s, response_limit, file_limit,
+                               poll_interval, sleep, new_id, clock)
+
+
+def _start_when_free(client, search_id, query, cancel, timeout_s, response_limit, file_limit, sleep, clock):
+    """POST the search, waiting out slskd's 429 'busy' answers (e.g. a previous search still finishing)."""
+    deadline = clock() + BUSY_WAIT_S
+    delay = 1.0
+    while True:
+        try:
+            client.start_search(search_id, query, timeout_s=timeout_s,
+                                response_limit=response_limit, file_limit=file_limit)
+            return
+        except SlskdBusyError:
+            if clock() >= deadline:
+                raise
+        if cancel.is_set():
+            raise SearchCancelled()
+        sleep(delay)
+        delay = min(delay * 2, 8.0)
+
+
+def _run_one_locked(client, query, cancel, timeout_s, response_limit, file_limit, poll_interval, sleep, new_id,
+                    clock):
     search_id = new_id()
     try:
-        client.start_search(search_id, query, timeout_s=timeout_s,
-                            response_limit=response_limit, file_limit=file_limit)
+        _start_when_free(client, search_id, query, cancel, timeout_s, response_limit, file_limit, sleep, clock)
         deadline = clock() + timeout_s + 10
         while True:
             if cancel.is_set():

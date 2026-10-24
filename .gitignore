@@ -56,3 +56,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Per-turn handoff notes for continuing in another model (local only)
+HANDOFF.md

@@ -103,7 +103,7 @@ def search_and_match(
         except Exception as exc:  # network/API errors must not abort the whole run
             return _unresolved(track, f"search failed: {type(exc).__name__}: {scrub(exc)}")
         try:
-            return match(track, files)
+            return match(track, files, settings.match_policy)
         except Exception as exc:  # pragma: no cover - defensive
             return _unresolved(track, f"matching failed: {type(exc).__name__}")
 
@@ -184,7 +184,7 @@ def import_completed(
                     track=track, tier=cand.tier, detected_version=cand.detected_version,
                     transfer=rec.status, downloads_dir=settings.slskd_downloads_dir,
                     destination=item.destination, ffprobe_path=settings.ffprobe_path, runner=runner,
-                    archive_name=settings.archive_dir_name,
+                    archive_name=settings.archive_dir_name, policy=settings.match_policy,
                 )
             except Exception as exc:
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,

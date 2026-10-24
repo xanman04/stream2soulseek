@@ -79,6 +79,81 @@ def test_full_flow_start_poll_collect_delete():
     assert not any("transfers" in r.url.path for r in fake.reqs)
 
 
+class BusyThenFree(FakeSlskd):
+    """Answers POST /searches with slskd's 429 'only one concurrent operation' `busy_times` times."""
+
+    BUSY = "Only one concurrent operation is permitted. Wait until the previous operation is complete"
+
+    def __init__(self, results, busy_times):
+        super().__init__(results)
+        self.busy_left = busy_times
+
+    def __call__(self, request):
+        if request.method == "POST" and self.busy_left > 0:
+            self.busy_left -= 1
+            self.reqs.append(request)
+            return httpx.Response(429, text=self.BUSY)
+        return super().__call__(request)
+
+
+def test_busy_slskd_is_retried_until_free():
+    q = build_queries(TRACK)[0]
+    fake = BusyThenFree({q: [("u1", "a\\x.mp3", 5)]}, busy_times=3)
+    waits = []
+    out = run(fake, sleep=waits.append)
+    assert [f.filename for f in out] == ["a\\x.mp3"]
+    assert [m for m, _ in fake.calls()].count("POST") == 4
+    assert waits[:3] == [1.0, 2.0, 4.0]  # backoff between busy answers
+
+
+def test_busy_beyond_wait_limit_raises():
+    from djimport.slskd.client import SlskdBusyError
+
+    fake = BusyThenFree({}, busy_times=10_000)
+    now = [0.0]
+
+    def sleep(s):
+        now[0] += s
+
+    with pytest.raises(SlskdBusyError):
+        run(fake, sleep=sleep, clock=lambda: now[0])
+
+
+def test_cancel_while_waiting_for_busy_slskd():
+    fake = BusyThenFree({}, busy_times=10_000)
+    cancel = threading.Event()
+    with pytest.raises(SearchCancelled):
+        run(fake, cancel=cancel, sleep=lambda s: cancel.set())
+
+
+def test_searches_from_several_threads_never_overlap():
+    import time as _time
+
+    active, peak = [0], [0]
+    lock = threading.Lock()
+
+    class Overlap(FakeSlskd):
+        def __call__(self, request):
+            if request.method == "POST":
+                with lock:
+                    active[0] += 1
+                    peak[0] = max(peak[0], active[0])
+                _time.sleep(0.02)
+            resp = super().__call__(request)
+            if request.method == "DELETE":
+                with lock:
+                    active[0] -= 1
+            return resp
+
+    fake = Overlap({})
+    threads = [threading.Thread(target=run, args=(fake,)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak[0] == 1
+
+
 def test_fallback_only_when_primary_empty():
     queries = build_queries(TRACK)
     assert len(queries) >= 2

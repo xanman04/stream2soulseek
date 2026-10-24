@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 
-from .models import Settings, default_ffprobe_path
+from .models import MatchPolicy, Settings, default_ffprobe_path
 
 MAX_RECENT = 10
 
@@ -52,7 +52,9 @@ def load_settings() -> Settings:
         return Settings()
     data = json.loads(path.read_text(encoding="utf-8"))
     known = {f.name for f in dataclasses.fields(Settings)}
-    s = Settings(**{k: v for k, v in data.items() if k in known})  # unknown/removed keys (tracks_root) ignored
+    kwargs = {k: v for k, v in data.items() if k in known}  # unknown/removed keys (tracks_root) ignored
+    kwargs["match_policy"] = MatchPolicy.from_dict(data.get("match_policy"))  # absent in old files -> defaults
+    s = Settings(**kwargs)
     if not s.ffprobe_path:
         s.ffprobe_path = default_ffprobe_path()
     s.recent_destinations = [str(d) for d in s.recent_destinations][:MAX_RECENT]
@@ -70,5 +72,5 @@ def remember_destination(settings: Settings, destination: str) -> None:
 def save_settings(settings: Settings) -> None:
     path = settings_path()
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(dataclasses.asdict(settings), indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps({**dataclasses.asdict(settings), "match_policy": settings.match_policy.to_dict()}, indent=2), encoding="utf-8")
     os.replace(tmp, path)

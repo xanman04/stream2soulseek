@@ -6,6 +6,8 @@ None of these types may hold credentials. They are safe to persist and export.
 from __future__ import annotations
 
 import enum
+import hashlib
+import json
 import shutil
 from dataclasses import dataclass, field
 
@@ -54,6 +56,130 @@ class RemoteFile:
     upload_speed: int | None = None  # bytes/s
 
 
+# ---------------------------------------------------------------- Matching rules (per-user)
+
+LOSSLESS_KINDS = ("flac", "wav", "aiff", "alac")
+LOSSY_KINDS = ("mp3", "aac", "ogg", "opus")
+FORMAT_KINDS = ("mp3", "flac", "wav", "aiff", "alac", "aac", "ogg", "opus")
+DEFAULT_MIN_KBPS = {"mp3": 320, "aac": 256, "ogg": 192, "opus": 128}
+VERSION_MODES = ("exact_only", "exact_then_extended")
+
+
+@dataclass
+class FormatRule:
+    """One accepted audio format. Lossy kinds carry a bitrate floor and a VBR switch."""
+
+    kind: str
+    min_bitrate_kbps: int | None = None  # lossy kinds only
+    allow_vbr: bool = False  # lossy kinds only
+
+    def __post_init__(self) -> None:
+        self.kind = str(self.kind).lower()
+        if self.kind in LOSSY_KINDS:
+            if self.min_bitrate_kbps is None:
+                self.min_bitrate_kbps = DEFAULT_MIN_KBPS[self.kind]
+            self.min_bitrate_kbps = max(0, int(self.min_bitrate_kbps))
+            self.allow_vbr = bool(self.allow_vbr)
+        else:
+            self.min_bitrate_kbps = None
+            self.allow_vbr = False
+
+    @property
+    def lossy(self) -> bool:
+        return self.kind in LOSSY_KINDS
+
+
+def default_formats() -> list[FormatRule]:
+    """The owner's rules: MP3 at exactly 320 CBR first, then FLAC."""
+    return [FormatRule("mp3", 320, False), FormatRule("flac")]
+
+
+@dataclass
+class MatchPolicy:
+    """What the user accepts. Defaults are the owner's rules.
+
+    NOT configurable, on purpose: a different remix/remixer, a different version kind, or a VIP
+    mismatch is always rejected (a wrong recording is never acceptable), and artist evidence is
+    always required. Turning an exclusion off only stops the label-based rejection; the file must
+    still be the same version as the request (see matching/rank.py).
+    """
+
+    formats: list[FormatRule] = field(default_factory=default_formats)  # best first; rank = index + 1
+    version_mode: str = "exact_then_extended"  # or "exact_only"
+    tier_before_format: bool = True  # right version outranks a better format
+    exclude_radio_edits: bool = True
+    exclude_live: bool = True
+    exclude_mixed: bool = True
+    duration_tolerance_s: int = 15
+    skip_flagged_by_default: bool = True
+
+    def excluded_labels(self) -> frozenset[str]:
+        out = set()
+        if self.exclude_radio_edits:
+            out.add("radio edit")
+        if self.exclude_live:
+            out.add("live")
+        if self.exclude_mixed:
+            out.add("mixed")
+        return frozenset(out)
+
+    def to_dict(self) -> dict:
+        return {
+            "formats": [{"kind": r.kind, "min_bitrate_kbps": r.min_bitrate_kbps, "allow_vbr": r.allow_vbr}
+                        for r in self.formats],
+            "version_mode": self.version_mode,
+            "tier_before_format": self.tier_before_format,
+            "exclude_radio_edits": self.exclude_radio_edits,
+            "exclude_live": self.exclude_live,
+            "exclude_mixed": self.exclude_mixed,
+            "duration_tolerance_s": self.duration_tolerance_s,
+            "skip_flagged_by_default": self.skip_flagged_by_default,
+        }
+
+    @classmethod
+    def from_dict(cls, data: object) -> "MatchPolicy":
+        """Tolerant loader: missing/invalid parts fall back to the defaults."""
+        base = cls()
+        if not isinstance(data, dict):
+            return base
+        formats: list[FormatRule] = []
+        raw = data.get("formats")
+        if isinstance(raw, list):
+            for r in raw:
+                try:
+                    kind = str(r.get("kind", "")).lower() if isinstance(r, dict) else str(r).lower()
+                    if kind in FORMAT_KINDS and all(x.kind != kind or x.lossy for x in formats):
+                        rule = FormatRule(kind, r.get("min_bitrate_kbps") if isinstance(r, dict) else None,
+                                          bool(r.get("allow_vbr", False)) if isinstance(r, dict) else False)
+                        formats.append(rule)
+                except (TypeError, ValueError, AttributeError):
+                    continue
+        if formats:
+            base.formats = formats
+
+        def flag(name: str, default: bool) -> bool:
+            v = data.get(name, default)
+            return v if isinstance(v, bool) else default
+
+        mode = data.get("version_mode")
+        if mode in VERSION_MODES:
+            base.version_mode = mode
+        base.tier_before_format = flag("tier_before_format", True)
+        base.exclude_radio_edits = flag("exclude_radio_edits", True)
+        base.exclude_live = flag("exclude_live", True)
+        base.exclude_mixed = flag("exclude_mixed", True)
+        base.skip_flagged_by_default = flag("skip_flagged_by_default", True)
+        try:
+            base.duration_tolerance_s = max(0, int(data.get("duration_tolerance_s", 15)))
+        except (TypeError, ValueError):
+            pass
+        return base
+
+    def fingerprint(self) -> str:
+        """Stable id of the rules; results produced under another fingerprint are stale."""
+        return hashlib.sha256(json.dumps(self.to_dict(), sort_keys=True).encode()).hexdigest()[:16]
+
+
 # ---------------------------------------------------------------- Matching
 
 
@@ -69,7 +195,7 @@ class Tier(enum.IntEnum):
 class Candidate:
     file: RemoteFile
     tier: Tier
-    format_rank: int  # 1 = MP3 320 CBR, 2 = FLAC, 9 = not acceptable
+    format_rank: int  # 1-based position in the user's accepted-format list (default: 1 = MP3 320 CBR, 2 = FLAC); 9 = not acceptable
     detected_version: str | None  # version label parsed from the remote file, e.g. "Extended Mix"
     reasons: tuple[str, ...] = ()  # human-readable why accepted/flagged/rejected
     flagged: bool = False  # eligible but needs a careful human look (duration mismatch, weak artist match...)
@@ -172,12 +298,13 @@ class Settings:
     slskd_downloads_dir: str = ""  # must be set by the user (Settings); the folder slskd downloads into
     ffprobe_path: str = field(default_factory=default_ffprobe_path)
     search_timeout_s: int = 30
-    search_concurrency: int = 2
+    search_concurrency: int = 1  # slskd 0.26 allows one concurrent search operation
     response_limit: int = 100
     file_limit: int = 10000
     recent_destinations: list[str] = field(default_factory=list)  # most recent first, max 10
     archive_dir_name: str = "OLD"  # subfolder of the downloads dir that receives finished peer folders
     auto_import: bool = True
+    match_policy: MatchPolicy = field(default_factory=MatchPolicy)
     extra: dict = field(default_factory=dict)
 
 

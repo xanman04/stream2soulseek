@@ -23,6 +23,10 @@ class SlskdAuthError(SlskdError):
     """HTTP 401/403 from slskd."""
 
 
+class SlskdBusyError(SlskdError):
+    """HTTP 429 from slskd, e.g. "Only one concurrent operation is permitted" while a search runs."""
+
+
 def _is_loopback_host(host: str | None) -> bool:
     if not host:
         return False
@@ -122,6 +126,9 @@ class SlskdClient:
             raise SlskdError(f"slskd request failed ({type(e).__name__})") from None
         if resp.status_code in (401, 403):
             raise SlskdAuthError(f"slskd rejected the API key (HTTP {resp.status_code})")
+        if resp.status_code == 429:
+            excerpt = resp.text[:200].replace("\n", " ")
+            raise SlskdBusyError(f"slskd busy (HTTP 429) on {method} {path}: {excerpt}")
         if resp.status_code >= 400:
             excerpt = resp.text[:200].replace("\n", " ")
             raise SlskdError(f"slskd HTTP {resp.status_code} on {method} {path}: {excerpt}")

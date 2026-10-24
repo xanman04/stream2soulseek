@@ -30,6 +30,7 @@ COLUMNS = ["Use", "#", "Title", "Artist", "Dur", "Status", "Peer", "Remote path"
 FLAG_BG = QBrush(QColor(255, 224, 130))
 FLAG_FG = QBrush(QColor(0, 0, 0))
 DIM_FG = QBrush(QColor(130, 130, 130))
+STALE_TEXT = "Matching rules changed since this search. Go back to Search and run it again before confirming."
 
 
 def file_key(c: Candidate) -> tuple:
@@ -74,6 +75,7 @@ class ReviewModel(QAbstractTableModel):
         self.rows: list[ReviewRow] = []
         self.destination: str = ""
         self.locked = False
+        self.skip_flagged = True  # MatchPolicy.skip_flagged_by_default
 
     # ------------------------------------------------------------ data
 
@@ -86,7 +88,7 @@ class ReviewModel(QAbstractTableModel):
         for res in results:
             chosen = res.best if res.status == MatchStatus.PROPOSED else None
             row = ReviewRow(res, chosen, existing=existing.get(res.track.apple_id, []))
-            row.checked = bool(chosen is not None and not chosen.flagged)  # flagged -> unchecked
+            row.checked = bool(chosen is not None and not (chosen.flagged and self.skip_flagged))
             self.rows.append(row)
         self.endResetModel()
         self.checks_changed.emit()
@@ -117,7 +119,7 @@ class ReviewModel(QAbstractTableModel):
             return False
         r = self.rows[row]
         r.chosen = cand
-        r.checked = not cand.flagged
+        r.checked = not (cand.flagged and self.skip_flagged)
         self.dataChanged.emit(self.index(row, 0), self.index(row, len(COLUMNS) - 1))
         self.checks_changed.emit()
         return True
@@ -368,6 +370,7 @@ class ReviewPage(QWidget):
     def set_results(self, results: list[MatchResult], destination: str,
                     existing: dict[str, list[str]] | None = None, *, locked: bool = False) -> None:
         self._locked = locked
+        self.model.skip_flagged = bool(self.ctx.settings.match_policy.skip_flagged_by_default)
         self.model.set_locked(locked)
         self.model.set_results(results, destination, existing)
         self.model.set_locked(locked)
@@ -376,8 +379,9 @@ class ReviewPage(QWidget):
         self.banner.setText(
             "This selection was approved and queued. It can no longer be edited; run a new search for a new review."
             if locked else
-            f"Review every row, then confirm. Destination: {destination}. Flagged (amber) rows are unchecked "
-            "by default; inspect the candidates below before ticking them.")
+            f"Review every row, then confirm. Destination: {destination}. Flagged (amber) rows are "
+            + ("unchecked by default; inspect the candidates below before ticking them."
+               if self.model.skip_flagged else "ticked like the others (your rules); inspect them anyway."))
         self.detail.setRowCount(0)
         self._update_footer()
 
@@ -465,8 +469,19 @@ class ReviewPage(QWidget):
             f"{c['proposed']} proposed ({c['flagged']} flagged), {c['unresolved']} unresolved, "
             f"{c['skipped']} skipped; {n} selected")
         self.confirm_btn.setText(f"Confirm and download {n} files...")
-        self.confirm_btn.setEnabled(n > 0 and not self._locked and not self._busy)
+        self.confirm_btn.setEnabled(n > 0 and not self._locked and not self._busy and not self.rules_stale())
         self._update_use_button()
+
+    def rules_stale(self) -> bool:
+        """True when these results were produced under matching rules that have since changed."""
+        fp = self.ctx.results_policy
+        return fp is not None and not self._locked and fp != self.ctx.settings.match_policy.fingerprint()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if self.rules_stale():
+            self.banner.setText(STALE_TEXT)
+        self._update_footer()
 
     def summary_entries(self) -> list[dict]:
         return [
@@ -483,6 +498,9 @@ class ReviewPage(QWidget):
     def confirm_download(self) -> None:
         """The single path from review to download: modal confirmation -> approval -> enqueue."""
         if self._locked or self._busy:
+            return
+        if self.rules_stale():
+            self.banner.setText(STALE_TEXT)
             return
         items = self.model.selection_items()
         if not items:

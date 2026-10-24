@@ -66,9 +66,14 @@ class MainWindow(QMainWindow):
         h.addWidget(self.stack, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage("Local app. Nothing is downloaded without your explicit confirmation.")
+        # Once the embedded Apple web view has been shown, Windows composition can leave a hidden page's
+        # pixels behind a page that does not paint its own background. Make every stacked page opaque.
+        for stack in self.findChildren(QStackedWidget):
+            for i in range(stack.count()):
+                stack.widget(i).setAutoFillBackground(True)
 
         self.soulseek_status = self.sidebar.soulseek_label
-        self.soulseek.status_changed.connect(self.sidebar.set_soulseek_text)
+        self.soulseek.status_changed.connect(self._soulseek_status)
 
         file_menu = self.menuBar().addMenu("&File")
         act = QAction("Settings...", self)
@@ -136,6 +141,10 @@ class MainWindow(QMainWindow):
             self.transfers.start()
         else:
             self.transfers.stop()
+
+    def _soulseek_status(self, text: str) -> None:
+        self.sidebar.set_soulseek_text(text)
+        self.sidebar.soulseek_btn.setText("Change login..." if self.soulseek.is_connected else "Log in...")
 
     def _open_service(self, key: str = APPLE_KEY) -> None:
         self.transfers.stop()
@@ -228,6 +237,9 @@ class MainWindow(QMainWindow):
         ctx.results = workflow.fill_unsearched(tracks, results)
         ctx.approval_id = approval.id if approval else None
         ctx.fingerprint = approval.fingerprint if approval else None
+        # The rules an earlier session searched under are not recorded, so an unconfirmed resumed review counts as
+        # stale: Review refuses to confirm until the search is run again under the current rules.
+        ctx.results_policy = "unknown (resumed)" if results and approval is None else None
         self.playlists.show_resumed(ctx.playlist, tracks)
         self.destination.show_resumed(imp.destination)
         self.search.show_results(results)

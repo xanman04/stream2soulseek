@@ -93,7 +93,13 @@ cd C:\DJ\dev
 
 - Nothing is queued before the review dialog is confirmed; an approval is bound to exact peer / file / size /
   destination and cannot be edited afterwards.
-- Radio edits, live recordings and `[Mixed]` tracks are always rejected; a different remix is never chosen.
+- What counts as acceptable is a per-user preference (Settings, "Matching rules" tab, also reachable from the
+  Search page): accepted file types in priority order with minimum bitrates and VBR switches, exact-only versus
+  exact-then-extended, whether the right version outranks a better format, whether radio edits / live
+  recordings / `[Mixed]` tracks are rejected, the duration tolerance, and whether flagged matches start
+  unticked. The defaults are MP3 320 CBR then FLAC, exact then extended, all three rejected. A different remix
+  or remixer, a different version and a VIP mismatch are always rejected and cannot be switched off. Changing
+  the rules after a search requires running the search again before confirming.
 - Existing files in the download location are never overwritten, moved, retagged or deleted. Downloaded
   source files are only ever moved into the archive folder inside the slskd downloads folder, after their
   copy was verified; archiving never overwrites and never deletes anything except a byte-identical duplicate.

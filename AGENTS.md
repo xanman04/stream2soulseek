@@ -21,7 +21,7 @@ File workflow:
 - `C:\DJ\Tracks` contains separate flat libraries. New non-DnB playlists belong in a chosen sibling library, not automatically in `Tracks\DnB`.
 - Treat `Tracks\Soulseek` as raw download staging/archive. `collect_songs.sh` is deprecated and must not define the new workflow.
 - Search first and show every proposed file, version, format, bitrate, and unresolved track for review. Queue no downloads until the user explicitly confirms the reviewed selection. Changed selections need fresh confirmation.
-- Prefer exact requested versions, with an extended mix of the same remix only as fallback. Reject different remixes, radio edits, live recordings, and `[Mixed]` tracks. Prefer MP3 320 then FLAC within eligible version tiers.
+- By default prefer exact requested versions, with an extended mix of the same remix only as fallback; always reject different remixes and VIP mismatches; by default also reject radio edits, live recordings and `[Mixed]` tracks, and prefer MP3 320 then FLAC within eligible version tiers. These defaults are user-configurable (see the recording and format policy section) except the remix/VIP identity rules.
 - Do not claim live authentication, complete playlist retrieval, downloading, or file organization works until independently verified. Preserve existing music during development.
 
 ## Goal and scope
@@ -78,19 +78,23 @@ The old collection script flattens downloads indiscriminately, copies originals,
 
 Version information can be lost in filenames AND embedded tags: an archived `Bassline Growler` source folder identifies a VIP Mix, while its library filename and embedded title omit VIP. Do not assume a cleaned filename proves recording identity.
 
-## Mandatory recording and format policy
+## Recording and format policy (defaults, user-configurable)
 
-Eligibility comes before audio format preferences:
+The rules below are the owner's DEFAULTS. Each user can change the configurable parts in Settings, "Matching rules" tab (`models.MatchPolicy`, persisted in `settings.json`; code in `matching/rank.py`, `matching/formats.py`, `organize.import_file`). Do not hardcode format, bitrate, version-fallback or exclusion decisions; read them from the policy.
+
+Eligibility comes before audio format preferences (default; "Prefer the right version over a better format" can be switched off, which orders by format first but never mixes in ineligible versions):
 
 1. Exact requested recording/remix/version.
-2. An extended mix of that SAME recording/remix only if the exact version is unavailable.
+2. An extended mix of that SAME recording/remix only if the exact version is unavailable (setting "Exact version only" removes this step).
 3. Otherwise unresolved; never silently choose a different remix.
 
-Within each eligible version tier, prefer MP3 at 320 kbps; accept FLAC if no qualifying MP3 is available. An exact-version FLAC outranks an extended-fallback MP3 320. Do not broaden to lower-bitrate MP3, other formats, or transcoding without user instruction.
+Default accepted formats, best first: MP3 at exactly 320 kbps CBR, then FLAC. An exact-version FLAC outranks an extended-fallback MP3 320. Other formats (WAV, AIFF, ALAC, AAC, OGG, Opus), lower bitrates and VBR are accepted only if the user adds them. Import verification (ffprobe codec and bitrate, 5 kbps tolerance) follows the same policy; VBR is judged from search metadata only.
 
-Always exclude radio edits, live recordings, and `[Mixed]` tracks. The user briefly allowed radio edits, then explicitly retracted that permission. Do not strip those version markers before applying exclusions. Detect version labels in context; do not reject an artist merely because their name contains a word such as `Live`.
+By default radio edits, live recordings and `[Mixed]` tracks are excluded (each is a switch). Switching one off only stops the label from rejecting a file: the file must still be the same version as the request, so a live or radio edit of a studio track stays rejected and the label is only used when the requested track carries it. Do not strip version markers before applying exclusions. Detect version labels in context; do not reject an artist merely because their name contains a word such as `Live`.
 
-Preserve original Apple titles, artists, IDs, album and duration when available, alongside normalized search fields. Use duration and source folder metadata as supporting evidence, not proof. Leave ambiguous matches unresolved or clearly flagged for user review. AI must not override hard exclusions.
+NOT configurable, by design: a different remix or remixer, a different version kind, and a VIP mismatch are always rejected, and artist evidence is always required. AI must not override any of this.
+
+Rules changed after a search make its results stale (`AppContext.results_policy` vs `MatchPolicy.fingerprint()`); the review screen refuses to confirm until the search is run again. Preserve original Apple titles, artists, IDs, album and duration when available, alongside normalized search fields. Use duration (configurable tolerance) and source folder metadata as supporting evidence, not proof. Leave ambiguous matches unresolved or clearly flagged for user review.
 
 ## Review gate and file lifecycle
 

@@ -24,6 +24,7 @@ class AppContext:
     results: list[MatchResult] = field(default_factory=list)
     approval_id: str | None = None
     fingerprint: str | None = None
+    results_policy: str | None = None  # MatchPolicy.fingerprint() the current results were produced under
 
     # ---------------------------------------------------------------- state
 
@@ -32,6 +33,7 @@ class AppContext:
         self.results = []
         self.approval_id = None
         self.fingerprint = None
+        self.results_policy = None
 
     # ---------------------------------------------------------------- errors
 
