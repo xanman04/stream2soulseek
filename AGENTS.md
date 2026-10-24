@@ -32,6 +32,7 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 - Agreed direction: Python backend, PySide6/Qt native widgets, and Qt WebEngine embedded only where needed for Apple authentication.
 - The user wants Apple sign-in contained inside the app window, then playlist browsing/selection in native controls. Do not silently substitute an external browser or require a share link as the normal workflow.
 - Public/open-source release on GitHub was considered and then deferred because of music-download legal concerns. Develop locally first; do not publish, push, or create a public repository without new authorization.
+- The app must stay general, not tailored to the owner's folders: the user picks any download location, and personal paths are never defaults or requirements.
 - Other website sources are a later phase. Initially report tracks unavailable on Soulseek rather than adding external downloading.
 - AI is optional. Deterministic matching and review should enforce the rules; no paid AI dependency is required for the core workflow.
 
@@ -155,7 +156,8 @@ Local setup:
 
 - Python 3.13.1 was confirmed. `ffprobe` exists at `C:\ffmpeg\bin\ffprobe.exe`.
 - Docker CLI is installed; its Linux engine was not running when checked on October 15. slskd can also run as native Windows binaries. Choose after checking current prerequisites; do not require Docker unnecessarily.
-- No slskd installation, configured credentials, running API, or successful Soulseek search/download has been verified.
+- 2026-10-24: slskd 0.26.2 (win-x64, SHA-256 verified against GitHub's digest) is installed at `%LOCALAPPDATA%\Programs\slskd\0.26.2`, app dir `%LOCALAPPDATA%\slskd-djimport`, run with `slskd.exe --app-dir <that dir>`. The API runs on 127.0.0.1:5030 only, with HTTPS disabled, no shares and file retention off. Downloads go to `Tracks\Soulseek\complete\<username>\<source dir>`, and incomplete files to `Tracks\Soulseek\downloading`. The app's API key is in its DPAPI store. The Soulseek login is not yet configured, and no live search or download has been run.
+- The live OpenAPI definition (0.26.2) confirmed the search, transfer, enqueue and cancel paths, the `remove` query flag, the transfer state flag names, and that `GET /application` returns `server.isLoggedIn`. Search response field shapes are still unverified until a logged-in search runs.
 - A GitHub release lookup was blocked first by sandbox DNS, then by GitHub API rate limiting after approved external access. This was not an installation failure; nothing was installed. Recheck current release rather than assuming a version.
 
 Configuration requirements to verify against the installed slskd version:
@@ -188,6 +190,16 @@ The user explicitly requires that personal credentials never become hardcoded or
 - `C:\DJ\dev` is its own Git repository; `C:\DJ\dev\.gitignore` excludes audio, credentials, sessions, local state and build artifacts. There is deliberately no repository or `.gitignore` at `C:\DJ`.
 - Use placeholder-only templates. Review tracked files, history and explicit release contents before any future publication; ignore rules are not retroactive or sufficient alone.
 - Public release and legal review are deferred. Do not imply that private development makes unauthorized downloading/sharing lawful, or treat a disclaimer as legal protection.
+
+## Sharing with friends (future goal, requested 2026-10-24)
+
+The user wants, eventually, a single runnable Windows package (like the SoulseekQt installer) to send to friends, even without open-sourcing. Each friend signs in to their own Apple Music and Soulseek accounts and uses their own folders. Design for this now:
+
+- Everything per-user and discovered at runtime: no paths, accounts, tokens or settings from the developer's machine in the build. A first-run setup asks for the download location, slskd folders, Soulseek login and Apple sign-in.
+- The app should manage slskd itself: start/stop it as a child process with a generated per-user config (random API key, loopback-only API, HTTPS off, no shares, file retention off). Pass the Soulseek login from DPAPI storage via `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD` environment variables rather than writing the password into `slskd.yml`.
+- Packaging candidate: PyInstaller (or Nuitka) one-folder build including Qt WebEngine, zipped or wrapped in an installer. Build only from a clean checkout with an explicit file allowlist, and inspect the package for secrets and personal data.
+- Licenses: slskd is AGPL-3.0, so redistributing its binary requires shipping its license and offering the corresponding source. PySide6/Qt is LGPL-3.0 (keep it dynamically linked and include notices); Qt WebEngine includes Chromium third-party licenses. Collect notices into the package.
+- Sending the package to friends is distribution: the deferred legal/terms questions (unofficial Apple API, downloading) apply to it as well.
 
 ## Implementation order and acceptance checks
 
