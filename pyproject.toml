@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "djimport"
+version = "0.1.0"
+description = "Personal desktop tool: Apple Music playlists -> reviewed Soulseek (slskd) downloads -> flat DJ libraries"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.8",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.gui-scripts]
+djimport = "djimport.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

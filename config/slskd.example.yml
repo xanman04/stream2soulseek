@@ -1,0 +1,29 @@
+# Placeholder-only template. Copy to <your slskd app dir>\slskd.yml and fill in.
+# Verify every key against the docs/config.md of the slskd version you installed.
+# NEVER commit a filled-in copy.
+
+soulseek:
+  username: "<your-soulseek-username>"
+  password: "<your-soulseek-password>"
+  # listen_port: 50300          # peer port; forwarding it is your own decision
+
+web:
+  port: 5030
+  ip_address: 127.0.0.1         # loopback only
+  authentication:
+    disabled: false
+    api_keys:
+      djimport:
+        key: "<generate-a-random-key>"   # long random string; also enter it in the app's Settings
+        role: readwrite
+        cidr: 127.0.0.1/32
+
+directories:
+  incomplete: "<path-to>\\Tracks\\Soulseek\\downloading"
+  downloads: "<path-to>\\Tracks\\Soulseek\\complete"
+
+# shares:
+#   directories: []              # share nothing until you choose folders deliberately
+
+feature:
+  swagger: false                 # set true temporarily to validate the API contract

@@ -1,0 +1,58 @@
+# This repository has its own ignores; C:\DJ\.gitignore does not protect it.
+
+# Music and personal audio must never enter this repository
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.aiff
+*.aif
+*.ogg
+*.opus
+Tracks/
+
+# Local credentials, sessions and settings (templates must contain placeholders only)
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.pfx
+*.pem
+*.key
+*.dpapi
+credentials*.json
+storage-state*.json
+storage_state*.json
+cookies*.json
+cookies*.txt
+tokens*.json
+slskd.yml
+!slskd.example.yml
+browser-profile/
+user-data/
+sessions/
+.auth/
+
+# Local app state, playlist exports, review/download records
+*.sqlite
+*.sqlite3
+*.db
+exports/
+reviews/
+runs/
+downloads/
+incomplete/
+logs/
+*.log
+*.har
+
+# Python and builds
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.egg-info/
