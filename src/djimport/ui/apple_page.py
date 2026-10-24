@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSplitter,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+    QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from .. import workflow
+from ..approval import ApprovalError, check_destination
 from ..apple.client import AppleAuthError, AppleMusicClient
 from ..models import AppleTrack, Playlist
 from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
 from .context import AppContext
 from .util import fmt_duration_ms, item, make_table, show_error
 from .workers import run_async
-
-NEW_LIBRARY = "__new__"
 
 
 class ApplePage(QWidget):
@@ -46,10 +46,12 @@ class ApplePage(QWidget):
         # --- playlists panel
         self.playlist_list = QListWidget()
         self.playlist_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.dest_combo = QComboBox()
-        self.new_name = QLineEdit()
-        self.new_name.setPlaceholderText("New library name (created only when files are imported)")
-        self.new_name.setVisible(False)
+        self.dest_edit = QLineEdit()
+        self.dest_edit.setReadOnly(True)
+        self.dest_edit.setPlaceholderText("No folder chosen yet")
+        self.browse_btn = QPushButton("Browse...")
+        self.recent_combo = QComboBox()
+        self.recent_combo.setToolTip("Recently used download locations")
         self.dest_error = QLabel("")
         self.dest_error.setStyleSheet("color: #b00020;")
         self.continue_btn = QPushButton("Continue to Search")
@@ -59,9 +61,12 @@ class ApplePage(QWidget):
         ll = QVBoxLayout(left)
         ll.addWidget(QLabel("Playlists (choose one):"))
         ll.addWidget(self.playlist_list, 1)
-        ll.addWidget(QLabel("Destination library (required):"))
-        ll.addWidget(self.dest_combo)
-        ll.addWidget(self.new_name)
+        ll.addWidget(QLabel("Download location (required; the folder finished tracks are copied into):"))
+        row = QHBoxLayout()
+        row.addWidget(self.dest_edit, 1)
+        row.addWidget(self.browse_btn)
+        ll.addLayout(row)
+        ll.addWidget(self.recent_combo)
         ll.addWidget(self.dest_error)
 
         self.track_info = QLabel("Click a playlist to preview its tracks.")
@@ -93,40 +98,57 @@ class ApplePage(QWidget):
         self.resume_btn.clicked.connect(self.resume_requested)
         self.playlist_list.currentItemChanged.connect(lambda *_: self.preview_tracks())
         self.continue_btn.clicked.connect(self._continue)
-        self.dest_combo.currentIndexChanged.connect(self._dest_changed)
-        self.new_name.textChanged.connect(self._dest_changed)
-        self.refresh_libraries()
+        self.browse_btn.clicked.connect(self._browse)
+        self.recent_combo.activated.connect(self._recent_chosen)
+        self.refresh_destinations()
         self.refresh_resume_button()
 
-    # ------------------------------------------------------------ libraries
+    # ------------------------------------------------------------ download location
 
-    def refresh_libraries(self) -> None:
-        self.dest_combo.blockSignals(True)
-        self.dest_combo.clear()
-        self.dest_combo.addItem("-- choose a library --", None)
-        for name in workflow.list_libraries(self.ctx.settings.tracks_root):
-            self.dest_combo.addItem(name, name)
-        self.dest_combo.addItem("New library...", NEW_LIBRARY)
-        self.dest_combo.blockSignals(False)
+    def refresh_destinations(self) -> None:
+        """Rebuild the recent-locations list (no default: nothing is chosen until the user picks)."""
+        self.recent_combo.blockSignals(True)
+        self.recent_combo.clear()
+        self.recent_combo.addItem("-- recent locations --", None)
+        for d in self.ctx.settings.recent_destinations:
+            self.recent_combo.addItem(d, d)
+        self.recent_combo.setEnabled(self.recent_combo.count() > 1)
+        self.recent_combo.blockSignals(False)
+        self._dest_changed()
+
+    def _browse(self) -> None:
+        start = self.dest_edit.text() or (self.ctx.settings.recent_destinations or [""])[0]
+        path = QFileDialog.getExistingDirectory(self, "Choose download location", start)
+        if path:
+            self.set_destination(path)
+
+    def _recent_chosen(self, index: int) -> None:
+        path = self.recent_combo.itemData(index)
+        if path:
+            self.set_destination(path)
+
+    def set_destination(self, path: str) -> None:
+        self.dest_edit.setText(os.path.normpath(path))
         self._dest_changed()
 
     def _dest_changed(self, *_: object) -> None:
-        self.new_name.setVisible(self.dest_combo.currentData() == NEW_LIBRARY)
         _, err = self.chosen_destination()
+        # a hint (not an error) while nothing has been chosen
         self.dest_error.setText(err or "")
         self._update_continue()
 
     def chosen_destination(self) -> tuple[str | None, str | None]:
         """(absolute path, None) or (None, error/hint). No default: the user must choose."""
-        data = self.dest_combo.currentData()
-        root = self.ctx.settings.tracks_root
-        if data is None:
-            return None, "Choose a destination library."
-        if data == NEW_LIBRARY:
-            name = self.new_name.text()
-            err = workflow.validate_library_name(name)
-            return (None, err) if err else (workflow.library_path(root, name), None)
-        return workflow.library_path(root, data), None
+        path = self.dest_edit.text().strip()
+        s = self.ctx.settings
+        if not s.slskd_downloads_dir.strip():
+            return None, "Set the slskd downloads folder in Settings first."
+        if not path:
+            return None, "Choose a download location."
+        try:
+            return check_destination(path, s.slskd_downloads_dir, s.archive_dir_name), None
+        except ApprovalError as exc:
+            return None, str(exc)
 
     def refresh_resume_button(self) -> None:
         try:

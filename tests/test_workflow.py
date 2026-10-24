@@ -68,7 +68,7 @@ def env(tmp_path):
     (root / "House").mkdir(parents=True)
     store = Store(tmp_path / "s.db")
     iid = store.create_import(Playlist("p.1", "Pl"), str(root / "House"))
-    settings = Settings(tracks_root=str(root), slskd_downloads_dir=str(tmp_path / "dl"),
+    settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"),
                         search_concurrency=2, search_timeout_s=1)
     yield SimpleNamespace(store=store, iid=iid, settings=settings, root=root, tmp=tmp_path)
     store.close()
@@ -188,7 +188,7 @@ def approved(env):
     run(env, FakeSlskd({"song": [good_file()]}), trs=[AppleTrack("i.1", "Song", "Artist")])
     dest = str(env.root / "House")
     ap = create_approval(env.store, env.iid, [SelectionItem("i.1", "u", REMOTE, 9_000_000, dest)],
-                         tracks_root=str(env.root))
+                         downloads_dir=env.settings.slskd_downloads_dir)
     return ap, dest
 
 
@@ -252,24 +252,150 @@ def test_scrub_removes_secrets_and_token_shapes():
     assert key not in msg and "Bearer abc" not in msg and "A" * 40 not in msg
 
 
-@pytest.mark.parametrize("name,ok", [
-    ("House", True), ("Drum & Bass 2", True), ("", False), ("  ", False), ("a/b", False), ("a\\b", False),
-    ("..", False), ("Soulseek", False), ("soulseek", False), ("CON", False), ("x.", False), ('a"b', False),
-    ("x" * 65, False), (" lead", False),
-])
-def test_validate_library_name(name, ok):
-    assert (workflow.validate_library_name(name) is None) is ok
-
-
-def test_list_libraries_excludes_soulseek(tmp_path):
-    for n in ("DnB", "House", "Soulseek"):
-        (tmp_path / n).mkdir()
-    (tmp_path / "file.txt").write_text("x")
-    assert workflow.list_libraries(str(tmp_path)) == ["DnB", "House"]
-    assert workflow.list_libraries(str(tmp_path / "missing")) == []
-
-
 def test_latest_approval_id(env):
     assert workflow.latest_approval_id(env.store, env.iid) is None
     ap, _ = approved(env)
     assert workflow.latest_approval_id(env.store, env.iid) == ap.id
+
+
+# ---------------------------------------------------------------- process_completed (import + archive)
+
+REMOTE_B = REMOTE.replace("03 - Artist - Song", "04 - Artist - Other")
+REMOTE_C = REMOTE.replace("03 - Artist - Song", "05 - Artist - Third")
+DATA_B = b"other-audio-bytes" * 12
+
+
+class FakeListing:
+    """Stands in for the slskd client's list_downloads (the only call process_completed makes)."""
+
+    def __init__(self, statuses=(), fail=False):
+        self.statuses, self.fail = list(statuses), fail
+
+    def list_downloads(self):
+        if self.fail:
+            raise SlskdError("down")
+        return self.statuses
+
+
+def three_track_approval(env):
+    """Two tracks from peer 'u' plus one from peer 'w', all approved to one destination."""
+    trs = [AppleTrack("i.1", "Song", "Artist", position=0), AppleTrack("i.2", "Other", "Artist", position=1),
+           AppleTrack("i.3", "Third", "Artist", position=2)]
+    client = FakeSlskd({"song": [good_file()], "other": [good_file("u", REMOTE_B)],
+                        "third": [good_file("w", REMOTE_C)]})
+    run(env, client, trs=trs)
+    dest = str(env.root / "House")
+    items = [SelectionItem("i.1", "u", REMOTE, 9_000_000, dest), SelectionItem("i.2", "u", REMOTE_B, 9_000_000, dest),
+             SelectionItem("i.3", "w", REMOTE_C, 9_000_000, dest)]
+    return create_approval(env.store, env.iid, items, downloads_dir=env.settings.slskd_downloads_dir)
+
+
+def put_peer_file(env, user, remote, data):
+    parts = remote.split("\\")
+    p = env.tmp / "dl" / user / parts[-2] / parts[-1]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    return p
+
+
+def set_state(env, ap, aid, user, remote, data, state):
+    env.store.upsert_transfer(ap.id, aid, TransferStatus(user, remote, len(data), state, state.value))
+
+
+def finish_u(env, ap, state_b=TransferState.SUCCEEDED, with_b_file=True):
+    put_peer_file(env, "u", REMOTE, DATA)
+    if with_b_file:
+        put_peer_file(env, "u", REMOTE_B, DATA_B)
+    set_state(env, ap, "i.1", "u", REMOTE, DATA, TransferState.SUCCEEDED)
+    set_state(env, ap, "i.2", "u", REMOTE_B, DATA_B, state_b)
+
+
+def test_process_imports_then_archives_peer_bundle(env):
+    ap = three_track_approval(env)
+    finish_u(env, ap)
+    set_state(env, ap, "i.3", "w", REMOTE_C, DATA, TransferState.IN_PROGRESS)
+    rep = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner(), client=FakeListing())
+    assert [r.outcome for r in rep.imported] == [ImportOutcome.COPIED, ImportOutcome.COPIED]
+    assert (env.root / "House" / "Song - Artist.mp3").read_bytes() == DATA
+    assert [a.username for a in rep.archived] == ["u"]
+    assert "w" in rep.blocked  # still downloading
+    dl = env.tmp / "dl"
+    assert not (dl / "u").exists()
+    assert (dl / "OLD" / "u" / "Artist - Album" / "03 - Artist - Song.mp3").read_bytes() == DATA
+    assert (dl / "OLD" / "u" / "Artist - Album" / "04 - Artist - Other.mp3").read_bytes() == DATA_B
+    assert [a.username for a in env.store.archives_for_approval(ap.id)] == ["u"]
+
+
+def test_process_is_idempotent_and_failed_items_are_terminal(env):
+    ap = three_track_approval(env)
+    finish_u(env, ap, state_b=TransferState.FAILED)
+    set_state(env, ap, "i.3", "w", REMOTE_C, DATA, TransferState.FAILED)
+    first = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert {a.username for a in first.archived} == {"u", "w"}
+    second = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert second.imported == [] and second.archived == [] and not second.blocked and not second.errors
+    assert len(list((env.tmp / "dl" / "OLD" / "u").rglob("*.mp3"))) == 2
+
+
+def test_archive_blocked_while_peer_item_unfinished(env):
+    ap = three_track_approval(env)
+    finish_u(env, ap, state_b=TransferState.QUEUED)
+    rep = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert rep.archived == [] and "u" in rep.blocked
+    assert "w" in rep.blocked  # never queued: no transfer record at all
+    assert (env.tmp / "dl" / "u").exists() and not (env.tmp / "dl" / "OLD").exists()
+    # the finished file was still imported
+    assert (env.root / "House" / "Song - Artist.mp3").exists()
+
+
+@pytest.mark.parametrize("kind", ["conflict", "invalid"])
+def test_archive_blocked_by_conflict_or_invalid_import(env, kind):
+    ap = three_track_approval(env)
+    set_state(env, ap, "i.3", "w", REMOTE_C, DATA, TransferState.FAILED)
+    finish_u(env, ap, with_b_file=(kind == "conflict"))  # invalid: i.2's file is missing on disk
+    want = ImportOutcome.INVALID
+    if kind == "conflict":
+        (env.root / "House").mkdir(parents=True, exist_ok=True)
+        (env.root / "House" / "Other - Artist.mp3").write_bytes(b"different")
+        want = ImportOutcome.CONFLICT
+    rep = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert any(r.outcome == want for r in rep.imported)
+    assert "u" in rep.blocked and "u" not in {a.username for a in rep.archived}
+    assert (env.tmp / "dl" / "u").exists()  # nothing moved; the user can inspect
+    again = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert "u" in again.blocked and (env.tmp / "dl" / "u").exists()
+    if kind == "conflict":
+        assert (env.root / "House" / "Other - Artist.mp3").read_bytes() == b"different"
+
+
+def test_archive_blocked_by_active_slskd_transfers(env):
+    ap = three_track_approval(env)
+    set_state(env, ap, "i.3", "w", REMOTE_C, DATA, TransferState.FAILED)
+    finish_u(env, ap)
+    busy = FakeListing([TransferStatus("U", "x/other.mp3", 5, TransferState.IN_PROGRESS)])  # case-insensitive
+    rep = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner(), client=busy)
+    assert "slskd" in rep.blocked["u"] and (env.tmp / "dl" / "u").exists()
+    broken = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner(),
+                                        client=FakeListing(fail=True))
+    assert "u" in broken.blocked and (env.tmp / "dl" / "u").exists()
+    idle = FakeListing([TransferStatus("u", "x/other.mp3", 5, TransferState.SUCCEEDED)])
+    ok = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner(), client=idle)
+    assert "u" in {a.username for a in ok.archived} and not (env.tmp / "dl" / "u").exists()
+
+
+def test_archive_blocked_by_other_approval_still_pending(env):
+    ap = three_track_approval(env)
+    set_state(env, ap, "i.3", "w", REMOTE_C, DATA, TransferState.FAILED)
+    finish_u(env, ap)
+    ap2 = create_approval(env.store, env.iid, [SelectionItem("i.1", "u", REMOTE, 9_000_000, str(env.root / "House"))],
+                          downloads_dir=env.settings.slskd_downloads_dir)
+    set_state(env, ap2, "i.1", "u", REMOTE, DATA, TransferState.IN_PROGRESS)
+    rep = workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert "other approval" in rep.blocked["u"] and (env.tmp / "dl" / "u").exists()
+
+
+def test_process_requires_downloads_dir(env):
+    ap = three_track_approval(env)
+    env.settings.slskd_downloads_dir = ""
+    with pytest.raises(ValueError, match="downloads folder"):
+        workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())

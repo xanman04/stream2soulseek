@@ -11,12 +11,13 @@ import subprocess
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
+from dataclasses import dataclass, field
 
-from . import organize
+from . import archive, organize
 from .matching import match
 from .models import (
     AppleTrack,
+    ArchiveResult,
     ImportOutcome,
     ImportResult,
     MatchResult,
@@ -41,45 +42,6 @@ def scrub(message: object, secrets: Iterable[str] = ()) -> str:
             text = text.replace(s, "[redacted]")
     text = _SECRETISH.sub("[redacted]", text)
     return text[:400]
-
-
-# ---------------------------------------------------------------- libraries
-
-_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", re.IGNORECASE)
-
-
-def list_libraries(tracks_root: str) -> list[str]:
-    """Existing flat libraries: immediate subfolders of the tracks root, excluding Soulseek."""
-    root = Path(tracks_root)
-    if not root.is_dir():
-        return []
-    return sorted(
-        (p.name for p in root.iterdir() if p.is_dir() and p.name.casefold() != "soulseek"),
-        key=str.casefold,
-    )
-
-
-def validate_library_name(name: str) -> str | None:
-    """Return an error message, or None if `name` is acceptable as a new library folder name."""
-    n = name.strip()
-    if not n:
-        return "Enter a name for the new library."
-    if len(n) > 64:
-        return "Library name is too long (64 characters at most)."
-    if _BAD_CHARS.search(n):
-        return 'Library name must not contain any of < > : " / \\ | ? *'
-    if n in (".", "..") or n.endswith(".") or name != name.strip():
-        return "Library name must not start/end with a space or end with a dot."
-    if _RESERVED.match(n):
-        return "That name is reserved by Windows."
-    if n.casefold() == "soulseek":
-        return "Soulseek is the raw download area; choose a different library name."
-    return None
-
-
-def library_path(tracks_root: str, name: str) -> str:
-    return str(Path(tracks_root) / name.strip())
 
 
 # ---------------------------------------------------------------- search
@@ -197,6 +159,8 @@ def import_completed(
     approval = store.get_approval(approval_id)
     if approval is None:
         raise ValueError("unknown approval")
+    if not settings.slskd_downloads_dir.strip():
+        raise ValueError("The slskd downloads folder is not set. Open Settings and choose it.")
     tracks = {t.apple_id: t for t in store.load_tracks(approval.import_id)}
     already = {
         r.apple_id for r in store.import_results(approval.import_id)
@@ -220,6 +184,7 @@ def import_completed(
                     track=track, tier=cand.tier, detected_version=cand.detected_version,
                     transfer=rec.status, downloads_dir=settings.slskd_downloads_dir,
                     destination=item.destination, ffprobe_path=settings.ffprobe_path, runner=runner,
+                    archive_name=settings.archive_dir_name,
                 )
             except Exception as exc:
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,
@@ -227,3 +192,83 @@ def import_completed(
         store.record_import_result(approval.import_id, res)
         out.append(res)
     return out
+
+
+# ---------------------------------------------------------------- import + archive
+
+_TERMINAL = (TransferState.SUCCEEDED, TransferState.FAILED)
+_ACTIVE = (TransferState.QUEUED, TransferState.IN_PROGRESS)
+_IMPORTED = (ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT)
+
+
+@dataclass
+class ProcessReport:
+    imported: list[ImportResult] = field(default_factory=list)  # results produced by this run
+    archived: list[ArchiveResult] = field(default_factory=list)  # peers archived by this run
+    blocked: dict[str, str] = field(default_factory=dict)  # username -> why not archived (yet)
+    errors: dict[str, str] = field(default_factory=dict)  # username -> archive error
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.imported or self.archived)
+
+
+def _archive_block_reason(store: Store, approval, username: str, client) -> str | None:
+    """Why this peer's bundle must not be archived yet, or None when it is safe."""
+    items = [i for i in approval.items if i.username == username]
+    imported = {r.apple_id: r for r in store.import_results(approval.import_id)}
+    for it in items:
+        rec = store.get_transfer(approval.id, it.apple_id)
+        if rec is None or rec.status.state not in _TERMINAL:
+            return "downloads from this peer are still unfinished"
+        if rec.status.state == TransferState.SUCCEEDED:
+            res = imported.get(it.apple_id)
+            if res is None:
+                return "a finished download has not been imported yet"
+            if res.outcome not in _IMPORTED:
+                return f"a file was not imported cleanly ({res.outcome.value}); inspect it first"
+    if store.peer_busy_elsewhere(username, approval.id):
+        return "another approval still has unfinished or unimported files from this peer"
+    if client is not None:
+        try:
+            listed = client.list_downloads()
+        except Exception as exc:  # noqa: BLE001
+            return f"could not check slskd for active transfers ({type(exc).__name__})"
+        if any(t.username.casefold() == username.casefold() and t.state in _ACTIVE for t in listed):
+            return "slskd still has queued or running transfers from this peer"
+    return None
+
+
+def process_completed(
+    store: Store, approval_id: str, settings: Settings, *, runner=subprocess.run, client=None
+) -> ProcessReport:
+    """Import every finished file, then archive each peer's bundle once it is safe to do so.
+
+    Idempotent: imported files and archived peers are recorded and skipped on later runs. Conflicts and
+    invalid files are reported and block archiving for that peer; they are never resolved automatically.
+    """
+    report = ProcessReport(imported=import_completed(store, approval_id, settings, runner=runner))
+    approval = store.get_approval(approval_id)
+    already = {a.username for a in store.archives_for_approval(approval_id)}
+    for username in sorted({i.username for i in approval.items}):
+        if username in already:
+            continue
+        reason = _archive_block_reason(store, approval, username, client)
+        if reason:
+            report.blocked[username] = reason
+            continue
+        try:
+            res = archive.archive_peer_bundle(
+                settings.slskd_downloads_dir, username, archive_name=settings.archive_dir_name)
+        except archive.ArchiveError as exc:
+            report.errors[username] = scrub(exc)
+            continue
+        except Exception as exc:  # noqa: BLE001
+            report.errors[username] = f"{type(exc).__name__}: {scrub(exc)}"
+            continue
+        if res.ok:
+            store.record_archive(approval_id, res)
+            report.archived.append(res)
+        else:
+            report.errors[username] = "; ".join(res.errors)[:400]
+    return report

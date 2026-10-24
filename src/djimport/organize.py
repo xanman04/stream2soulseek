@@ -85,12 +85,26 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def locate_download(downloads_dir: str, remote_filename: str, expected_size: int) -> Path:
+def sanitize_component(name: str) -> str:
+    """Windows-safe single folder name (how a peer username maps to a folder). May return ''."""
+    cleaned = _INVALID.sub("_", name).strip(" .")
+    if not cleaned:
+        return ""
+    if _RESERVED.match(cleaned.split(".")[0].strip()):
+        cleaned = "_" + cleaned
+    return cleaned
+
+
+def locate_download(
+    downloads_dir: str, username: str, remote_filename: str, expected_size: int, *, archive_name: str = "OLD"
+) -> Path:
     """Find the local copy of a remote file.
 
-    ASSUMPTION (needs live verification): slskd saves to <downloads_dir>/<last directory component of
-    the remote path>/<basename>. If absent, search recursively for the basename with exactly
-    expected_size; exactly one match is required.
+    ASSUMPTION (needs live verification): slskd saves to
+    <downloads_dir>/<username>/<last directory component of the remote path>/<basename>.
+    Fallbacks, in order: the older <downloads_dir>/<last dir>/<basename>, then a recursive search for the
+    basename with exactly expected_size (exactly one match required). The archive folder
+    (<downloads_dir>/<archive_name>) is never searched.
     """
     root = Path(downloads_dir)
     parts = [p for p in re.split(r"[\\/]+", remote_filename) if p]
@@ -99,23 +113,33 @@ def locate_download(downloads_dir: str, remote_filename: str, expected_size: int
     base = parts[-1]
     if base in (".", ".."):
         raise DownloadNotFoundError("invalid remote filename")
-    if len(parts) >= 2 and parts[-2] not in (".", ".."):
-        first = root / parts[-2] / base
+    archive = (root / archive_name) if archive_name else None
+
+    def ok(p: Path) -> bool:
         try:
-            if first.is_file() and first.stat().st_size == expected_size and _inside(first, root):
-                return first.resolve()
+            return (p.is_file() and p.stat().st_size == expected_size and _inside(p, root)
+                    and not (archive is not None and _inside(p, archive)))
         except OSError:
-            pass
+            return False
+
+    if len(parts) >= 2 and parts[-2] not in (".", ".."):
+        user_dir = sanitize_component(username)
+        candidates = []
+        if user_dir and user_dir not in (".", "..") and (not archive_name or user_dir.casefold() != archive_name.casefold()):
+            candidates.append(root / user_dir / parts[-2] / base)
+        candidates.append(root / parts[-2] / base)
+        for first in candidates:
+            if ok(first):
+                return first.resolve()
     matches: list[Path] = []
-    for dirpath, _dirs, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(root):
+        if archive is not None and Path(dirpath) == root:
+            dirs[:] = [d for d in dirs if d.casefold() != archive_name.casefold()]
         for f in files:
             if f == base:
                 p = Path(dirpath) / f
-                try:
-                    if p.stat().st_size == expected_size and _inside(p, root):
-                        matches.append(p)
-                except OSError:
-                    continue
+                if ok(p):
+                    matches.append(p)
     if len(matches) != 1:
         raise DownloadNotFoundError(
             f"expected exactly one downloaded file named {base!r} of {expected_size} bytes, found {len(matches)}"
@@ -222,6 +246,7 @@ def import_file(
     destination: str,
     ffprobe_path: str,
     runner=subprocess.run,
+    archive_name: str = "OLD",
 ) -> ImportResult:
     aid = track.apple_id
 
@@ -231,7 +256,8 @@ def import_file(
     if transfer.state != TransferState.SUCCEEDED:
         return invalid(f"transfer is not complete (state: {transfer.state.value})")
     try:
-        src = locate_download(downloads_dir, transfer.filename, transfer.size)
+        src = locate_download(downloads_dir, transfer.username, transfer.filename, transfer.size,
+                              archive_name=archive_name)
     except OrganizeError as exc:
         return invalid(str(exc))
     if src.stat().st_size != transfer.size:

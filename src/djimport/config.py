@@ -11,15 +11,23 @@ import json
 import os
 from pathlib import Path
 
-from .models import Settings
+from .models import Settings, default_ffprobe_path
+
+MAX_RECENT = 10
 
 
-def app_dir() -> Path:
+def app_dir_path() -> Path:
+    """The application data directory path, without creating it."""
     override = os.environ.get("DJIMPORT_HOME")
     if override:
         base = Path(override)
     else:
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "DJImport"
+    return base
+
+
+def app_dir() -> Path:
+    base = app_dir_path()
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -44,7 +52,19 @@ def load_settings() -> Settings:
         return Settings()
     data = json.loads(path.read_text(encoding="utf-8"))
     known = {f.name for f in dataclasses.fields(Settings)}
-    return Settings(**{k: v for k, v in data.items() if k in known})
+    s = Settings(**{k: v for k, v in data.items() if k in known})  # unknown/removed keys (tracks_root) ignored
+    if not s.ffprobe_path:
+        s.ffprobe_path = default_ffprobe_path()
+    s.recent_destinations = [str(d) for d in s.recent_destinations][:MAX_RECENT]
+    return s
+
+
+def remember_destination(settings: Settings, destination: str) -> None:
+    """Put `destination` first in settings.recent_destinations (deduplicated, max 10) and persist."""
+    key = os.path.normcase(os.path.normpath(destination))
+    rest = [d for d in settings.recent_destinations if os.path.normcase(os.path.normpath(d)) != key]
+    settings.recent_destinations = ([destination] + rest)[:MAX_RECENT]
+    save_settings(settings)
 
 
 def save_settings(settings: Settings) -> None:

@@ -28,8 +28,12 @@ class TransfersPage(QWidget):
         self.retry_btn = QPushButton("Retry failed (same file)")
         self.cancel_btn = QPushButton("Cancel transfer")
         self.refresh_btn = QPushButton("Refresh now")
-        self.import_btn = QPushButton("Import completed files")
+        self.import_btn = QPushButton("Process completed now")
         self.import_table = make_table(["Track", "Outcome", "Final file", "Detail"])
+        self.archive_table = make_table(["Peer", "Archive status"])
+        self._blocked: dict[str, str] = {}
+        self._archive_errors: dict[str, str] = {}
+        self._manual = False
         row = QHBoxLayout()
         for b in (self.retry_btn, self.cancel_btn, self.refresh_btn):
             row.addWidget(b)
@@ -41,14 +45,17 @@ class TransfersPage(QWidget):
         lay.addLayout(row)
         lay.addWidget(QLabel("Import results (conflicts are shown, never resolved automatically):"))
         lay.addWidget(self.import_table, 2)
+        lay.addWidget(QLabel("Peer folders (moved into the archive folder once everything from that peer is "
+                             "imported and finished):"))
+        lay.addWidget(self.archive_table, 1)
 
         self.timer = QTimer(self)
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.refresh)
         self.retry_btn.clicked.connect(self.retry_selected)
         self.cancel_btn.clicked.connect(self.cancel_selected)
-        self.refresh_btn.clicked.connect(self.refresh)
-        self.import_btn.clicked.connect(self.import_completed)
+        self.refresh_btn.clicked.connect(lambda *_: self.refresh())
+        self.import_btn.clicked.connect(lambda *_: self.process_now())
         self._set_enabled(False)
 
     # ------------------------------------------------------------ lifecycle
@@ -76,31 +83,49 @@ class TransfersPage(QWidget):
 
     # ------------------------------------------------------------ refresh
 
-    def refresh(self) -> None:
+    def refresh(self, *, process: bool | None = None) -> None:
+        """Poll slskd, then (auto_import, or process=True from the button) import and archive."""
         aid, iid = self.ctx.approval_id, self.ctx.import_id
         if not aid or self._inflight:
             return
         self._inflight = True
         ctx = self.ctx
+        do_process = ctx.settings.auto_import if process is None else process
 
         def work():
-            err = None
+            err = proc_err = None
+            report = None
             try:
                 with ctx.download_service() as svc:
                     svc.refresh(aid)
             except Exception as exc:  # noqa: BLE001 - show stored state anyway
                 err = ctx.describe(exc)
-            return err, ctx.store.transfers_for_approval(aid), (ctx.store.import_results(iid) if iid else [])
+            if do_process and err is None:
+                try:
+                    client = ctx.slskd_client()
+                    try:
+                        report = workflow.process_completed(ctx.store, aid, ctx.settings, client=client)
+                    finally:
+                        client.close()
+                except Exception as exc:  # noqa: BLE001
+                    proc_err = ctx.describe(exc)
+            return (err, ctx.store.transfers_for_approval(aid), (ctx.store.import_results(iid) if iid else []),
+                    ctx.store.archives_for_approval(aid), report, proc_err)
 
         run_async(self, work, self._refreshed, self._refresh_failed)
 
     def _refresh_failed(self, exc: object) -> None:
         self._inflight = False
         self.info.setText(f"Refresh failed: {self.ctx.describe(exc)}")
+        if self._manual:
+            self._manual = False
+            self.import_btn.setEnabled(True)
 
     def _refreshed(self, payload: tuple) -> None:
         self._inflight = False
-        err, records, results = payload
+        err, records, results, archives, report, proc_err = payload
+        if report is not None:
+            self._blocked, self._archive_errors = report.blocked, report.errors
         self._states = {r.apple_id: r.status.state for r in records}
         self.table.setRowCount(len(records))
         for r, rec in enumerate(records):
@@ -118,8 +143,23 @@ class TransfersPage(QWidget):
         msg = f"{done} of {len(records)} complete, {failed} failed."
         if err:
             msg += f" slskd refresh problem (showing last known state): {err}"
+        if proc_err:
+            msg += f" Import/archive problem: {proc_err}"
+        counts = {o: sum(1 for x in results if x.outcome == o) for o in ImportOutcome}
+        if results:
+            msg += (f" Imported: {counts[ImportOutcome.COPIED]} copied, {counts[ImportOutcome.ALREADY_PRESENT]} "
+                    f"already present, {counts[ImportOutcome.CONFLICT]} conflicts, "
+                    f"{counts[ImportOutcome.INVALID]} invalid.")
         self.info.setText(msg)
         self._show_import_results(results)
+        self._show_archives(records, archives)
+        if self._manual:
+            self._manual = False
+            self.import_btn.setEnabled(True)
+            if counts[ImportOutcome.CONFLICT] or counts[ImportOutcome.INVALID]:
+                QMessageBox.warning(self, "Import", "Some files were not imported (conflict or failed "
+                                    "verification). Nothing was overwritten or archived for those peers; "
+                                    "see the results table.")
 
     def _show_import_results(self, results: list) -> None:
         self.import_table.setRowCount(len(results))
@@ -128,6 +168,27 @@ class TransfersPage(QWidget):
                                       res.final_path or "", res.detail]):
                 self.import_table.setItem(r, c, item(text, text))
         self.import_table.resizeColumnsToContents()
+
+    def _show_archives(self, records: list, archives: list) -> None:
+        done = {a.username: a for a in archives}
+        peers = sorted({r.status.username for r in records} | set(done), key=str.casefold)
+        name = self.ctx.settings.archive_dir_name
+        self.archive_table.setRowCount(len(peers))
+        for r, peer in enumerate(peers):
+            a = done.get(peer)
+            if a is not None:
+                text = (f"Archived to {name}: {len(a.moved)} moved, {len(a.deduped)} duplicate(s) removed, "
+                        f"{len(a.renamed)} renamed" if not a.nothing_to_archive else
+                        f"Nothing to archive (no folder for this peer)")
+            elif peer in self._archive_errors:
+                text = f"Archive problem: {self._archive_errors[peer]}"
+            elif peer in self._blocked:
+                text = f"Waiting: {self._blocked[peer]}"
+            else:
+                text = "Waiting"
+            self.archive_table.setItem(r, 0, item(peer, peer))
+            self.archive_table.setItem(r, 1, item(text, text))
+        self.archive_table.resizeColumnsToContents()
 
     # ------------------------------------------------------------ actions
 
@@ -170,29 +231,10 @@ class TransfersPage(QWidget):
 
         run_async(self, work, lambda _r: self.refresh(), lambda e: show_error(self, "Cancel", ctx.describe(e)))
 
-    def import_completed(self) -> None:
-        aid = self.ctx.approval_id
-        if not aid:
+    def process_now(self) -> None:
+        """Manual 'Process completed now': refresh, import finished files, archive what is safe."""
+        if not self.ctx.approval_id or self._inflight:
             return
-        ctx = self.ctx
+        self._manual = True
         self.import_btn.setEnabled(False)
-
-        def work():
-            return workflow.import_completed(ctx.store, aid, ctx.settings)
-
-        def done(results):
-            self.import_btn.setEnabled(True)
-            counts = {o: sum(1 for r in results if r.outcome == o) for o in ImportOutcome}
-            self.info.setText(
-                f"Import: {counts[ImportOutcome.COPIED]} copied, {counts[ImportOutcome.ALREADY_PRESENT]} already "
-                f"present, {counts[ImportOutcome.CONFLICT]} conflicts, {counts[ImportOutcome.INVALID]} invalid.")
-            if counts[ImportOutcome.CONFLICT] or counts[ImportOutcome.INVALID]:
-                QMessageBox.warning(self, "Import", "Some files were not imported (conflict or failed "
-                                    "verification). Nothing was overwritten; see the results table.")
-            self.refresh()
-
-        def failed(exc):
-            self.import_btn.setEnabled(True)
-            show_error(self, "Import", ctx.describe(exc))
-
-        run_async(self, work, done, failed)
+        self.refresh(process=True)

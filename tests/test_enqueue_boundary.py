@@ -32,7 +32,7 @@ def env(tmp_path):
     s.save_match_results(iid, [MatchResult(tr, MatchStatus.PROPOSED, cd)])
     s.load_match_results(iid)
     items = [SelectionItem("i.1", "u", "x\\1.mp3", 10, str(root / "House"))]
-    ap = create_approval(s, iid, items, tracks_root=str(root))
+    ap = create_approval(s, iid, items, downloads_dir=str(root / "Soulseek" / "complete"))
     yield s, c, ap
     s.close()
 
