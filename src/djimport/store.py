@@ -1,0 +1,449 @@
+"""SQLite state store: the single source of truth for imports, review data, approvals and transfers.
+
+Never stores credentials. One shared connection guarded by an RLock (check_same_thread=False), so it
+is safe to use from Qt worker threads. WAL journal mode; schema version in PRAGMA user_version.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import threading
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .models import (
+    AppleTrack,
+    Approval,
+    Candidate,
+    ImportOutcome,
+    ImportResult,
+    MatchResult,
+    MatchStatus,
+    Playlist,
+    RemoteFile,
+    SelectionItem,
+    Tier,
+    TransferState,
+    TransferStatus,
+)
+
+SCHEMA_VERSION = 1
+
+_SCHEMA = """
+CREATE TABLE imports (
+    id TEXT PRIMARY KEY,
+    playlist_id TEXT NOT NULL,
+    playlist_name TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE tracks (
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT,
+    duration_ms INTEGER,
+    catalog_id TEXT,
+    PRIMARY KEY (import_id, apple_id)
+);
+CREATE TABLE match_results (
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (import_id, apple_id)
+);
+CREATE TABLE candidates (
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    extension TEXT,
+    bitrate INTEGER,
+    is_vbr INTEGER,
+    sample_rate INTEGER,
+    bit_depth INTEGER,
+    length_s INTEGER,
+    has_free_slot INTEGER,
+    queue_length INTEGER,
+    upload_speed INTEGER,
+    tier INTEGER NOT NULL,
+    format_rank INTEGER NOT NULL,
+    detected_version TEXT,
+    flagged INTEGER NOT NULL,
+    score REAL NOT NULL,
+    reasons_json TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('best', 'alt', 'rejected')),
+    ordinal INTEGER NOT NULL,
+    PRIMARY KEY (import_id, apple_id, username, filename, size)
+);
+CREATE TABLE approvals (
+    id TEXT PRIMARY KEY,
+    import_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE approval_items (
+    approval_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    destination TEXT NOT NULL,
+    PRIMARY KEY (approval_id, apple_id)
+);
+CREATE TABLE transfers (
+    approval_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    raw_state TEXT NOT NULL DEFAULT '',
+    transfer_id TEXT,
+    percent REAL NOT NULL DEFAULT 0,
+    bytes_transferred INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE (username, filename, size, approval_id),
+    UNIQUE (approval_id, apple_id)
+);
+CREATE TABLE import_results (
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    source_path TEXT,
+    final_path TEXT,
+    sha256 TEXT,
+    codec TEXT,
+    bitrate INTEGER,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (import_id, apple_id)
+);
+"""
+
+
+class StoreError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class ImportRecord:
+    id: str
+    playlist_id: str
+    playlist_name: str
+    destination: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class TransferRecord:
+    approval_id: str
+    apple_id: str
+    status: TransferStatus
+    updated_at: str
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def norm_path(p: str) -> str:
+    return os.path.normcase(os.path.normpath(p))
+
+
+def _b(v: bool | None) -> int | None:
+    return None if v is None else int(v)
+
+
+def _ob(v: int | None) -> bool | None:
+    return None if v is None else bool(v)
+
+
+class Store:
+    def __init__(self, path: str | Path):
+        self.path = str(path)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
+        self._conn.row_factory = sqlite3.Row
+        with self._lock:
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.DatabaseError:
+                pass
+            self._conn.execute("PRAGMA synchronous=FULL")
+            self._migrate()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def _migrate(self) -> None:
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == 0:
+            with self._conn:
+                for stmt in _SCHEMA.split(";"):
+                    if stmt.strip():
+                        self._conn.execute(stmt)
+                self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        elif version > SCHEMA_VERSION:
+            raise StoreError(f"database schema {version} is newer than supported {SCHEMA_VERSION}")
+
+    # ------------------------------------------------------------ imports / tracks
+
+    def create_import(self, playlist: Playlist, destination: str) -> str:
+        import_id = uuid.uuid4().hex
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO imports VALUES (?,?,?,?,?)",
+                (import_id, playlist.id, playlist.name, destination, utc_now()),
+            )
+        return import_id
+
+    def get_import(self, import_id: str) -> ImportRecord | None:
+        with self._lock:
+            r = self._conn.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone()
+        return ImportRecord(**dict(r)) if r else None
+
+    def list_imports(self) -> list[ImportRecord]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM imports ORDER BY created_at DESC, rowid DESC").fetchall()
+        return [ImportRecord(**dict(r)) for r in rows]
+
+    def _upsert_track(self, import_id: str, t: AppleTrack) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO tracks VALUES (?,?,?,?,?,?,?,?)",
+            (import_id, t.apple_id, t.position, t.name, t.artist, t.album, t.duration_ms, t.catalog_id),
+        )
+
+    def save_tracks(self, import_id: str, tracks: list[AppleTrack]) -> None:
+        with self._lock, self._conn:
+            for t in tracks:
+                self._upsert_track(import_id, t)
+
+    def load_tracks(self, import_id: str) -> list[AppleTrack]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM tracks WHERE import_id=? ORDER BY position, apple_id", (import_id,)
+            ).fetchall()
+        return [_track(r) for r in rows]
+
+    # ------------------------------------------------------------ match results
+
+    def save_match_results(self, import_id: str, results: list[MatchResult]) -> None:
+        """Replace stored results (and candidates) for the given tracks. Also upserts the tracks."""
+        with self._lock, self._conn:
+            for res in results:
+                aid = res.track.apple_id
+                self._upsert_track(import_id, res.track)
+                self._conn.execute("DELETE FROM match_results WHERE import_id=? AND apple_id=?", (import_id, aid))
+                self._conn.execute("DELETE FROM candidates WHERE import_id=? AND apple_id=?", (import_id, aid))
+                self._conn.execute(
+                    "INSERT INTO match_results VALUES (?,?,?,?)", (import_id, aid, res.status.value, res.note)
+                )
+                ordinal = 0
+                groups: list[tuple[str, list[Candidate]]] = [
+                    ("best", [res.best] if res.best else []),
+                    ("alt", list(res.alternatives)),
+                    ("rejected", list(res.rejected)),
+                ]
+                for role, cands in groups:
+                    for c in cands:
+                        self._insert_candidate(import_id, aid, c, role, ordinal)
+                        ordinal += 1
+
+    def _insert_candidate(self, import_id: str, aid: str, c: Candidate, role: str, ordinal: int) -> None:
+        f = c.file
+        self._conn.execute(
+            "INSERT OR REPLACE INTO candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                import_id, aid, f.username, f.filename, f.size, f.extension, f.bitrate, _b(f.is_vbr),
+                f.sample_rate, f.bit_depth, f.length_s, _b(f.has_free_slot), f.queue_length, f.upload_speed,
+                int(c.tier), c.format_rank, c.detected_version, int(c.flagged), c.score,
+                json.dumps(list(c.reasons)), role, ordinal,
+            ),
+        )
+
+    def load_match_results(self, import_id: str) -> list[MatchResult]:
+        with self._lock:
+            tracks = {t.apple_id: t for t in self.load_tracks(import_id)}
+            mrows = self._conn.execute("SELECT * FROM match_results WHERE import_id=?", (import_id,)).fetchall()
+            crows = self._conn.execute(
+                "SELECT * FROM candidates WHERE import_id=? ORDER BY ordinal", (import_id,)
+            ).fetchall()
+        by_track: dict[str, list[sqlite3.Row]] = {}
+        for r in crows:
+            by_track.setdefault(r["apple_id"], []).append(r)
+        out: list[MatchResult] = []
+        for m in mrows:
+            aid = m["apple_id"]
+            if aid not in tracks:
+                continue
+            best: Candidate | None = None
+            alts: list[Candidate] = []
+            rej: list[Candidate] = []
+            for r in by_track.get(aid, []):
+                c = _candidate(r)
+                if r["role"] == "best":
+                    best = c
+                elif r["role"] == "alt":
+                    alts.append(c)
+                else:
+                    rej.append(c)
+            out.append(
+                MatchResult(
+                    track=tracks[aid], status=MatchStatus(m["status"]), best=best,
+                    alternatives=tuple(alts), rejected=tuple(rej), note=m["note"],
+                )
+            )
+        out.sort(key=lambda r: (r.track.position, r.track.apple_id))
+        return out
+
+    def find_candidate(self, import_id: str, apple_id: str, username: str, filename: str, size: int) -> Candidate | None:
+        """Exact lookup of a stored candidate (any role, including rejected)."""
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT * FROM candidates WHERE import_id=? AND apple_id=? AND username=? AND filename=? AND size=?",
+                (import_id, apple_id, username, filename, size),
+            ).fetchone()
+        return _candidate(r) if r else None
+
+    # ------------------------------------------------------------ approvals
+
+    def save_approval(self, approval: Approval) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO approvals VALUES (?,?,?,?)",
+                (approval.id, approval.import_id, approval.fingerprint, approval.created_at),
+            )
+            for it in approval.items:
+                self._conn.execute(
+                    "INSERT INTO approval_items VALUES (?,?,?,?,?,?)",
+                    (approval.id, it.apple_id, it.username, it.filename, it.size, it.destination),
+                )
+
+    def get_approval(self, approval_id: str) -> Approval | None:
+        with self._lock:
+            a = self._conn.execute("SELECT * FROM approvals WHERE id=?", (approval_id,)).fetchone()
+            if a is None:
+                return None
+            rows = self._conn.execute(
+                "SELECT * FROM approval_items WHERE approval_id=? ORDER BY apple_id, username, filename, size",
+                (approval_id,),
+            ).fetchall()
+        items = tuple(
+            SelectionItem(r["apple_id"], r["username"], r["filename"], r["size"], r["destination"]) for r in rows
+        )
+        return Approval(a["id"], a["import_id"], a["fingerprint"], items, a["created_at"])
+
+    # ------------------------------------------------------------ transfers
+
+    def upsert_transfer(self, approval_id: str, apple_id: str, status: TransferStatus) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO transfers (approval_id, apple_id, username, filename, size, state, raw_state,
+                       transfer_id, percent, bytes_transferred, error, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(approval_id, apple_id) DO UPDATE SET
+                       username=excluded.username, filename=excluded.filename, size=excluded.size,
+                       state=excluded.state, raw_state=excluded.raw_state, transfer_id=excluded.transfer_id,
+                       percent=excluded.percent, bytes_transferred=excluded.bytes_transferred,
+                       error=excluded.error, updated_at=excluded.updated_at""",
+                (
+                    approval_id, apple_id, status.username, status.filename, status.size, status.state.value,
+                    status.raw_state, status.transfer_id, status.percent, status.bytes_transferred,
+                    status.error, utc_now(),
+                ),
+            )
+
+    def transfers_for_approval(self, approval_id: str) -> list[TransferRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM transfers WHERE approval_id=? ORDER BY apple_id", (approval_id,)
+            ).fetchall()
+        return [_transfer(r) for r in rows]
+
+    def get_transfer(self, approval_id: str, apple_id: str) -> TransferRecord | None:
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT * FROM transfers WHERE approval_id=? AND apple_id=?", (approval_id, apple_id)
+            ).fetchone()
+        return _transfer(r) if r else None
+
+    # ------------------------------------------------------------ import results
+
+    def record_import_result(self, import_id: str, result: ImportResult) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO import_results VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    import_id, result.apple_id, result.outcome.value, result.source_path, result.final_path,
+                    result.sha256, result.codec, result.bitrate_kbps, result.detail, utc_now(),
+                ),
+            )
+
+    def import_results(self, import_id: str) -> list[ImportResult]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM import_results WHERE import_id=? ORDER BY rowid", (import_id,)
+            ).fetchall()
+        return [_import_result(r) for r in rows]
+
+    def completed_apple_ids(self, destination: str) -> set[str]:
+        """Apple ids already copied into (or identical to a file already in) this destination."""
+        want = norm_path(destination)
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT r.apple_id, i.destination FROM import_results r JOIN imports i ON i.id = r.import_id
+                   WHERE r.outcome IN (?, ?)""",
+                (ImportOutcome.COPIED.value, ImportOutcome.ALREADY_PRESENT.value),
+            ).fetchall()
+        return {r["apple_id"] for r in rows if norm_path(r["destination"]) == want}
+
+
+# ---------------------------------------------------------------- row mappers
+
+
+def _track(r: sqlite3.Row) -> AppleTrack:
+    return AppleTrack(
+        apple_id=r["apple_id"], name=r["name"], artist=r["artist"], album=r["album"],
+        duration_ms=r["duration_ms"], catalog_id=r["catalog_id"], position=r["position"],
+    )
+
+
+def _candidate(r: sqlite3.Row) -> Candidate:
+    f = RemoteFile(
+        username=r["username"], filename=r["filename"], size=r["size"], extension=r["extension"],
+        bitrate=r["bitrate"], is_vbr=_ob(r["is_vbr"]), sample_rate=r["sample_rate"], bit_depth=r["bit_depth"],
+        length_s=r["length_s"], has_free_slot=_ob(r["has_free_slot"]), queue_length=r["queue_length"],
+        upload_speed=r["upload_speed"],
+    )
+    return Candidate(
+        file=f, tier=Tier(r["tier"]), format_rank=r["format_rank"], detected_version=r["detected_version"],
+        reasons=tuple(json.loads(r["reasons_json"])), flagged=bool(r["flagged"]), score=r["score"],
+    )
+
+
+def _transfer(r: sqlite3.Row) -> TransferRecord:
+    st = TransferStatus(
+        username=r["username"], filename=r["filename"], size=r["size"], state=TransferState(r["state"]),
+        raw_state=r["raw_state"], transfer_id=r["transfer_id"], percent=r["percent"],
+        bytes_transferred=r["bytes_transferred"], error=r["error"],
+    )
+    return TransferRecord(r["approval_id"], r["apple_id"], st, r["updated_at"])
+
+
+def _import_result(r: sqlite3.Row) -> ImportResult:
+    return ImportResult(
+        apple_id=r["apple_id"], outcome=ImportOutcome(r["outcome"]), source_path=r["source_path"],
+        final_path=r["final_path"], detail=r["detail"], codec=r["codec"], bitrate_kbps=r["bitrate"],
+        sha256=r["sha256"],
+    )
