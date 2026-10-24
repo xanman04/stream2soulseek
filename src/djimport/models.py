@@ -305,6 +305,7 @@ class Settings:
     archive_dir_name: str = "OLD"  # subfolder of the downloads dir that receives finished peer folders
     auto_import: bool = True
     match_policy: MatchPolicy = field(default_factory=MatchPolicy)
+    rule_layouts: dict[str, MatchPolicy] = field(default_factory=dict)  # saved rule sets by name (see layouts.py)
     extra: dict = field(default_factory=dict)
 
 

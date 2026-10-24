@@ -54,6 +54,9 @@ def load_settings() -> Settings:
     known = {f.name for f in dataclasses.fields(Settings)}
     kwargs = {k: v for k, v in data.items() if k in known}  # unknown/removed keys (tracks_root) ignored
     kwargs["match_policy"] = MatchPolicy.from_dict(data.get("match_policy"))  # absent in old files -> defaults
+    layouts = data.get("rule_layouts")
+    kwargs["rule_layouts"] = ({str(n): MatchPolicy.from_dict(p) for n, p in layouts.items() if str(n).strip()}
+                              if isinstance(layouts, dict) else {})
     s = Settings(**kwargs)
     if not s.ffprobe_path:
         s.ffprobe_path = default_ffprobe_path()
@@ -72,5 +75,7 @@ def remember_destination(settings: Settings, destination: str) -> None:
 def save_settings(settings: Settings) -> None:
     path = settings_path()
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({**dataclasses.asdict(settings), "match_policy": settings.match_policy.to_dict()}, indent=2), encoding="utf-8")
+    data = {**dataclasses.asdict(settings), "match_policy": settings.match_policy.to_dict(),
+            "rule_layouts": {n: p.to_dict() for n, p in settings.rule_layouts.items()}}
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     os.replace(tmp, path)
