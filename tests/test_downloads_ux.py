@@ -102,7 +102,8 @@ def test_still_downloading_hides_check_and_counts_groups(env):  # noqa: F811
     assert page.chip_downloading.text() == "1 downloading"
     assert page.chip_waiting.text() == "1 waiting on uploader"
     assert page.chip_attention.isHidden() and page.banner.isHidden()
-    assert page.check_btn.isHidden() and page.new_import_btn.isHidden()
+    assert page.check_btn.isHidden() and not page.new_import_btn.isHidden()  # always available
+    assert page._active == 2
     assert not page.queued_backups_btn.isHidden()  # a queued track with no progress
     page.stop()
 
@@ -150,10 +151,10 @@ def test_refresh_error_and_import_problems_are_a_single_banner(env):  # noqa: F8
     recs = [(0, rec(TransferState.SUCCEEDED, track="a"))]
     page._refreshed(payload(recs, err="offline"))
     assert "Can't reach Soulseek" in page.banner.text() and page.check_btn.isHidden()
-    assert page.new_import_btn.isHidden()
+    assert not page.new_import_btn.isHidden()
     page.ctx.approval_id = "ap"
     page._refresh_failed(RuntimeError("synthetic poll failure"))
-    assert "Can't read the download status" in page.banner.text() and page.new_import_btn.isHidden()
+    assert "Can't read the download status" in page.banner.text() and not page.new_import_btn.isHidden()
     conflict = SimpleNamespace(apple_id="a", outcome=ImportOutcome.CONFLICT, final_path=None, detail="exists")
     page._refreshed(payload(recs, [conflict]))
     assert "needs a check" in page.banner.text() and page.fix_btn.isHidden()

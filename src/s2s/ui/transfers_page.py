@@ -15,6 +15,7 @@ from .. import workflow
 from ..models import ImportOutcome, TransferState
 from ..rejections import RejectionKind, classify, pending_declined
 from .context import AppContext
+from .spectrogram_dialog import SpectrogramDialog
 from .theme import button_text, chip, primary, set_banner, set_chip, subtle, tint
 from .util import fmt_mib, item, make_table, show_error
 from .workers import run_async
@@ -139,6 +140,7 @@ class TransfersPage(QWidget):
         self._blocked: dict[str, str] = {}
         self._archive_errors: dict[str, str] = {}
         self._manual = False
+        self._active = 0  # tracks still downloading, waiting or not started (from the last refresh)
 
         # header: one bar, a few counts
         self.progress = QProgressBar()
@@ -183,6 +185,9 @@ class TransfersPage(QWidget):
         self.retry_btn = QPushButton("Retry same file")
         self.cancel_btn = QPushButton("Cancel")
         self.folder_btn = QPushButton("Show in folder")
+        self.spectrogram_btn = QPushButton("Spectrogram…")
+        self.spectrogram_btn.setToolTip("Check the real quality of a finished track (select a track that is in "
+                                        "your folder).")
         self.queued_backups_btn = QPushButton("Try my approved backups…")
         self.queued_backups_btn.setVisible(False)
         self.import_btn = QPushButton("Copy finished downloads")  # only when automatic copying is off
@@ -221,7 +226,7 @@ class TransfersPage(QWidget):
         lay.addLayout(banner_row)
         lay.addWidget(self.table, 1)
         actions = QHBoxLayout()
-        for b in (self.retry_btn, self.cancel_btn, self.folder_btn, self.queued_backups_btn):
+        for b in (self.retry_btn, self.cancel_btn, self.folder_btn, self.spectrogram_btn, self.queued_backups_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.import_btn)
@@ -239,12 +244,14 @@ class TransfersPage(QWidget):
         self.timer.timeout.connect(self.refresh)
         self.fix_btn.clicked.connect(lambda *_: self.request_fix())
         self.check_btn.clicked.connect(lambda *_: self.check_requested.emit())
-        self.new_import_btn.clicked.connect(lambda *_: self.new_import_requested.emit())
+        self.new_import_btn.clicked.connect(lambda *_: self.request_new_import())
         self.history_btn.clicked.connect(lambda *_: self.history_requested.emit())
         self.queued_backups_btn.clicked.connect(lambda *_: self.queued_backups_requested.emit())
         self.retry_btn.clicked.connect(self.retry_selected)
         self.cancel_btn.clicked.connect(self.cancel_selected)
         self.folder_btn.clicked.connect(self.show_in_folder)
+        self.spectrogram_btn.clicked.connect(self.open_spectrogram)
+        self.table.cellDoubleClicked.connect(lambda *_: self.open_spectrogram())
         self.refresh_btn.clicked.connect(lambda *_: self.refresh())
         self.import_btn.clicked.connect(lambda *_: self.process_now())
         self.details_btn.toggled.connect(self.archive_table.setVisible)
@@ -265,6 +272,7 @@ class TransfersPage(QWidget):
         self.retry_btn.setEnabled(state == TransferState.FAILED)
         self.cancel_btn.setEnabled(state in (TransferState.QUEUED, TransferState.IN_PROGRESS))
         self.folder_btn.setEnabled(bool(selected and self._final_paths.get(selected[1])))
+        self.spectrogram_btn.setEnabled(bool(selected and self._final_paths.get(selected[1])))
 
     def _reset_header(self) -> None:
         self.banner.setVisible(False)
@@ -272,6 +280,7 @@ class TransfersPage(QWidget):
         self.check_btn.setVisible(False)
         self.new_import_btn.setVisible(False)
         self.new_import_btn.setEnabled(False)
+        self._active = 0
 
     def start(self) -> None:
         """Begin showing/refreshing the current approval."""
@@ -289,6 +298,7 @@ class TransfersPage(QWidget):
             self._names = {t.apple_id: f"{t.name} — {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
         self._set_enabled(True)
         self.history_btn.setEnabled(True)
+        self.new_import_btn.setVisible(True)  # always available once downloads were confirmed
         self.import_btn.setVisible(not self.ctx.settings.auto_import)
         self.refresh()
         self.timer.start()
@@ -306,7 +316,6 @@ class TransfersPage(QWidget):
             return
         if self._inflight:
             return
-        self.new_import_btn.setVisible(False)
         self.new_import_btn.setEnabled(False)
         self._inflight = True
         ctx = self.ctx
@@ -367,7 +376,7 @@ class TransfersPage(QWidget):
 
     def _refresh_failed(self, exc: object) -> None:
         self._inflight = False
-        self.new_import_btn.setVisible(False)
+        self.new_import_btn.setVisible(bool(self.ctx.approval_id))
         self.new_import_btn.setEnabled(True)
         self.fix_btn.setVisible(False)
         self.check_btn.setVisible(False)
@@ -421,6 +430,7 @@ class TransfersPage(QWidget):
         fixable = [st for st in statuses.values() if st.fixable]
         needs_check = sum(1 for st in statuses.values() if st.group == ATTENTION and not st.fixable)
         active = counts[DOWNLOADING] + counts[WAITING] + counts[IDLE]
+        self._active = active
         self._show_banner(err=err, proc_err=proc_err, total=total, playlist_tracks=playlist_tracks, counts=counts,
                           fixable=fixable, needs_check=needs_check, active=active,
                           paths=[self._final_paths.get(t, "") for t in order if statuses[t].group == FOLDER])
@@ -430,7 +440,7 @@ class TransfersPage(QWidget):
             rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS)
             and rec.status.bytes_transferred == 0 and rec.status.percent == 0
             for rec in records if relevant.get(rec.apple_id) == rec.approval_id))
-        self.new_import_btn.setVisible(bool(total) and not active and not err)
+        self.new_import_btn.setVisible(bool(total) or bool(self.ctx.approval_id))
         self.history_btn.setEnabled(bool(self.ctx.import_id))
         self._show_archives(records, archives, relevant)
         self._update_row_actions()
@@ -626,7 +636,7 @@ class TransfersPage(QWidget):
         self.table.selectRow(row)
         self._update_row_actions()
         menu = QMenu(self)
-        for button in (self.retry_btn, self.cancel_btn, self.folder_btn):
+        for button in (self.retry_btn, self.cancel_btn, self.folder_btn, self.spectrogram_btn):
             act = menu.addAction(button.text())
             act.setEnabled(button.isEnabled())
             act.triggered.connect(button.click)
@@ -637,6 +647,45 @@ class TransfersPage(QWidget):
         path = self._final_paths.get(sel[1]) if sel else None
         if path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent)))
+
+    def open_spectrogram(self) -> None:
+        sel = self._selected()
+        path = self._final_paths.get(sel[1]) if sel else None
+        if not path:
+            return
+        if not Path(path).is_file():
+            show_error(self, "Spectrogram", "That file is no longer in your folder.")
+            return
+        SpectrogramDialog(path, self.ctx.settings, self).exec()
+
+    def _import_name(self) -> str:
+        ctx = self.ctx
+        if ctx.playlist is not None and ctx.playlist.name:
+            return ctx.playlist.name
+        try:
+            record = ctx.store.get_import(ctx.import_id) if ctx.import_id else None
+        except Exception:  # noqa: BLE001
+            record = None
+        return (record.playlist_name if record else "") or "this playlist"
+
+    def ask_start_another(self, name: str, active: int) -> bool:
+        """Modal question when downloads are still running. True only for Start another. Replaceable in tests."""
+        box = QMessageBox(QMessageBox.Icon.Question, "Start another playlist?",
+                          f"Downloads for {name} are still running ({_plural(active, 'track', 'tracks')} not "
+                          "finished). Start another playlist?\n\nDownloads continue in Soulseek; S2S imports them "
+                          "when you reopen this import (Resume last import).", parent=self)
+        go = box.addButton("Start another", QMessageBox.ButtonRole.AcceptRole)
+        stay = box.addButton("Stay here", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is go
+
+    def request_new_import(self) -> None:
+        """'Start another playlist': asks first while anything is still running or queued."""
+        if self._active > 0 and not self.ask_start_another(self._import_name(), self._active):
+            return
+        self.new_import_requested.emit()
 
     def retry_selected(self) -> None:
         sel = self._selected()

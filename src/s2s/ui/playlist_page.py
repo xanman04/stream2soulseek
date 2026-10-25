@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QSplitter, QStackedWidget, QTableView, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSplitter, QStackedWidget, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..models import AppleTrack, Playlist
@@ -48,6 +48,8 @@ class PlaylistPage(QWidget):
         self._link_request = 0
         self._link_open = False  # the shown playlist came from a pasted link
         self._public_fetch = fetch_public_playlist  # replaceable in tests
+        self._source_index = -1  # last accepted source, restored when the user stays on the running import
+        self._restoring = False
 
         # --- top row
         self.source_combo = QComboBox()
@@ -174,7 +176,7 @@ class PlaylistPage(QWidget):
         self.source_combo.currentIndexChanged.connect(self._source_changed)
         self.link_btn.clicked.connect(self.open_link)
         self.link_edit.returnPressed.connect(self.open_link)
-        self.playlist_list.currentItemChanged.connect(lambda *_: self.preview_tracks())
+        self.playlist_list.currentItemChanged.connect(self._playlist_selected)
         self.playlist_search.textChanged.connect(self._filter_playlists)
         self.track_search.textChanged.connect(self._filter_tracks)
         self.refresh_sources()
@@ -198,6 +200,7 @@ class PlaylistPage(QWidget):
             i = self.source_combo.findText(prev.name)
             self.source_combo.setCurrentIndex(max(i, 0))
         self.source_combo.blockSignals(False)
+        self._source_index = self.source_combo.currentIndex()
         has = self.source_combo.count() > 0
         self.stack.setCurrentIndex(0 if has or self._link_open else 1)
         self.source_combo.setEnabled(self.source_combo.count() > 1)
@@ -208,7 +211,74 @@ class PlaylistPage(QWidget):
             self.playlist_list.clear()
             self._update_playlist_count()
 
+    # ------------------------------------------------------------ running-import guard
+
+    def active_import_name(self) -> str:
+        ctx = self.ctx
+        if ctx.playlist is not None and ctx.playlist.name:
+            return ctx.playlist.name
+        try:
+            record = ctx.store.get_import(ctx.import_id) if ctx.import_id else None
+        except Exception:  # noqa: BLE001
+            record = None
+        return (record.playlist_name if record else "") or "the current playlist"
+
+    def ask_switch_playlist(self, current_name: str, new_name: str) -> bool:
+        """Modal question when leaving an import whose downloads were confirmed. True only for Switch.
+        Replaceable in tests (like ReviewPage.ask_confirmation)."""
+        box = QMessageBox(QMessageBox.Icon.Question, "Switch playlist?",
+                          f"Downloads for {current_name} are still running. Switch to {new_name}?\n\n"
+                          "Downloads continue in Soulseek; S2S imports them when you reopen this import "
+                          "(Resume last import).", parent=self)
+        switch = box.addButton("Switch", QMessageBox.ButtonRole.AcceptRole)
+        stay = box.addButton("Stay", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is switch
+
+    def _confirm_leaving_import(self, new_name: str) -> bool:
+        """True when nothing is running, or the user chose to switch. Asked once per switch."""
+        if not self.ctx.approval_id:
+            return True
+        return bool(self.ask_switch_playlist(self.active_import_name(), new_name or "this playlist"))
+
+    def _playlist_selected(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
+        if self._restoring:
+            return
+        if current is not None and self.ctx.approval_id:
+            pl = current.data(Qt.ItemDataRole.UserRole)
+            active = self.ctx.playlist
+            if active is not None and getattr(pl, "id", None) == active.id:
+                return  # the playlist whose downloads are running: nothing to switch, keep the import attached
+            if not self._confirm_leaving_import(getattr(pl, "name", "") or current.text()):
+                self._restoring = True  # Stay: put the old selection back without any side effect
+                try:
+                    self.playlist_list.blockSignals(True)
+                    if previous is not None:
+                        self.playlist_list.setCurrentItem(previous)
+                    else:
+                        self.playlist_list.setCurrentRow(-1)
+                        self.playlist_list.clearSelection()
+                    self.playlist_list.blockSignals(False)
+                finally:
+                    self._restoring = False
+                return
+        self.preview_tracks()
+
     def _source_changed(self, _index: int) -> None:
+        if not self._restoring and self.ctx.approval_id:
+            new_name = self.source_combo.currentText()
+            if not self._confirm_leaving_import(f"a playlist from {new_name}" if new_name else ""):
+                self._restoring = True
+                try:
+                    self.source_combo.blockSignals(True)
+                    self.source_combo.setCurrentIndex(self._source_index)
+                    self.source_combo.blockSignals(False)
+                finally:
+                    self._restoring = False
+                return
+        self._source_index = self.source_combo.currentIndex()
         self._source_generation += 1
         self._link_open = False
         self._track_cache.clear()
@@ -426,6 +496,9 @@ class PlaylistPage(QWidget):
         run_async(self, lambda: fetch(ident), done, failed)
 
     def _link_loaded(self, pl: Playlist, tracks: TrackList) -> None:
+        if not self._confirm_leaving_import(pl.name or "this playlist"):
+            set_banner(self.link_status, "", "info")  # Stay: the running import and its selection are untouched
+            return
         self._link_open = True
         self.playlist_list.blockSignals(True)
         self.playlist_list.setCurrentRow(-1)

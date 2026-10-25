@@ -13,9 +13,12 @@ from PySide6.QtWidgets import (
 )
 
 from .. import finalize
+from ..models import TransferState
 from ..finalize import Checklist, ChecklistEntry
 from . import theme
+from .theme import button_text
 from .context import AppContext
+from .spectrogram_dialog import SpectrogramDialog
 from .util import fmt_seconds, item, make_table, show_error
 from .workers import run_async
 
@@ -43,6 +46,24 @@ def _length_text(e: ChecklistEntry) -> str:
     return f"{fmt_seconds(want)} (file {fmt_seconds(have)})"
 
 
+def fixable_track_ids(store, import_id: str) -> set[str]:
+    """Tracks whose newest download failed or was declined: the only ones a replacement review can help."""
+    latest: dict[str, str] = {}
+    for approval in store.approvals_for_import(import_id):
+        for selected in approval.items:
+            latest[selected.apple_id] = approval.id
+    out = set()
+    for track_id, aid in latest.items():
+        record = store.get_transfer(aid, track_id)
+        if record is not None and record.status.state == TransferState.FAILED:
+            out.add(track_id)
+    return out
+
+
+def _n(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
+
+
 class FinishPage(QWidget):
     find_missing_requested = Signal()
 
@@ -50,6 +71,7 @@ class FinishPage(QWidget):
         super().__init__(parent)
         self.ctx = ctx
         self.checklist: Checklist | None = None
+        self.fixable: set[str] = set()  # failed/declined tracks a replacement review can help
         self._generation = 0
 
         self.heading = QLabel("<b>Check &amp; export</b>", self)
@@ -76,13 +98,19 @@ class FinishPage(QWidget):
         self.copy_button.setToolTip("Copies the tracks to another folder with numbered names, so players that sort "
                                     "by file name keep the playlist order. Nothing is moved or overwritten.")
         self.open_button = QPushButton("Open folder", self)
-        self.find_button = QPushButton("Find missing tracks", self)
+        self.find_button = QPushButton("Find another source…", self)
+        self.spectrogram_button = QPushButton("Spectrogram…", self)
+        self.spectrogram_button.setToolTip("Draws the selected track's spectrogram to check its real quality "
+                                           "(for example a 320 kbps MP3 that was re-encoded from a worse source).")
         self.csv_button = QPushButton("Export missing list (CSV)…", self)
         actions = QHBoxLayout()
-        for b in (self.export_button, self.copy_button, self.open_button, self.find_button, self.csv_button):
+        for b in (self.export_button, self.copy_button, self.open_button, self.spectrogram_button, self.find_button,
+                  self.csv_button):
             actions.addWidget(b)
         actions.addStretch(1)
 
+        self.advice = theme.banner("", "info", self)
+        self.advice.hide()
         self.result = theme.banner("", "info", self)
         self.result.hide()
 
@@ -92,6 +120,7 @@ class FinishPage(QWidget):
         cl.addWidget(self.verdict)
         cl.addLayout(chips)
         cl.addWidget(self.table, 1)
+        cl.addWidget(self.advice)
         cl.addWidget(self.result)
         cl.addLayout(actions)
 
@@ -113,6 +142,9 @@ class FinishPage(QWidget):
         self.copy_button.clicked.connect(self.copy_in_order)
         self.open_button.clicked.connect(self.open_folder)
         self.find_button.clicked.connect(self.find_missing_requested.emit)
+        self.spectrogram_button.clicked.connect(self.open_spectrogram)
+        self.table.itemSelectionChanged.connect(self._set_actions_enabled)
+        self.table.cellDoubleClicked.connect(lambda *_: self.open_spectrogram())
         self.csv_button.clicked.connect(self.export_missing_csv)
         self._set_actions_enabled()
 
@@ -129,13 +161,14 @@ class FinishPage(QWidget):
         store = self.ctx.store
         ffprobe = None
 
-        def work() -> Checklist:
-            return finalize.build_checklist(store, import_id, ffprobe_path=ffprobe)
+        def work() -> tuple[Checklist, set[str]]:
+            return finalize.build_checklist(store, import_id, ffprobe_path=ffprobe), fixable_track_ids(store, import_id)
 
-        def done(checklist: Checklist) -> None:
+        def done(payload: tuple[Checklist, set[str]]) -> None:
             if generation != self._generation:  # a newer refresh or navigation superseded this one
                 return
-            self._show(checklist)
+            self.fixable = payload[1]
+            self._show(payload[0])
 
         def failed(exc: BaseException) -> None:
             if generation == self._generation:
@@ -146,6 +179,8 @@ class FinishPage(QWidget):
     def _show_empty(self) -> None:
         self.stack.setCurrentIndex(0)
         self.result.hide()
+        self.advice.hide()
+        self.fixable = set()
         self._set_actions_enabled()
 
     def _show(self, checklist: Checklist) -> None:
@@ -173,7 +208,51 @@ class FinishPage(QWidget):
                                        "(they may belong to other playlists). They are never touched.\n"
                                        + "\n".join(shown) + more)
         self._fill_table(checklist)
+        self._show_advice(checklist)
         self._set_actions_enabled()
+
+    def _fixable_entries(self) -> list[ChecklistEntry]:
+        c = self.checklist
+        if c is None:
+            return []
+        return [e for e in c.entries if e.status == finalize.NOT_DOWNLOADED and e.apple_id in self.fixable]
+
+    def _show_advice(self, checklist: Checklist) -> None:
+        """Say, per kind of missing track, what can (or cannot) be done about it. Nothing is a dead end."""
+        fixable = {e.apple_id for e in self._fixable_entries()}
+        others = [e for e in checklist.entries if e.status == finalize.NOT_DOWNLOADED and e.apple_id not in fixable]
+
+        def count(reason: str) -> int:
+            return sum(1 for e in others if e.reason == reason)
+
+        n_nf, n_ns, n_wait = count(finalize.NOT_FOUND), count(finalize.NOT_SELECTED), count(finalize.WAITING)
+        n_unsearched = count(finalize.NOT_SEARCHED)
+        n_other = len(others) - n_nf - n_ns - n_wait - n_unsearched
+        n_gone = checklist.count(finalize.MISSING_FILE)
+        parts = []
+        if fixable:
+            them = "it" if len(fixable) == 1 else "them"
+            parts.append(f"{_n(len(fixable), 'download failed or was declined', 'downloads failed or were declined')}"
+                         f" — use “Find another source” to review a different file for {them}.")
+        if n_nf:
+            parts.append(f"{n_nf} {'was' if n_nf == 1 else 'were'} not found on Soulseek — try again later with "
+                         "Start another playlist, or change your Matching rules.")
+        if n_ns:
+            parts.append(f"{n_ns} {'was' if n_ns == 1 else 'were'} left out by choice (no file was ticked in the "
+                         "review).")
+        if n_unsearched:
+            parts.append(f"{n_unsearched} {'was' if n_unsearched == 1 else 'were'} not searched yet.")
+        if n_wait:
+            parts.append(f"{n_wait} {'is' if n_wait == 1 else 'are'} still downloading. Check again when "
+                         "Downloads is done.")
+        if n_other:
+            parts.append(f"{_n(n_other, 'track', 'tracks')} could not be finished; see the Status column.")
+        if n_gone:
+            parts.append(f"{_n(n_gone, 'file is', 'files are')} no longer in the folder.")
+        if parts:
+            theme.set_banner(self.advice, " ".join(parts), "warn" if fixable or n_gone else "info")
+        else:
+            self.advice.hide()
 
     @staticmethod
     def _chip(label: QLabel, text: str, kind: str, count: int) -> None:
@@ -217,10 +296,35 @@ class FinishPage(QWidget):
         self.copy_button.setEnabled(has and c.in_folder > 0)
         self.open_button.setEnabled(has and bool(c.destination) and Path(c.destination).is_dir())
         missing = bool(has and c.missing)
-        self.find_button.setVisible(missing)
+        fixable = self._fixable_entries() if has else []
+        self.find_button.setVisible(bool(fixable))
+        if fixable:
+            n = len(fixable)
+            self.find_button.setText(button_text(f"Find another source for {n} track{'s' if n != 1 else ''}…"))
+            self.find_button.setToolTip("Opens a review with different files for the downloads that failed or were "
+                                        "declined. Nothing downloads until you confirm it.")
         self.csv_button.setVisible(missing)
+        self.spectrogram_button.setEnabled(self._selected_path() is not None)
 
     # ------------------------------------------------------------------ actions
+
+    def _selected_path(self) -> str | None:
+        """The selected row's file, only when that track is in the folder."""
+        c = self.checklist
+        rows = self.table.selectionModel().selectedRows() if c else []
+        if not rows or rows[0].row() >= len(c.entries):
+            return None
+        e = c.entries[rows[0].row()]
+        return e.path if e.status == finalize.IN_FOLDER and e.path else None
+
+    def open_spectrogram(self) -> None:
+        path = self._selected_path()
+        if path is None:
+            return
+        if not Path(path).is_file():
+            self._note("That file is no longer in the folder.", "warn")
+            return
+        SpectrogramDialog(path, self.ctx.settings, self).exec()
 
     def _note(self, text: str, kind: str) -> None:
         theme.set_banner(self.result, text, kind)
