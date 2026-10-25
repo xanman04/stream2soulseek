@@ -5,8 +5,10 @@ Stack layout: index 0 is the streaming-service page, indexes 1..5 are the five w
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
 from .. import workflow
@@ -134,6 +136,12 @@ class MainWindow(QMainWindow):
         if hasattr(self.transfers, "check_requested"):  # Downloads' "Check & export" call to action
             self.transfers.check_requested.connect(lambda: self.go_step(STEP_FINISH))
         self.finish.find_missing_requested.connect(lambda: self.start_replacement(include_failed=True))
+        icon = Path(__file__).with_name("assets") / "s2s-icon.png"
+        if icon.exists():
+            self.setWindowIcon(QIcon(str(icon)))
+        for i in range(len(STEPS)):  # Ctrl+1..Ctrl+6 jump to a step (locked steps are ignored as usual)
+            QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.go_step(i))
+
         self.go_step(STEP_PLAYLIST)
         if autostart:
             QTimer.singleShot(0, self.startup)
