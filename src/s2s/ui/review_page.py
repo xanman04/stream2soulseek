@@ -733,6 +733,12 @@ class ReviewPage(QWidget):
         self.backup_wait.setSuffix(" seconds")
         self.backup_wait.setEnabled(False)
         self.backups_check.toggled.connect(self.backup_wait.setEnabled)
+        # Remember the user's own opt-in choice and wait between imports (still opt-in: default off).
+        extra = self.ctx.settings.extra
+        self.backup_wait.setValue(int(extra.get("backup_recovery_wait", 45) or 45))
+        self.backups_check.setChecked(bool(extra.get("backup_recovery_opt_in", False)))
+        self.backups_check.toggled.connect(lambda on: self._remember_backup_choice())
+        self.backup_wait.valueChanged.connect(lambda _v: self._remember_backup_choice())
         backup_row = QHBoxLayout()
         backup_row.addWidget(self.backups_check)
         backup_row.addWidget(self.backup_wait)
@@ -1130,6 +1136,19 @@ class ReviewPage(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self._update_footer()
+
+    def _remember_backup_choice(self) -> None:
+        extra = self.ctx.settings.extra
+        on, wait = self.backups_check.isChecked(), self.backup_wait.value()
+        if extra.get("backup_recovery_opt_in") == on and extra.get("backup_recovery_wait") == wait:
+            return
+        extra["backup_recovery_opt_in"], extra["backup_recovery_wait"] = on, wait
+        try:
+            from .. import config
+
+            config.save_settings(self.ctx.settings)
+        except OSError:
+            pass  # a preference only; the current review still uses the on-screen choice
 
     def summary_entries(self) -> list[dict]:
         entries = [

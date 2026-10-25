@@ -211,3 +211,28 @@ def test_confirm_dialog_is_a_compact_summary(page):
     assert dlg.table.item(0, 2).text() == "MP3 320"
     dlg.paths_check.setChecked(True)
     assert not dlg.table.isColumnHidden(4)
+
+
+def test_backup_opt_in_choice_is_remembered(tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+    from s2s import config
+    from s2s.models import Settings
+    from s2s.secretstore import SecretStore
+    from s2s.store import Store
+    from s2s.ui.context import AppContext
+    from s2s.ui.review_page import ReviewPage
+
+    store = Store(config.db_path())
+    ctx = AppContext(store, SecretStore(tmp_path / "s", protect=lambda b: b, unprotect=lambda b: b),
+                     Settings(slskd_downloads_dir=str(tmp_path / "dl")))
+    page = ReviewPage(ctx)
+    assert not page.backups_check.isChecked()  # opt-in: off by default
+    page.backups_check.setChecked(True)
+    page.backup_wait.setValue(60)
+    saved = config.load_settings().extra
+    assert saved["backup_recovery_opt_in"] is True and saved["backup_recovery_wait"] == 60
+    again = ReviewPage(AppContext(store, ctx.secrets, config.load_settings()))
+    assert again.backups_check.isChecked() and again.backup_wait.value() == 60
+    store.close()
