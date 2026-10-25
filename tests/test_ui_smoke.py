@@ -167,7 +167,7 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert not f[0].next_btn.isEnabled() and f[0].hint_label.text() == "Pick a playlist first"
     assert f[0].next_btn.text() == "Next: Choose tracklist folder"
     assert f[1].next_btn.text() == "Next: Find on Soulseek"
-    assert f[3].next_btn.text() == "Next: Downloads & import"
+    assert f[3].next_btn.text() == "Next: Downloads && import"  # & escaped so Qt shows it
     assert not f[4].next_btn.isVisibleTo(f[4])  # last step has no Next
     win.go_step(2)  # locked: ignored
     assert win.stack.currentIndex() == 1
