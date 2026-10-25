@@ -208,7 +208,8 @@ def main():
     shot("01_playlist")
     win.resume_last_import()
     pump()
-    for i, name in enumerate(["01b_playlist_resumed", "02_destination", "03_search", "04_review", "05_downloads"]):
+    for i, name in enumerate(["01b_playlist_resumed", "02_destination", "03_search", "04_review", "05_downloads",
+                              "06_check_export"]):
         win.go_step(i)
         shot(name)
     win.review.model  # noqa: B018
