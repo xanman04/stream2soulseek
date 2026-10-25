@@ -19,17 +19,17 @@ class QueuedRecoveryDialog(QDialog):
     def __init__(self, ctx: AppContext, parent=None) -> None:
         super().__init__(parent)
         self.ctx = ctx
-        self.setWindowTitle("Recover queued downloads")
+        self.setWindowTitle("Try backups for queued downloads")
         self.resize(1050, 620)
         self.approvals: dict[str, Approval] = {}
         self._results = {r.track.apple_id: r for r in ctx.store.load_match_results(ctx.import_id)} if ctx.import_id else {}
         self._items: dict[QTreeWidgetItem, tuple[str, str, SelectionItem | None]] = {}
 
         self.explanation = QLabel(
-            "Choose reviewed backup files for queued downloads that have transferred no bytes. "
-            "After approval, backups start after the wait shown below. Up to three can run at once; "
-            "the first file that starts moving becomes the leader and redundant attempts are cancelled. "
-            "If the leader fails, unused reviewed backups can be tried. No other files are included.", self,
+            "These downloads are still waiting in an uploader's queue with nothing transferred. Tick the backup "
+            "files you are happy to try instead. If a download makes no progress for the time below, another "
+            "ticked backup is tried (up to three at once per track). The first file that starts moving wins and "
+            "the rest are cancelled; nothing outside this list is ever tried.", self,
         )
         self.explanation.setWordWrap(True)
         self.wait_seconds = QSpinBox(self)
@@ -38,27 +38,27 @@ class QueuedRecoveryDialog(QDialog):
         self.wait_seconds.setSuffix(" seconds")
         self.tree = QTreeWidget(self)
         self.tree.setColumnCount(5)
-        self.tree.setHeaderLabels(["Track / peer", "Remote path", "Format", "Bitrate", "Role"])
+        self.tree.setHeaderLabels(["Track / uploader", "File on Soulseek", "Format", "Bitrate", ""])
         self.tree.setWordWrap(True)
         self.tree.setAlternatingRowColors(True)
         self.tree.header().setStretchLastSection(True)
         self.tree.itemChanged.connect(self._item_changed)
 
         top = QHBoxLayout()
-        top.addWidget(QLabel("Wait with no bytes transferred:", self))
+        top.addWidget(QLabel("Try a backup after no progress for:", self))
         top.addWidget(self.wait_seconds)
         top.addStretch(1)
         layout = QVBoxLayout(self)
         layout.addWidget(self.explanation)
         layout.addLayout(top)
         layout.addWidget(self.tree, 1)
-        self.empty_note = QLabel("No queued files are eligible for recovery.", self)
+        self.empty_note = QLabel("Nothing to recover: no queued download has eligible backups.", self)
         self.empty_note.setWordWrap(True)
         layout.addWidget(self.empty_note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.approve_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        self.approve_btn.setText("Approve selected backups")
+        self.approve_btn.setText("Approve ticked backups")
         self.approve_btn.setEnabled(False)
         buttons.accepted.connect(self._accept_if_selected)
         buttons.rejected.connect(self.reject)
@@ -99,7 +99,7 @@ class QueuedRecoveryDialog(QDialog):
             primary_file = primary_candidate.file if primary_candidate else None
             primary_format = primary_file.extension.upper() if primary_file and primary_file.extension else ""
             primary_bitrate = f"{primary_file.bitrate} kbps" if primary_file and primary_file.bitrate is not None else ""
-            parent = QTreeWidgetItem([title, selected.filename, primary_format, primary_bitrate, "Existing primary"])
+            parent = QTreeWidgetItem([title, selected.filename, primary_format, primary_bitrate, "Already approved"])
             parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
             parent.setCheckState(0, Qt.CheckState.Checked)
             parent.setToolTip(0, "Already approved primary file")
@@ -122,7 +122,7 @@ class QueuedRecoveryDialog(QDialog):
             shown += 1
         self.empty_note.setVisible(shown == 0)
         if shown:
-            self.empty_note.setText("Only queued transfers with zero transferred bytes are listed.")
+            self.empty_note.setText("Only queued downloads with nothing transferred are listed.")
         self._update_approve()
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
