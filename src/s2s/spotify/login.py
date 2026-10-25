@@ -183,8 +183,8 @@ class SpotifyLoginWidget(QWidget):
             shiboken6.delete(self._profile)
 
     def _forget_popup(self, popup_id: int) -> None:
+        # Forget only the popup that closed; the others must still be closed and freed by dispose().
         self._popup_dialogs = [dlg for dlg in self._popup_dialogs if id(dlg) != popup_id]
-        self._popup_dialogs.clear()
 
     def _on_cookie(self, qc):
         if not self._capture_enabled or self._disposed:

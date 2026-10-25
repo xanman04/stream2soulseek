@@ -11,6 +11,18 @@ class SourceAuthError(Exception):
     """The source rejected the stored session; the user has to sign in to that service again."""
 
 
+class SourceError(Exception):
+    """Loading failed for another reason (network, unexpected response). The stored session is kept."""
+
+
+class TrackList(list):
+    """Tracks in playlist order, plus human-readable notes about entries that were skipped."""
+
+    def __init__(self, tracks=(), skipped: list[str] | None = None) -> None:
+        super().__init__(tracks)
+        self.skipped: list[str] = list(skipped or [])
+
+
 @runtime_checkable
 class PlaylistSource(Protocol):
     name: str  # shown to the user, e.g. "Apple Music"

@@ -290,7 +290,14 @@ class PlaylistPage(QWidget):
         self.ctx.tracks = tracks  # Apple order; the preview's sorting never touches this list
         self.ctx.reset_import()
         self._fill(tracks)
-        self.track_info.setText(f"'{pl.name}'")
+        skipped = list(getattr(tracks, "skipped", []) or [])
+        if skipped:
+            self.track_info.setText(f"'{pl.name}' — {len(skipped)} item{'s' if len(skipped) != 1 else ''} skipped "
+                                    "(unavailable, podcast or missing details; hover for details)")
+            self.track_info.setToolTip("\n".join(skipped[:50]) + ("\n…" if len(skipped) > 50 else ""))
+        else:
+            self.track_info.setText(f"'{pl.name}'")
+            self.track_info.setToolTip("")
         self.tracks_changed.emit()
 
     def _tracks_failed(self, pl: Playlist, src: PlaylistSource, exc: object) -> None:
