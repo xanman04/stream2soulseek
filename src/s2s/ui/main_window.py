@@ -120,6 +120,10 @@ class MainWindow(QMainWindow):
         self.search.state_changed.connect(self.refresh_navigation)
         self.search.search_finished.connect(self._search_finished)
         self.review.approved.connect(self._approved)
+        if hasattr(self.review, "rerun_search_requested"):  # stale matching rules: search again
+            self.review.rerun_search_requested.connect(self._rerun_search)
+        if hasattr(self.review, "downloads_requested"):
+            self.review.downloads_requested.connect(lambda: self.go_step(STEP_TRANSFERS))
         self.review.queueing_changed.connect(self._queueing_changed)
         self.transfers.find_another_source.connect(self.start_replacement)
         self.transfers.new_import_requested.connect(self.start_another_import)
@@ -278,6 +282,12 @@ class MainWindow(QMainWindow):
             self.go_step(STEP_REVIEW)
 
         run_async(self, work, done, lambda e: show_error(self, "Find another source", ctx.describe(e)))
+
+    def _rerun_search(self) -> None:
+        """Go to Search and run it again for the current playlist and folder (searching never queues)."""
+        self.go_step(STEP_SEARCH)
+        if self.stack.currentIndex() == STEP_SEARCH + 1 and not self.search._running:
+            self.search.start()
 
     def _approved(self) -> None:
         self.refresh_navigation()
