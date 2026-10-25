@@ -31,7 +31,7 @@ def test_page_shows_checklist_and_actions(tmp_path, monkeypatch):
         page.refresh()
         assert page.table.rowCount() == 6
         assert [page.table.item(r, 0).text() for r in range(6)] == ["1", "2", "3", "4", "5", "6"]
-        assert page.table.item(0, 1).text() == "A Artist - Alpha (VIP)"
+        assert page.table.item(0, 1).text() == "Alpha (VIP) — A Artist"  # same order as other steps
         assert page.table.item(0, 2).text() == "In folder"
         assert page.table.item(0, 3).text() == "Alpha (VIP) - A Artist.mp3"
         assert page.table.item(2, 2).text() == "File is gone"

@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QDesktopServices
 from PySide6.QtWidgets import (
+    QHeaderView,
     QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QStackedLayout, QVBoxLayout, QWidget,
 )
 
@@ -52,6 +53,7 @@ class FinishPage(QWidget):
         self._generation = 0
 
         self.heading = QLabel("<b>Check &amp; export</b>", self)
+        self.heading.hide()  # the step frame already shows "Step 6: Check & export"
         self.verdict = theme.banner("", "info", self)
         self.verdict.setStyleSheet(self.verdict.styleSheet() + " font-size: 15px;")
         self.chip_folder = theme.chip("", "ok", self)
@@ -192,15 +194,21 @@ class FinishPage(QWidget):
             file_tip = e.path or ""
             if e.status == finalize.MISSING_FILE and e.path:
                 name, file_tip = os.path.basename(e.path), f"{e.path}\n(the file is no longer there)"
-            cells = (number, item(e.label, e.label), item(status_text, e.detail or status_text),
+            shown = f"{e.title} — {e.artist}" if e.artist else e.title  # same order as the other steps
+            cells = (number, item(shown, shown), item(status_text, e.detail or status_text),
                      item(name, file_tip), item(_length_text(e)))
             for col, cell in enumerate(cells):
                 if e.status != finalize.IN_FOLDER:
                     cell.setBackground(QBrush(theme.tint(kind)))
                 table.setItem(row, col, cell)
-            table.item(row, 2).setForeground(QBrush(theme.accent(kind)))
+            if e.status == finalize.IN_FOLDER:  # tinted rows keep normal text: accent-on-tint is hard to read
+                table.item(row, 2).setForeground(QBrush(theme.accent(kind)))
         table.resizeColumnsToContents()
         table.setColumnWidth(1, max(table.columnWidth(1), 300))
+        header = table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
     def _set_actions_enabled(self) -> None:
         c = self.checklist
