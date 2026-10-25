@@ -28,16 +28,18 @@ from .settings_dialog import SettingsDialog
 from .sidebar import APPLE_KEY, SPOTIFY_KEY, Sidebar
 from .soulseek_login import SoulseekSession
 from .steps import STEPS, StepFrame
+from .finish_page import FinishPage
 from .transfers_page import TransfersPage
 from .util import show_error
 from .workers import run_async
 
-(STEP_PLAYLIST, STEP_DESTINATION, STEP_SEARCH, STEP_REVIEW, STEP_TRANSFERS) = range(5)
+(STEP_PLAYLIST, STEP_DESTINATION, STEP_SEARCH, STEP_REVIEW, STEP_TRANSFERS, STEP_FINISH) = range(6)
 NEXT_HINTS = {
     STEP_PLAYLIST: "Pick a playlist first",
     STEP_DESTINATION: "Choose a tracklist folder first",
     STEP_SEARCH: "Run the search first",
     STEP_REVIEW: "Confirm the download first",
+    STEP_TRANSFERS: "Start downloads first",
 }
 
 
@@ -61,8 +63,9 @@ class MainWindow(QMainWindow):
         self.search = SearchPage(self.ctx)
         self.review = ReviewPage(self.ctx)
         self.transfers = TransfersPage(self.ctx)
+        self.finish = FinishPage(self.ctx)
         self.frames = [StepFrame(i, w) for i, w in enumerate(
-            (self.playlists, self.destination, self.search, self.review, self.transfers))]
+            (self.playlists, self.destination, self.search, self.review, self.transfers, self.finish))]
         self.stack = QStackedWidget()
         self.stack.addWidget(self.service)  # 0
         for f in self.frames:  # 1..5
@@ -124,6 +127,9 @@ class MainWindow(QMainWindow):
         self.transfers.settings_requested.connect(self.open_settings)
         self.transfers.review_requested.connect(lambda: self.start_replacement(include_failed=True))
         self.transfers.queued_backups_requested.connect(self.review_queued_backups)
+        if hasattr(self.transfers, "check_requested"):  # Downloads' "Check & export" call to action
+            self.transfers.check_requested.connect(lambda: self.go_step(STEP_FINISH))
+        self.finish.find_missing_requested.connect(lambda: self.start_replacement(include_failed=True))
         self.go_step(STEP_PLAYLIST)
         if autostart:
             QTimer.singleShot(0, self.startup)
@@ -136,7 +142,10 @@ class MainWindow(QMainWindow):
         has_tracks = bool(c.playlist and c.tracks)
         has_dest = has_tracks and c.destination is not None
         searched = has_dest and bool(c.results) and not self.search._running
-        return [has_tracks, has_dest, searched, searched and c.approval_id is not None, False]
+        confirmed = searched and c.approval_id is not None
+        # Step 5 counts as done once downloads were confirmed, so Step 6 (Check & export) is reachable while
+        # downloads are still running: the checklist shows what is already in the folder.
+        return [has_tracks, has_dest, searched, confirmed, confirmed, False]
 
     def step_available(self) -> list[bool]:
         done = self.step_done()
@@ -169,6 +178,8 @@ class MainWindow(QMainWindow):
             self.transfers.start()
         else:
             self.transfers.stop()
+        if index == STEP_FINISH:
+            self.finish.refresh()
 
     def _soulseek_status(self, text: str) -> None:
         self.sidebar.set_soulseek_text(text)

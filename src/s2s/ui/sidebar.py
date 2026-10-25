@@ -20,7 +20,7 @@ SERVICES = [
 
 def _header(text: str) -> QLabel:
     lab = QLabel(text)
-    lab.setStyleSheet("font-weight: bold; color: #666; margin-top: 6px;")
+    lab.setStyleSheet("font-weight: bold; color: palette(placeholder-text); margin-top: 6px;")
     return lab
 
 
@@ -130,8 +130,9 @@ class Sidebar(QWidget):
         was_blocked = self.steps.blockSignals(True)
         for i, (name, _t, _e) in enumerate(STEPS):
             it = self.steps.item(i)
-            it.setText(("✓ " if done[i] else "") + f"{i + 1}. {name}")
-            if available[i]:
+            is_done = i < len(done) and done[i]
+            it.setText(("✓ " if is_done else "") + f"{i + 1}. {name}")
+            if i < len(available) and available[i]:
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 it.setToolTip("")
             else:

@@ -191,7 +191,7 @@ def test_sidebar_state_updates_never_emit_navigation(win):
     selected = []
     win.sidebar.step_selected.connect(selected.append)
     win.sidebar.show_step(3)
-    win.sidebar.set_step_states([True, True, False, False, False], [True, True, True, False, False])
+    win.sidebar.set_step_states([True, True, False, False, False, False], [True, True, True, False, False, False])
     assert selected == []
 
 
