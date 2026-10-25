@@ -41,7 +41,7 @@ def test_defaults_are_the_owners_rules():
     assert p.version_mode == "exact_then_extended" and p.tier_before_format
     assert p.excluded_labels() == {"radio edit", "live", "mixed"}
     assert p.duration_tolerance_s == 15 and p.skip_flagged_by_default
-    assert Settings().search_concurrency == 1
+    assert Settings().search_concurrency == 3
     assert not hasattr(p, "allow_different_remix")
 
 
