@@ -18,6 +18,8 @@ STEPS = [
      "Check every proposed file, change or untick any of them, then confirm: only the files you confirm are downloaded."),
     ("Downloads & import", "Downloads & import",
      "Watch the downloads, then verified files are copied into your chosen library folder."),
+    ("Check & export", "Check & export",
+     "Check that your tracklist folder matches the playlist, then export it as a playlist file or copy it in order."),
 ]
 
 

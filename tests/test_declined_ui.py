@@ -11,7 +11,7 @@ from s2s.approval import create_approval
 from s2s.models import SelectionItem, TransferState, TransferStatus
 from s2s.ui import review_page
 from s2s.ui.context import AppContext
-from s2s.ui.transfers_page import COL_PROBLEM, COL_SET
+from s2s.ui.transfers_page import COL_SOURCE, COL_STATUS
 from test_ui_smoke import env, inline_workers, mk_cand, qapp, synthetic  # noqa: F401  (fixtures)
 
 
@@ -63,20 +63,19 @@ def test_declined_row_shows_problem_and_banner_with_button(declined):
     t.refresh()
     assert svc.refreshed == [ap.id]
     assert t.table.rowCount() == 1
-    problem = t.table.item(0, COL_PROBLEM)
-    assert "share" in problem.text().lower()
+    problem = t.table.item(0, COL_STATUS)
+    assert problem.text().startswith("Declined:") and "share" in problem.text().lower()
     assert "you must share files" in problem.toolTip() and "Completed, Rejected" in problem.toolTip()
-    assert t.table.item(0, COL_SET).text() == "Original"
-    assert not t.declined_banner.isHidden()
-    assert t.declined_label.text().startswith("1 file was declined by their uploader.")
-    assert t.declined_btn.text() == "Find another source..."
+    assert not t.banner.isHidden()
+    assert t.banner.text().startswith("1 track needs another source.")
+    assert t.fix_btn.text() == "Find another source…"
     t.stop()
 
 
 def test_find_another_source_shows_only_declined_tracks_and_queues_nothing(declined):
     win, _store, ctx, svc, ap, c, dest = declined
     win.transfers.refresh()
-    win.transfers.declined_btn.click()
+    win.transfers.fix_btn.click()
     rp = win.review
     assert rp.replacement
     assert [r.result.track.apple_id for r in rp.model.rows] == ["i.0"]  # only the declined track
@@ -94,7 +93,7 @@ def test_find_another_source_shows_only_declined_tracks_and_queues_nothing(decli
 def test_confirm_replacement_makes_second_approval_and_transfers_show_both(declined, monkeypatch):
     win, store, ctx, svc, ap, c, dest = declined
     win.transfers.refresh()
-    win.transfers.declined_btn.click()
+    win.transfers.fix_btn.click()
     asked, created = [], []
     real = review_page.create_approval
 
@@ -120,16 +119,17 @@ def test_confirm_replacement_makes_second_approval_and_transfers_show_both(decli
     store.upsert_transfer(created[0].id, "i.0", TransferStatus("u3", asked[0][0]["filename"], asked[0][0]["size"],
                                                                TransferState.QUEUED, "Queued, Remotely"))
     t.refresh()
-    labels = sorted(t.table.item(r, COL_SET).text() for r in range(t.table.rowCount()))
-    assert labels == ["Original", "Replacement 1"]
-    assert t.declined_banner.isHidden()  # the declined track now has a replacement
+    assert t.table.rowCount() == 1  # the replacement is the same track, not a second row
+    assert t.table.item(0, COL_SOURCE).text() == "u3 (replacement)"
+    assert t.table.item(0, COL_STATUS).text() == "Waiting on uploader"
+    assert t.fix_btn.isHidden()  # the declined track now has a replacement
     t.stop()
 
 
 def test_declining_replacement_is_not_confirmed_without_yes(declined, monkeypatch):
     win, store, ctx, svc, ap, c, dest = declined
     win.transfers.refresh()
-    win.transfers.declined_btn.click()
+    win.transfers.fix_btn.click()
     monkeypatch.setattr(type(win.review), "ask_confirmation", lambda self, e: False)
     win.review.confirm_download()
     assert svc.enqueued == [] and len(store.approvals_for_import(ctx.import_id)) == 1
