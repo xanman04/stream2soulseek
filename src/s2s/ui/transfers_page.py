@@ -284,9 +284,9 @@ class TransfersPage(QWidget):
             self.timer.stop()
             self._set_enabled(False)
             return
-        self._names = {t.apple_id: f"{t.name} - {t.artist}" for t in self.ctx.tracks}
+        self._names = {t.apple_id: f"{t.name} — {t.artist}" for t in self.ctx.tracks}
         if not self._names and self.ctx.import_id:
-            self._names = {t.apple_id: f"{t.name} - {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
+            self._names = {t.apple_id: f"{t.name} — {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
         self._set_enabled(True)
         self.history_btn.setEnabled(True)
         self.import_btn.setVisible(not self.ctx.settings.auto_import)
