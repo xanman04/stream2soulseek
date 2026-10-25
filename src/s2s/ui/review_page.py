@@ -50,7 +50,9 @@ EMPTY_TEXT = "Nothing to review yet. Run a search first."
 FILTERS = ("all", "check", "missing")
 
 _LOSSLESS_EXTS = {"flac", "wav", "aiff", "aif", "alac"}
-_INFO_REASONS = ("exact requested version", "extended mix of the same version")
+# Reasons the matcher records as information (why a file was accepted), not as problems to check.
+_INFO_REASONS = ("exact requested version", "extended mix of the same version", "artist found in path",
+                 "artist matched via remixer")
 
 
 def file_key(c: Candidate) -> tuple:
