@@ -229,6 +229,7 @@ class SearchPage(QWidget):
         if res.status == MatchStatus.PROPOSED and res.best is not None:
             note = f"{res.best.file.username}: {res.best.detected_version or 'exact title'}" + (
                 " (flagged)" if res.best.flagged else "")
+            note += f"; {workflow.backup_source_count(res)} backup uploaders"
         self.table.setItem(r, 3, item(res.status.value))
         self.table.setItem(r, 4, item(note, res.note))
         self.track_bar.set_result(self._track_position.get(res.track.apple_id, -1), res)
@@ -262,6 +263,7 @@ class SearchPage(QWidget):
         cancel = self._cancel
         tracks = list(ctx.tracks)
         playlist, destination = ctx.playlist, ctx.destination
+        self._request_context = (playlist.id, destination, tuple(t.apple_id for t in tracks))
         reuse = ctx.import_id if (ctx.import_id and ctx.approval_id is None) else None
         settings = ctx.settings
         policy_fp = settings.match_policy.fingerprint()
@@ -317,6 +319,13 @@ class SearchPage(QWidget):
         self.state_changed.emit()
 
     def _finished(self, payload: tuple) -> None:
+        requested = getattr(self, "_request_context", None)
+        current = (self.ctx.playlist.id if self.ctx.playlist else None, self.ctx.destination,
+                   tuple(t.apple_id for t in self.ctx.tracks))
+        if requested is not None and requested != current:
+            self._set_running(False)
+            self.info.setText("The playlist or tracklist folder changed during this search. Run a new search for the current selection.")
+            return
         import_id, results, cancelled, policy_fp = payload
         self._set_running(False)
         self.ctx.import_id = import_id

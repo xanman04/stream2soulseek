@@ -23,7 +23,7 @@ a packaged release is not available.
 | Spotify | Planned; not implemented |
 | SoundCloud | Planned; not implemented |
 
-The latest local validation passed **619 offline tests**, covering matching, download approvals, file
+The latest local validation passed **711 offline tests**, covering matching, download approvals, file
 organization, state management, and the desktop interface. These tests use synthetic data and simulated
 services; they do not verify live authentication or end-to-end downloads.
 
@@ -31,10 +31,14 @@ services; they do not verify live authentication or end-to-end downloads.
 
 - Browse playlists and preview their tracks in a native desktop interface.
 - Search Soulseek for matching recordings, with progress and individual track results.
+- Search multiple tracks concurrently, using short initial passes and a longer search when more backup
+  sources are needed. Aim for a primary match and 3–5 independent backup uploaders; availability varies.
 - Review proposed files, alternatives, audio quality, and unresolved matches before downloading.
+- Optionally approve exact backup files for queued downloads: wait 45 seconds, try another source, and cancel redundant attempts when one starts.
 - Configure matching rules and save reusable rule sets.
 - Verify completed downloads and copy them into a flat tracklist folder.
 - Track failed transfers, review replacement sources, and resume the most recent import.
+- Inspect every playlist track in import history, filter outstanding work, and export remaining tracks to CSV.
 - Start another import without reconnecting accounts or losing import history.
 
 By default, S2S prefers an exact recording match, then an extended version of the same recording if needed.
@@ -84,10 +88,19 @@ Connect a supported service from the sidebar, then follow the five import steps:
 3. **Find on Soulseek.** Search for eligible recordings using the selected matching rules. The interface
    shows ongoing activity, per-track results, and found/error counts.
 4. **Review & confirm.** Inspect the proposed files and alternatives. Unresolved or flagged results remain
-   visible for review. Downloads begin only after explicit confirmation of the selected files.
+   visible for review. Downloads begin only after explicit confirmation of the selected files. Optional queued
+   recovery lists the exact backup files in the same confirmation.
 5. **Downloads & import.** Monitor transfers and file verification. Successfully verified files are copied
    into the tracklist folder. The completion summary identifies outstanding work or errors; **Start another
    import** returns to playlist selection.
+
+**Import history / outstanding tracks** is available from the File menu and step 5. It preserves the full
+playlist view, including tracks without an eligible match, files not selected for download, failures, and
+queued transfers. Download totals refer to approved tracks; they do not imply that the entire playlist has
+been imported. The outstanding list can be exported for later searches.
+
+**Previous import recorded** refers to an earlier import into the selected tracklist folder. New searches
+skip those tracks only while the recorded file still exists. History identifies missing destination files.
 
 ### Download folders and the final library
 
@@ -128,10 +141,24 @@ are visible to other Soulseek users. See the [setup guide](docs/SETUP.md) for de
 Use S2S only to obtain or share material you are authorized to access or distribute. The current Apple Music
 integration uses an unofficial API; S2S is not affiliated with the streaming services or Soulseek.
 
+## Queued downloads
+
+Enable the backup option during Review, or use **Review queued backups** in Step 5. Inspect the listed
+files and approve them before recovery starts. The default wait is 45 seconds with no progress; the
+interval can be adjusted before approval. S2S tries another reviewed source each interval, with at most
+three attempts active per track. Once a source starts transferring, the other attempts are cancelled
+without deleting partial files. If it fails, unused reviewed backups can still be tried. Only the finished,
+verified winning file is copied to the tracklist folder.
+
+Recovery checks run while Step 5 is open. Soulseek downloads continue independently when S2S is closed
+or another page is open; recovery resumes when Step 5 is opened again. This behavior has offline test
+coverage; live queue recovery remains under user testing.
+
+
 ## Known limitations
 
-- Changing the playlist or destination while a search is running can allow an earlier search result to be
-  associated with the newer selection. Keep both unchanged until the search finishes.
+- Peer availability and upload queues can delay or prevent downloads. Backup-source targets are not
+  guaranteed, and unresolved results may require a later search or manual investigation.
 - Archive handling needs additional protection against pre-existing nested symbolic links and Windows
   junctions. Use ordinary folders for downloads and archives in the current prototype.
 - Live authentication, playlist retrieval, transfers, and filesystem behavior require further end-to-end

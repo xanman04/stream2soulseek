@@ -32,7 +32,7 @@ from .models import (
     TransferStatus,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE imports (
@@ -168,6 +168,41 @@ CREATE TABLE rejection_events (
 );
 """
 
+# v4: persistent ordered fallback plans and their approval attempts. Existing approval and transfer
+# tables remain unchanged; the primary approval is referenced from the plan and recorded as ordinal -1.
+_SCHEMA_V4 = """
+CREATE TABLE fallback_plans (
+    id TEXT PRIMARY KEY,
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    primary_approval_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    items_json TEXT NOT NULL,
+    policy_fingerprint TEXT NOT NULL,
+    wait_seconds INTEGER NOT NULL,
+    max_parallel INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    last_attempt_at TEXT,
+    next_index INTEGER NOT NULL DEFAULT 0,
+    winner_ordinal INTEGER,
+    status TEXT NOT NULL DEFAULT 'active',
+    error TEXT NOT NULL DEFAULT '',
+    UNIQUE (primary_approval_id, apple_id)
+);
+CREATE TABLE fallback_attempts (
+    plan_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'not_queued',
+    raw_state TEXT NOT NULL DEFAULT '',
+    transfer_id TEXT,
+    percent REAL NOT NULL DEFAULT 0,
+    bytes_transferred INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    PRIMARY KEY (plan_id, ordinal)
+);
+"""
+
 
 class StoreError(Exception):
     pass
@@ -230,10 +265,10 @@ class Store:
             raise StoreError(f"database schema {version} is newer than supported {SCHEMA_VERSION}")
         if version == SCHEMA_VERSION:
             return
-        steps = {0: _SCHEMA, 1: _SCHEMA_V2, 2: _SCHEMA_V3}  # each step upgrades to the next version
+        steps = {0: _SCHEMA, 1: _SCHEMA_V2, 2: _SCHEMA_V3, 3: _SCHEMA_V4}  # each step upgrades to the next version
         with self._conn:
             if version == 0:
-                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3]
+                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4]
             else:
                 scripts = [steps[v] for v in range(version, SCHEMA_VERSION)]
             for script in scripts:
@@ -396,6 +431,100 @@ class Store:
                 "SELECT id FROM approvals WHERE import_id=? ORDER BY created_at, rowid", (import_id,)).fetchall()]
         return [a for a in (self.get_approval(i) for i in ids) if a is not None]
 
+    # ------------------------------------------------------------ fallback plans
+
+    _FALLBACK_PLAN_FIELDS = (
+        "id", "import_id", "apple_id", "primary_approval_id", "fingerprint", "items_json",
+        "policy_fingerprint", "wait_seconds", "max_parallel", "created_at", "last_attempt_at",
+        "next_index", "winner_ordinal", "status", "error",
+    )
+    _FALLBACK_MUTABLE_FIELDS = frozenset({
+        "last_attempt_at", "next_index", "winner_ordinal", "status", "error",
+    })
+    _FALLBACK_ATTEMPT_MUTABLE_FIELDS = frozenset({
+        "state", "raw_state", "transfer_id", "percent", "bytes_transferred", "error",
+    })
+
+    def save_fallback_plan(self, plan: dict) -> None:
+        """Persist a fallback plan and its queued primary attempt as one transaction."""
+        values = [plan[name] for name in self._FALLBACK_PLAN_FIELDS]
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO fallback_plans (" + ",".join(self._FALLBACK_PLAN_FIELDS) + ") VALUES (" +
+                ",".join("?" for _ in self._FALLBACK_PLAN_FIELDS) + ")", values,
+            )
+            self._conn.execute(
+                "INSERT INTO fallback_attempts (plan_id, ordinal, started_at, state) VALUES (?,?,?,?)",
+                (plan["id"], -1, plan["created_at"], "queued"),
+            )
+
+    def get_fallback_plan(self, plan_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM fallback_plans WHERE id=?", (plan_id,)).fetchone()
+        return dict(row) if row else None
+
+    def fallback_plans(self, import_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM fallback_plans WHERE import_id=? ORDER BY created_at, rowid", (import_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_fallback_plan(self, plan_id: str, **fields) -> None:
+        invalid = fields.keys() - self._FALLBACK_MUTABLE_FIELDS
+        if invalid:
+            raise ValueError("fallback plan fields are immutable or unknown: " + ", ".join(sorted(invalid)))
+        if not fields:
+            return
+        assignments = ", ".join(f"{name}=?" for name in fields)
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                f"UPDATE fallback_plans SET {assignments} WHERE id=?", (*fields.values(), plan_id)
+            )
+            if cur.rowcount == 0:
+                raise KeyError(plan_id)
+
+    def fallback_attempts(self, plan_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM fallback_attempts WHERE plan_id=? ORDER BY ordinal", (plan_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_fallback_attempt(self, plan_id: str, ordinal: int, **fields) -> None:
+        invalid = fields.keys() - self._FALLBACK_ATTEMPT_MUTABLE_FIELDS
+        if invalid:
+            raise ValueError("fallback attempt fields are immutable or unknown: " + ", ".join(sorted(invalid)))
+        if not fields:
+            return
+        assignments = ", ".join(f"{name}=?" for name in fields)
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                f"UPDATE fallback_attempts SET {assignments} WHERE plan_id=? AND ordinal=?",
+                (*fields.values(), plan_id, ordinal),
+            )
+            if cur.rowcount == 0:
+                raise KeyError((plan_id, ordinal))
+
+    def reserve_fallback_attempt(self, plan_id: str, ordinal: int, started_at: str) -> bool:
+        """Atomically reserve the next child attempt without creating another approval."""
+        with self._lock, self._conn:
+            plan = self._conn.execute(
+                "SELECT status, winner_ordinal, next_index FROM fallback_plans WHERE id=?", (plan_id,)
+            ).fetchone()
+            if (plan is None or plan["status"] != "active" or plan["winner_ordinal"] is not None
+                    or plan["next_index"] != ordinal):
+                return False
+            self._conn.execute(
+                "INSERT INTO fallback_attempts (plan_id, ordinal, started_at, state) VALUES (?,?,?,?)",
+                (plan_id, ordinal, started_at, "not_queued"),
+            )
+            self._conn.execute(
+                "UPDATE fallback_plans SET next_index=next_index+1, last_attempt_at=? WHERE id=?",
+                (started_at, plan_id),
+            )
+            return True
+
     # ------------------------------------------------------------ transfers
 
     def transfers_for_import(self, import_id: str) -> list[TransferRecord]:
@@ -535,15 +664,25 @@ class Store:
         return out
 
     def completed_apple_ids(self, destination: str) -> set[str]:
-        """Apple ids already copied into (or identical to a file already in) this destination."""
+        """Previously imported ids whose recorded file still exists in this destination."""
         want = norm_path(destination)
         with self._lock:
             rows = self._conn.execute(
-                """SELECT r.apple_id, i.destination FROM import_results r JOIN imports i ON i.id = r.import_id
+                """SELECT r.apple_id, r.final_path, i.destination FROM import_results r JOIN imports i ON i.id = r.import_id
                    WHERE r.outcome IN (?, ?)""",
                 (ImportOutcome.COPIED.value, ImportOutcome.ALREADY_PRESENT.value),
             ).fetchall()
-        return {r["apple_id"] for r in rows if norm_path(r["destination"]) == want}
+        present = set()
+        for r in rows:
+            if norm_path(r["destination"]) != want or not r["final_path"]:
+                continue
+            final = Path(r["final_path"])
+            try:
+                if norm_path(str(final.parent)) == want and final.is_file():
+                    present.add(r["apple_id"])
+            except OSError:
+                continue  # inaccessible or missing files must not suppress a search
+        return present
 
 
 # ---------------------------------------------------------------- row mappers

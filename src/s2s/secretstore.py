@@ -17,6 +17,7 @@ from . import config
 APPLE_DEVELOPER_TOKEN = "apple_developer_token"
 APPLE_MEDIA_USER_TOKEN = "apple_media_user_token"
 SLSKD_API_KEY = "slskd_api_key"
+SPOTIFY_SESSION = "spotify_session"
 
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 _ENTROPY = b"djimport/v1"  # pre-rename value; changing it would make every stored secret unreadable

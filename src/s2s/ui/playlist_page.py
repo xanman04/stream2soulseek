@@ -20,6 +20,7 @@ class PlaylistPage(QWidget):
     tracks_changed = Signal()  # ctx.tracks / ctx.playlist changed
     resume_requested = Signal()
     open_service_requested = Signal()
+    open_spotify_requested = Signal()
     auth_failed = Signal(str)  # the source rejected the stored session (source name)
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
@@ -27,6 +28,8 @@ class PlaylistPage(QWidget):
         self.ctx = ctx
         self._playlists: list[Playlist] = []
         self._track_cache: dict[tuple[str, str], list[AppleTrack]] = {}  # (source, playlist id) -> tracks
+        self._source_generation = 0
+        self._playlist_request = 0
 
         # --- top row
         self.source_combo = QComboBox()
@@ -96,13 +99,15 @@ class PlaylistPage(QWidget):
 
         # --- no connected service
         self.no_service_label = QLabel(
-            "No streaming service is connected yet. Connect Apple Music to see your playlists.")
+            "No streaming service is connected yet. Connect Apple Music or Spotify to see your playlists.")
         self.no_service_label.setWordWrap(True)
-        self.connect_btn = QPushButton("Open the Apple Music page")
+        self.connect_btn = QPushButton("Connect Apple Music")
+        self.connect_spotify_btn = QPushButton("Connect Spotify")
         empty = QWidget()
         el = QVBoxLayout(empty)
         el.addWidget(self.no_service_label)
         el.addWidget(self.connect_btn)
+        el.addWidget(self.connect_spotify_btn)
         el.addStretch(1)
 
         self.stack = QStackedWidget()
@@ -116,6 +121,7 @@ class PlaylistPage(QWidget):
         self.reload_btn.clicked.connect(self.load_playlists)
         self.resume_btn.clicked.connect(self.resume_requested)
         self.connect_btn.clicked.connect(self.open_service_requested)
+        self.connect_spotify_btn.clicked.connect(self.open_spotify_requested)
         self.source_combo.currentIndexChanged.connect(self._source_changed)
         self.playlist_list.currentItemChanged.connect(lambda *_: self.preview_tracks())
         self.playlist_search.textChanged.connect(self._filter_playlists)
@@ -130,6 +136,7 @@ class PlaylistPage(QWidget):
 
     def refresh_sources(self) -> None:
         """Rebuild the source selector from the sources that are connected."""
+        self._source_generation += 1
         prev = self.current_source()
         self.source_combo.blockSignals(True)
         self.source_combo.clear()
@@ -151,7 +158,15 @@ class PlaylistPage(QWidget):
             self._update_playlist_count()
 
     def _source_changed(self, _index: int) -> None:
+        self._source_generation += 1
         self._track_cache.clear()
+        self.ctx.playlist, self.ctx.tracks = None, []
+        self.ctx.reset_import()
+        self.playlist_list.clear()
+        self.track_model.set_tracks([])
+        self._update_track_count()
+        self.track_info.setText("Click a playlist to preview its tracks.")
+        self.tracks_changed.emit()
         self.load_playlists()
 
     def reset(self) -> None:
@@ -190,9 +205,12 @@ class PlaylistPage(QWidget):
         self.status.setText("Loading playlists...")
         self.reload_btn.setEnabled(False)
         self._track_cache.clear()
-
-        run_async(self, src.list_playlists, lambda pls: self._playlists_loaded(pls, src),
-                  lambda e: self._playlists_failed(e, src))
+        self._playlist_request += 1
+        request, generation = self._playlist_request, self._source_generation
+        def current():
+            return request == self._playlist_request and generation == self._source_generation
+        run_async(self, src.list_playlists, lambda pls: self._playlists_loaded(pls, src) if current() else None,
+                  lambda e: self._playlists_failed(e, src) if current() else None)
 
     def _playlists_loaded(self, playlists: list[Playlist], src: PlaylistSource | None = None) -> None:
         if src is not None and src is not self.current_source() and src.name != getattr(
@@ -251,14 +269,18 @@ class PlaylistPage(QWidget):
         self.track_info.setText(f"Loading tracks of '{pl.name}'...")
         self.tracks_changed.emit()
 
-        run_async(self, lambda: src.get_tracks(pl.id), lambda tr: self._tracks_loaded(pl, src, tr),
-                  lambda e: self._tracks_failed(pl, src, e))
+        generation = self._source_generation
+        run_async(self, lambda: src.get_tracks(pl.id),
+                  lambda tr: self._tracks_loaded(pl, src, tr) if generation == self._source_generation else None,
+                  lambda e: self._tracks_failed(pl, src, e) if generation == self._source_generation else None)
 
     def _is_selected(self, pl: Playlist) -> bool:
         cur = self.selected_playlist()
         return cur is not None and cur.id == pl.id
 
     def _tracks_loaded(self, pl: Playlist, src: PlaylistSource, tracks: list[AppleTrack]) -> None:
+        if getattr(self.current_source(), "name", None) != src.name:
+            return
         self._track_cache[(src.name, pl.id)] = tracks
         if self._is_selected(pl):  # the user may have clicked another playlist meanwhile
             self._show_tracks(pl, tracks)

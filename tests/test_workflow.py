@@ -114,7 +114,9 @@ def test_search_never_enqueues_and_creates_no_transfers(env):
 def test_already_imported_tracks_are_skipped_without_searching(env):
     from s2s.models import ImportResult
     prev = env.store.create_import(Playlist("p.0", "Old"), str(env.root / "House"))
-    env.store.record_import_result(prev, ImportResult("i.1", ImportOutcome.COPIED, "a", "b"))
+    final = env.root / "House" / "saved.mp3"
+    final.write_bytes(b"synthetic")
+    env.store.record_import_result(prev, ImportResult("i.1", ImportOutcome.COPIED, "a", str(final)))
     client = FakeSlskd({"song": [good_file()]})
     res, _ = run(env, client)
     assert res[0].status == MatchStatus.SKIPPED and res[0].note == "already imported"
@@ -399,3 +401,94 @@ def test_process_requires_downloads_dir(env):
     env.settings.slskd_downloads_dir = ""
     with pytest.raises(ValueError, match="downloads folder"):
         workflow.process_completed(env.store, ap.id, env.settings, runner=fake_runner())
+
+
+@pytest.mark.parametrize("title", ["Song (Radio Edit)", "Song (Live)", "Song [Mixed]"])
+def test_excluded_requests_skip_network(env, title):
+    client = FakeSlskd()
+    res, events = run(env, client, [AppleTrack("excluded", title, "Artist")])
+    assert res[0].status == MatchStatus.SKIPPED
+    assert "excluded" in res[0].note
+    assert client.calls == []
+    assert len(events) == 1
+
+
+def test_rejected_primary_does_not_hide_eligible_fallback(env):
+    track = AppleTrack("remix", "Song (Bob Remix)", "Artist")
+    wrong = good_file(path=r"Artist - Song (Alice Remix).mp3")
+    right = good_file(path=r"Artist - Song (Bob Remix).mp3")
+    client = FakeSlskd()
+    def responses(search_id):
+        query = client.texts[search_id]
+        return [wrong] if "bob remix" in query else [right]
+    client.get_search_responses = responses
+    res, _ = run(env, client, [track])
+    assert res[0].best.file.filename == right.filename
+    assert len(client.texts) == 2
+    assert any(c.file.filename == wrong.filename for c in res[0].rejected)
+
+
+def test_all_rejected_queries_remain_unresolved(env):
+    client = FakeSlskd({"song": [good_file(path=r"Artist - Song (Alice Remix).mp3")]})
+    res, _ = run(env, client, [AppleTrack("remix", "Song (Bob Remix)", "Artist")])
+    assert res[0].status == MatchStatus.UNRESOLVED
+    assert res[0].best is None
+    assert len(client.texts) == 2
+
+
+@pytest.mark.parametrize("users,enough,needs_deep,backups", [
+    (["u1", "u2", "u3", "u4", "u5", "u6"], True, False, 5),
+    (["u1", "u2", "u3", "u4"], False, False, 3),
+    (["u1", "u1", "u1", "u1", "u1", "u1"], False, True, 0),
+    (["u1", "u2"], False, True, 1),
+])
+def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, enough, needs_deep, backups):
+    # A folder difference creates distinct remote files without changing recording identity.
+    files = [good_file(user=u, path=rf"folder{i}\Artist - Song.mp3") for i, u in enumerate(users)]
+    def search(client, track, **kw):
+        assert kw["fast_timeout_s"] == 8
+        assert kw["has_eligible"](files) is enough
+        assert kw["needs_deep_search"](files) is needs_deep
+        return files
+    monkeypatch.setattr(workflow, "run_search", search)
+    res, _ = run(env, FakeSlskd(), [AppleTrack("one", "Song", "Artist")])
+    assert workflow.backup_source_count(res[0]) == backups
+    assert f"{backups} backup uploaders" in res[0].note
+    stored = env.store.load_match_results(env.iid)[0]
+    assert len(stored.alternatives) == len(files) - 1
+    assert workflow.backup_source_count(stored) == backups
+
+
+def test_wrong_remixes_never_satisfy_backup_target(env, monkeypatch):
+    files = [good_file(user=f"peer{i}", path=r"Artist - Song (Other Remix).mp3") for i in range(10)]
+    def search(client, track, **kw):
+        assert not kw["has_eligible"](files)
+        assert kw["needs_deep_search"](files)
+        return files
+    monkeypatch.setattr(workflow, "run_search", search)
+    res, _ = run(env, FakeSlskd(), [AppleTrack("remix", "Song (Bob Remix)", "Artist")])
+    assert res[0].best is None
+    assert workflow.backup_source_count(res[0]) == 0
+
+
+
+def test_backup_search_warning_is_stored_without_losing_primary(env, monkeypatch):
+    def search(client, track, **kw):
+        kw["on_warning"](SlskdError("synthetic failure"))
+        return [good_file()]
+    monkeypatch.setattr(workflow, "run_search", search)
+    res, _ = run(env, FakeSlskd(), [AppleTrack("one", "Song", "Artist")])
+    assert res[0].status == MatchStatus.PROPOSED
+    assert "earlier results retained" in res[0].note
+    assert "earlier results retained" in env.store.load_match_results(env.iid)[0].note
+
+
+
+def test_missing_historical_import_is_searched_again(env):
+    from s2s.models import ImportResult
+    previous = env.store.create_import(Playlist("previous", "Previous"), str(env.root / "House"))
+    missing = env.root / "House" / "missing.mp3"
+    env.store.record_import_result(previous, ImportResult("i.1", ImportOutcome.COPIED, "source", str(missing)))
+    results, _ = run(env, FakeSlskd({"song": [good_file()]}), [tracks()[0]])
+    assert results[0].status == MatchStatus.PROPOSED
+    assert not missing.exists()

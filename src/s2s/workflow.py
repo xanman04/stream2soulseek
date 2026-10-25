@@ -12,9 +12,10 @@ import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from . import archive, organize
-from .matching import match, penalise_peers
+from .matching import match, penalise_peers, request_exclusion
 from .models import (
     AppleTrack,
     ArchiveResult,
@@ -27,12 +28,16 @@ from .models import (
     Tier,
     TransferState,
 )
-from .rejections import RejectionKind, declined_transfers, pending_declined, peer_reason
+from .rejections import DeclinedTransfer, RejectionKind, classify, declined_transfers, pending_declined, peer_reason
 from .slskd.search import SearchCancelled, run_search
 from .store import Store
+from .queue_recovery import effective_item, pool_for_track
 
 ALREADY_IMPORTED = "already imported"
 NOT_SEARCHED = "not searched (search was cancelled before this track)"
+QUICK_SEARCH_S = 8
+TARGET_SOURCES = 6  # primary plus five independent backup uploaders
+MIN_SOURCES = 4  # primary plus three backups before avoiding a deeper search
 
 _SECRETISH = re.compile(r"(?i)\bbearer\s+\S+|[A-Za-z0-9_\-]{32,}(?:\.[A-Za-z0-9_\-]{8,}){0,2}")
 
@@ -62,6 +67,21 @@ def declined_peer_reasons(store: Store) -> dict[str, str]:
         if reason:
             out[user] = reason
     return out
+
+
+def _source_count(result: MatchResult, *, preferred: bool = False) -> int:
+    candidates = ([result.best] if result.best else []) + list(result.alternatives)
+    return len({c.file.username.casefold() for c in candidates if not c.flagged
+                and (not preferred or (c.tier == Tier.EXACT and c.format_rank == 1))})
+
+
+def backup_source_count(result: MatchResult) -> int:
+    """Usable alternate uploaders, excluding every file from the selected peer."""
+    if result.best is None:
+        return 0
+    primary = result.best.file.username.casefold()
+    return len({c.file.username.casefold() for c in result.alternatives
+                if not c.flagged and c.file.username.casefold() != primary})
 
 
 def search_and_match(
@@ -101,6 +121,8 @@ def search_and_match(
             break
         if t.apple_id in done_ids:
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IMPORTED))
+        elif request_exclusion(t, settings.match_policy):
+            finish(match(t, [], settings.match_policy, declined_peers))
         else:
             todo.append(t)
 
@@ -108,25 +130,51 @@ def search_and_match(
         if cancel.is_set():
             return None
         try:
+            warnings: list[str] = []
+
+            def ranked(found):
+                return match(track, found, settings.match_policy, declined_peers)
+
             files = run_search(
                 client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
                 response_limit=settings.response_limit, file_limit=settings.file_limit,
+                has_eligible=lambda found: _source_count(ranked(found), preferred=True) >= TARGET_SOURCES,
+                fast_timeout_s=QUICK_SEARCH_S,
+                needs_deep_search=lambda found: (
+                    _source_count(ranked(found)) < MIN_SOURCES
+                    or _source_count(ranked(found), preferred=True) == 0
+                ),
+                on_warning=lambda exc: warnings.append(
+                    "Additional source search failed; earlier results retained "
+                    f"({type(exc).__name__})"
+                ),
             )
         except SearchCancelled:
             return None
         except Exception as exc:  # network/API errors must not abort the whole run
             return _unresolved(track, f"search failed: {type(exc).__name__}: {scrub(exc)}")
         try:
-            return match(track, files, settings.match_policy, declined_peers)
+            result = ranked(files)
+            if result.best is not None:
+                backups = backup_source_count(result)
+                summary = f"{backups} backup uploaders available"
+                if backups < MIN_SOURCES - 1:
+                    summary += "; fewer than the target of 3-5 backups were found"
+                result = replace(result, note="; ".join(x for x in (result.note, summary) if x))
+            if warnings:
+                result = replace(result, note="; ".join(x for x in (result.note, *warnings) if x))
+            return result
         except Exception as exc:  # pragma: no cover - defensive
             return _unresolved(track, f"matching failed: {type(exc).__name__}")
 
     if todo and not cancel.is_set():
-        workers = max(1, int(settings.search_concurrency))
+        workers = min(8, max(1, int(settings.search_concurrency)))
         ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="search")
         try:
             futures = [ex.submit(work, t) for t in todo]
             for fut in as_completed(futures):
+                if fut.cancelled():
+                    continue
                 res = fut.result()
                 if res is not None:
                     finish(res)
@@ -186,7 +234,8 @@ class ReplacementPlan:
     without_source: list[str]  # apple ids with no other eligible candidate
 
 
-def build_replacement_plan(store: Store, import_id: str, settings: Settings) -> ReplacementPlan:
+def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
+                           include_failed: bool = False) -> ReplacementPlan:
     """Review rows for the declined tracks of an import only.
 
     For each such track, every candidate from a peer that declined THAT track becomes REJECTED
@@ -195,9 +244,27 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings) -> 
     review, which creates a NEW approval.
     """
     pending = pending_declined(store, import_id)
+    if include_failed:
+        latest = {}
+        for approval in store.approvals_for_import(import_id):
+            for selected in approval.items:
+                latest[selected.apple_id] = (approval.id, selected)
+        pending = []
+        for track_id, (aid, selected) in latest.items():
+            record = store.get_transfer(aid, track_id)
+            if record is None or record.status.state != TransferState.FAILED:
+                continue
+            status = record.status
+            rejection = classify(status.raw_state, status.error) or classify("Completed, Errored", status.error)
+            pending.append(DeclinedTransfer(track_id, aid, selected.username, selected.filename,
+                                           selected.size, selected.destination, rejection, False))
     declined_users: dict[str, set[str]] = {}
     for d in declined_transfers(store, import_id):
         declined_users.setdefault(d.apple_id, set()).add(d.username.casefold())
+    if include_failed:
+        for record in store.transfers_for_import(import_id):
+            if record.status.state == TransferState.FAILED:
+                declined_users.setdefault(record.apple_id, set()).add(record.status.username.casefold())
     stored = {r.track.apple_id: r for r in store.load_match_results(import_id)}
     tracks = {t.apple_id: t for t in store.load_tracks(import_id)}
     peers = declined_peer_reasons(store)
@@ -228,7 +295,7 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings) -> 
         rejected = tuple(refused) + (old.rejected if old else ())
         if usable:
             results.append(MatchResult(track, MatchStatus.PROPOSED, usable[0], tuple(usable[1:]), rejected,
-                                       note=f"replacement for a declined download from {d.username}"))
+                                       note=f"replacement for a failed or declined download from {d.username}"))
         else:
             missing.append(d.apple_id)
             results.append(MatchResult(track, MatchStatus.UNRESOLVED, None, (), rejected, note=NO_OTHER_SOURCE))
@@ -256,10 +323,14 @@ def import_completed(
     already = {
         r.apple_id for r in store.import_results(approval.import_id)
         if r.outcome in (ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT)
+        and r.final_path and Path(r.final_path).is_file()
     }
     out: list[ImportResult] = []
     for item in approval.items:
         if item.apple_id in already:
+            continue
+        item = effective_item(store, approval_id, item, for_import=True)
+        if item is None:
             continue
         rec = store.get_transfer(approval_id, item.apple_id)
         if rec is None or rec.status.state != TransferState.SUCCEEDED:
@@ -276,6 +347,7 @@ def import_completed(
                     transfer=rec.status, downloads_dir=settings.slskd_downloads_dir,
                     destination=item.destination, ffprobe_path=settings.ffprobe_path, runner=runner,
                     archive_name=settings.archive_dir_name, policy=settings.match_policy,
+                    require_peer=pool_for_track(store, approval_id, item.apple_id) is not None,
                 )
             except Exception as exc:
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,
@@ -340,6 +412,7 @@ def process_completed(
     """
     report = ProcessReport(imported=import_completed(store, approval_id, settings, runner=runner))
     approval = store.get_approval(approval_id)
+    approval = replace(approval, items=tuple(effective_item(store, approval_id, item) or item for item in approval.items))
     already = {a.username for a in store.archives_for_approval(approval_id)}
     for username in sorted({i.username for i in approval.items}):
         if username in already:

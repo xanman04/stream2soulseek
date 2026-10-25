@@ -6,7 +6,7 @@ import contextlib
 from dataclasses import dataclass, field
 
 from ..models import AppleTrack, MatchResult, Playlist, Settings
-from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SecretStore
+from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SPOTIFY_SESSION, SecretStore
 from ..slskd.client import SlskdClient, SlskdError
 from ..store import Store
 from ..workflow import scrub
@@ -39,13 +39,22 @@ class AppContext:
 
     def secret_values(self) -> list[str]:
         out = []
-        for name in (APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY):
+        for name in (APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SPOTIFY_SESSION):
             try:
                 v = self.secrets.get(name)
             except Exception:  # noqa: BLE001
                 v = None
             if v:
                 out.append(v)
+                if name == SPOTIFY_SESSION:
+                    try:
+                        import json
+                        data = json.loads(v)
+                        cookies = data.get("cookies", []) if isinstance(data, dict) else []
+                        out.extend(cookie["value"] for cookie in cookies if isinstance(cookies, list)
+                                   if isinstance(cookie, dict) and isinstance(cookie.get("value"), str))
+                    except (ValueError, TypeError):
+                        pass
         return out
 
     def describe(self, exc: object) -> str:
@@ -56,10 +65,11 @@ class AppContext:
     # ---------------------------------------------------------------- services
 
     def playlist_sources(self) -> list:
-        """All playlist sources the app knows (connected or not). Spotify/SoundCloud plug in here later."""
+        """All playlist sources the app knows, whether connected or not."""
         from ..sources import AppleSource
+        from ..sources.spotify import SpotifySource
 
-        return [AppleSource(self.secrets)]
+        return [AppleSource(self.secrets), SpotifySource(self.secrets)]
 
     def slskd_client(self, *, url: str | None = None, api_key: str | None = None) -> SlskdClient:
         key = api_key if api_key else self.secrets.get(SLSKD_API_KEY)

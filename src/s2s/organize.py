@@ -97,7 +97,8 @@ def sanitize_component(name: str) -> str:
 
 
 def locate_download(
-    downloads_dir: str, username: str, remote_filename: str, expected_size: int, *, archive_name: str = "OLD"
+    downloads_dir: str, username: str, remote_filename: str, expected_size: int, *, archive_name: str = "OLD",
+    require_peer: bool = False,
 ) -> Path:
     """Find the local copy of a remote file.
 
@@ -105,7 +106,8 @@ def locate_download(
     <downloads_dir>/<username>/<last directory component of the remote path>/<basename>.
     Fallbacks, in order: the older <downloads_dir>/<last dir>/<basename>, then a recursive search for the
     basename with exactly expected_size (exactly one match required). The archive folder
-    (<downloads_dir>/<archive_name>) is never searched.
+    (<downloads_dir>/<archive_name>) is never searched. With require_peer=True, all
+    lookup is restricted to the winning uploader's folder; legacy global fallbacks are disabled.
     """
     root = Path(downloads_dir)
     parts = [p for p in re.split(r"[\\/]+", remote_filename) if p]
@@ -115,10 +117,15 @@ def locate_download(
     if base in (".", ".."):
         raise DownloadNotFoundError("invalid remote filename")
     archive = (root / archive_name) if archive_name else None
+    peer_root = root / sanitize_component(username)
+    if require_peer and (peer_root.resolve() == root.resolve() or not _inside(peer_root, root)
+                         or (archive is not None and _inside(peer_root, archive))):
+        raise DownloadNotFoundError("cannot identify a safe download folder for the winning peer")
 
     def ok(p: Path) -> bool:
         try:
             return (p.is_file() and p.stat().st_size == expected_size and _inside(p, root)
+                    and (not require_peer or (peer_root != root and _inside(p, peer_root)))
                     and not (archive is not None and _inside(p, archive)))
         except OSError:
             return False
@@ -133,7 +140,7 @@ def locate_download(
             if ok(first):
                 return first.resolve()
     matches: list[Path] = []
-    for dirpath, dirs, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(peer_root if require_peer else root):
         if archive is not None and Path(dirpath) == root:
             dirs[:] = [d for d in dirs if d.casefold() != archive_name.casefold()]
         for f in files:
@@ -249,6 +256,7 @@ def import_file(
     runner=subprocess.run,
     archive_name: str = "OLD",
     policy: MatchPolicy | None = None,
+    require_peer: bool = False,
 ) -> ImportResult:
     policy = policy or MatchPolicy()
     aid = track.apple_id
@@ -260,7 +268,7 @@ def import_file(
         return invalid(f"transfer is not complete (state: {transfer.state.value})")
     try:
         src = locate_download(downloads_dir, transfer.username, transfer.filename, transfer.size,
-                              archive_name=archive_name)
+                              archive_name=archive_name, require_peer=require_peer)
     except OrganizeError as exc:
         return invalid(str(exc))
     if src.stat().st_size != transfer.size:

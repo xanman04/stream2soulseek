@@ -1,6 +1,6 @@
 # S2S (Stream to Soulseek): development instructions and handoff
 
-Updated: 2026-10-24. Owner: Xander. Development workspace: `C:\DJ\dev`.
+Updated: 2026-10-25. Owner: Xander. Development workspace: `C:\DJ\dev`.
 
 This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. All project files live under `C:\DJ\dev`; the rest of `C:\DJ` is the user's music and DJ workspace, not part of the project. This is a development plan, not evidence that the integrations work.
 
@@ -37,7 +37,29 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 - Other website sources are a later phase. Initially report tracks unavailable on Soulseek rather than adding external downloading.
 - AI is optional. Deterministic matching and review should enforce the rules; no paid AI dependency is required for the core workflow.
 
+## Search performance and backup requirements (2026-10-25)
+
+- A 64-track playlist exposed roughly 40 seconds between serial search completions. slskd 0.26.2 limits concurrent search-start POST requests, not active searches: serialize only creation and allow bounded active searches (default 3, maximum 8).
+- Start with queries bounded to 8 seconds each. Aim for a primary candidate plus five unflagged, exact, preferred-format uploaders; if fewer than three independent backups are available, or no exact preferred-format source exists, use the configured extended timeout for one broader artist/title search. Keep version/format eligibility unchanged and retain candidates for review.
+- Count backup uploaders independently; several files from the same peer are not independent backups. Show the available count and report shortfalls rather than guaranteeing unavailable files. Backup search results alone never authorize extra downloads. Users may explicitly approve an exact-file backup pool in Review or Step 5; any file outside that pool still needs fresh confirmation.
+- slskd persists response files when the search finalizes. After stopping a bounded search, wait for finalization before fetching responses. Do not implement early matching against partial file responses without verifying upstream support.
+- Upgrade the old concurrency default of 1 to 3 once using `extra.search_scheduler_version`; preserve subsequent explicit settings. Verify speed with simulated services and then a live playlist before claiming a real-world improvement.
+
+## Reviewed queued-download recovery (2026-10-25)
+
+- Opt-in only. Initial Review lists primary and every backup in confirmation; Step 5 also offers Review queued backups for existing transfers. Bind exact peer, path, size, destination, matching-policy fingerprint, wait interval and concurrent limit. Exclude flagged/rejected backup files.
+- User chose a 45-second default wait with no actual bytes/percentage progress. Try another reviewed source each interval, at most three concurrent attempts per track, rotating waiting backups to allow all five to be tried. No guarantee of five available sources.
+- Keep one original approval with persisted child attempts and a single logical leader. First actual progress selects the leader; cancel redundant attempts with remove=False, preserving partial files. Unused reviewed backups remain available if the leader fails. Persist reservations before dispatch; never repeat an uncertain request after restart.
+- History and verified import follow the current leader, only after SUCCEEDED. Pool imports require the winning peer's own folder; never select a same-name loser through a global fallback search. Cancelled partials stay in Soulseek storage and are not imported.
+- Retry/cancel/recovery share a process lock. Changed matching policy or a newer approval stops and cancels the old pool; failed cancellations remain retryable. Manual same-file retry disables automatic switching.
+- Recovery polling runs while Step 5 is open; slskd downloads continue independently when navigating elsewhere or closing S2S. Live queue recovery and search recall still need user testing.
+- Promotional website suffix cleanup is conservative and always flags the resulting candidate for review. Keep the raw filename and apply recording/version exclusions before any cleanup. No AI dependency added.
+
 ## Working norms
+
+- Account for every saved playlist track through import history, including unresolved, unselected, excluded, queued, failed, and missing-file cases. Report current transfer counts by latest approval per track; replacement attempts are not additional playlist tracks. Exporting outstanding titles must remain an explicit local action.
+- A historical import record alone must not suppress searching: the recorded final file must still exist in the chosen destination. Keep confirmation navigation stable, discard stale background callbacks after selection/navigation changes, and require explicit approval for replacement downloads.
+- Update local `HANDOFF.md` as work progresses and at the end of each development turn, including test results, uncommitted work, and remaining limits. Do not publish that file or private playlist data.
 
 - Prioritize accuracy and low subscription-token usage. Explain outcomes plainly and distinguish inspected code, offline tests, and live verification.
 - Preserve existing music. Do not move, rename, delete, retag, or convert the user's current library to test the app.
@@ -105,7 +127,7 @@ Proposed native screens:
 1. Connect Apple Music; browse playlists; choose playlists and destination library.
 2. Search with progress and cancellation. Display one row per requested track, including unresolved/skipped entries.
 3. Review requested recording versus proposed remote file: peer username, full remote path, matched version/fallback reason, format, bitrate, size, duration if available, availability/queue, and existing-library status. Allow alternatives, deselection, and inspection of other candidates.
-4. Explicit confirmation queues only the reviewed selection. Bind approval to exact peer/file/size and destination, not just a track title. A changed selection or replacement file requires fresh review. No automatic fallback download after approval.
+4. Explicit confirmation queues only the reviewed selection. Bind approval to exact peer/file/size and destination, not just a track title. A changed selection or replacement file outside an explicitly reviewed backup pool requires fresh review. Automatic attempts are limited to the exact files in that fingerprinted pool.
    A download declined by its uploader (e.g. "share files first") is never replaced automatically: "Find another source" reopens Review for the declined tracks only (the declining peer's files marked unusable; `approval.create_approval` also refuses that peer for that track), and a replacement needs its own confirmation and a NEW approval; the original approval stays immutable. Classification lives in `src/s2s/rejections.py`; the exact slskd/Soulseek rejection texts are unverified.
 5. Show transfer progress, queue states, errors, retry/cancel controls, and partial completion.
 6. Verify successful downloads, then organize into the chosen flat library with a persistent import record.
@@ -201,6 +223,7 @@ The user explicitly requires that personal credentials never become hardcoded or
 
 The user wants, eventually, a single runnable Windows package (like the SoulseekQt installer) to send to friends, even without open-sourcing. Each friend signs in to their own Apple Music and Soulseek accounts and uses their own folders. Design for this now:
 
+- Future distribution must support **macOS as well as Windows** (requested 2026-10-24). Implement macOS compatibility when preparing downloadable packages; no port is requested yet. Plan for platform-specific secret storage (macOS Keychain instead of Windows DPAPI), application-data paths, slskd process management, filesystem behavior, and Qt WebEngine packaging. Verify installation, sign-in, searching, downloads, and imports on macOS before claiming support.
 - Everything per-user and discovered at runtime: no paths, accounts, tokens or settings from the developer's machine in the build. A first-run setup asks for the download location, slskd folders, Soulseek login and Apple sign-in.
 - The app should manage slskd itself: start/stop it as a child process with a generated per-user config (random API key, loopback-only API, HTTPS off, no shares, file retention off). Pass the Soulseek login from DPAPI storage via `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD` environment variables rather than writing the password into `slskd.yml`.
 - Packaging candidate: PyInstaller (or Nuitka) one-folder build including Qt WebEngine, zipped or wrapped in an installer. Build only from a clean checkout with an explicit file allowlist, and inspect the package for secrets and personal data.

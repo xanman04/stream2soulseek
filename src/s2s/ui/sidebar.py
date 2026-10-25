@@ -9,10 +9,11 @@ from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QListWidgetItem, QPus
 from .steps import STEPS
 
 APPLE_KEY = "apple"
+SPOTIFY_KEY = "spotify"
 # (key, label, available today)
 SERVICES = [
     (APPLE_KEY, "Apple Music", True),
-    ("spotify", "Spotify (coming soon)", False),
+    (SPOTIFY_KEY, "Spotify", True),
     ("soundcloud", "SoundCloud (coming soon)", False),
 ]
 
@@ -122,6 +123,7 @@ class Sidebar(QWidget):
         self.soulseek_label.setText(text)
 
     def set_step_states(self, done: list[bool], available: list[bool]) -> None:
+        was_blocked = self.steps.blockSignals(True)
         for i, (name, _t, _e) in enumerate(STEPS):
             it = self.steps.item(i)
             it.setText(("✓ " if done[i] else "") + f"{i + 1}. {name}")
@@ -131,6 +133,7 @@ class Sidebar(QWidget):
             else:
                 it.setFlags(Qt.ItemFlag.NoItemFlags)  # greyed out and not clickable
                 it.setToolTip("Finish the earlier steps first.")
+        self.steps.blockSignals(was_blocked)
         self._bold_current()
 
     def _bold_current(self) -> None:
