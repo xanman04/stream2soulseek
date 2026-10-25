@@ -14,6 +14,7 @@ from pathlib import Path
 from .models import MatchPolicy, Settings, default_ffprobe_path
 
 MAX_RECENT = 10
+SEARCH_SCHEDULER_VERSION = 1
 
 
 def app_dir_path() -> Path:
@@ -74,6 +75,14 @@ def load_settings() -> Settings:
     data = json.loads(path.read_text(encoding="utf-8"))
     known = {f.name for f in dataclasses.fields(Settings)}
     kwargs = {k: v for k, v in data.items() if k in known}  # unknown/removed keys (tracks_root) ignored
+    extra = dict(kwargs.get("extra") or {})
+    if extra.get("search_scheduler_version", 0) < SEARCH_SCHEDULER_VERSION:
+        # Previously the global lock forced every search to run serially. Upgrade
+        # that old default once; subsequent explicit choices of 1 remain valid.
+        if kwargs.get("search_concurrency", 1) == 1:
+            kwargs["search_concurrency"] = 3
+        extra["search_scheduler_version"] = SEARCH_SCHEDULER_VERSION
+    kwargs["extra"] = extra
     kwargs["match_policy"] = MatchPolicy.from_dict(data.get("match_policy"))  # absent in old files -> defaults
     layouts = data.get("rule_layouts")
     kwargs["rule_layouts"] = ({str(n): MatchPolicy.from_dict(p) for n, p in layouts.items() if str(n).strip()}
@@ -98,5 +107,6 @@ def save_settings(settings: Settings) -> None:
     tmp = path.with_suffix(".tmp")
     data = {**dataclasses.asdict(settings), "match_policy": settings.match_policy.to_dict(),
             "rule_layouts": {n: p.to_dict() for n, p in settings.rule_layouts.items()}}
+    data["extra"]["search_scheduler_version"] = SEARCH_SCHEDULER_VERSION
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     os.replace(tmp, path)

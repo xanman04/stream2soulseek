@@ -240,6 +240,39 @@ def scan_exclusion(text: str, skip: set[str] | frozenset[str] = frozenset()) -> 
 
 _AUDIO_EXT = re.compile(r"\.(mp3|flac|m4a|wav|ogg|opus|aac|wma|aif|aiff|alac|ape|wv)$", re.I)
 _TRACKNO = re.compile(r"^\s*(?:\d{1,2}[-.]\d{1,3}|[A-Da-d]\d{1,2}|\d{1,3})\s*(?:[-.)\]_]\s*|\s+)")
+_PROMO_DOMAIN = re.compile(r"(?i)(?<![\w.-])(?:https?://)?(?:www\.)?[a-z0-9-]+\.(?:com|net|org|co|io|info|biz|me|tv)(?:\.[a-z]{2})?(?![\w.-])")
+_PROMO_WORDS = {"download", "downloads", "free", "mp3", "music", "song", "songs", "track", "tracks"}
+
+
+def clean_filename_promo(stem: str) -> tuple[str, bool]:
+    """Remove a narrowly recognizable promo domain and adjacent promo boilerplate.
+
+    Version labels and arbitrary words are retained. Callers should flag any changed
+    filename for review; this helper only improves title parsing.
+    """
+    match = _PROMO_DOMAIN.search(stem or "")
+    if not match:
+        return stem, False
+    start, end = match.span()
+    # Only trim the domain when the remaining plain-text tail is promo boilerplate;
+    # bracketed version labels are left intact for the version matcher.
+    tail = stem[end:]
+    tail_text = re.split(r"(?=[([{])", tail, maxsplit=1)[0]
+    tail_words = normalise(tail_text).split()
+    if any(word not in _PROMO_WORDS for word in tail_words):
+        return stem, False
+    prefix = stem[:start]
+    # The common "title x domain" separator is part of the promo fragment.
+    separator = re.search(r"(?i)\s+x\s*$", prefix)
+    explicit_url = bool(re.match(r"(?i)(?:https?://|www\.)", match.group()))
+    if not separator and not explicit_url:
+        return stem, False
+    if separator:
+        prefix = prefix[:separator.start()]
+    if not prefix.strip():
+        return stem, False
+    cleaned = prefix.rstrip() + tail[len(tail_text):]
+    return cleaned, True
 
 
 def split_remote_path(path: str) -> tuple[list[str], str]:
@@ -278,6 +311,7 @@ def remote_interpretations(path: str) -> list[tuple[str | None, ParsedTitle]]:
     Track-number-stripped readings come first, then the unstripped ones (a title may start with a number).
     """
     _dirs, stem = split_remote_path(path)
+    stem, _promo = clean_filename_promo(stem)
     stripped = strip_track_number(stem)
     out = _interps_for(stripped)
     if stripped != stem:

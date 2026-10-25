@@ -24,6 +24,7 @@ from .versions import (
     strip_track_number,
     tokenise,
     version_words,
+    clean_filename_promo,
 )
 
 MAX_REJECTED = 50
@@ -157,6 +158,7 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     artists = split_names(track.artist)
     full_artist = normalise(track.artist)
     dirs, stem = split_remote_path(f.filename)
+    _clean_stem, promo_changed = clean_filename_promo(stem)
     path_norm = normalise(" ".join(dirs + [stem]))
     fr = 1 if ignore_format else format_rank(f, policy)
 
@@ -164,6 +166,9 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     flags: list[str] = []
     info: list[str] = []
     relevance = 0
+
+    if promo_changed:
+        flags.append("filename contains promotional website text; review the raw filename")
 
     if fr == 9:
         reject.append("format: " + _fmt.describe_format(f, policy))
