@@ -14,6 +14,9 @@ def main() -> int:
     # Keep the web view's native window from turning every sibling widget native (repaint artifacts).
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
     app = QApplication.instance() or QApplication(sys.argv)
+    from .ui.theme import apply_app_style
+
+    apply_app_style(app)
 
     from . import config
     from .secretstore import SecretStore
