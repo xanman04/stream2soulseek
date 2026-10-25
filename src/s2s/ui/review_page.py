@@ -150,7 +150,9 @@ def not_found_detail(note: str) -> str:
     if not note or note == "no files returned":
         return "Soulseek returned no files for this search."
     if m := re.match(r"(\d+) files, none eligible", note):
-        return f"{m[1]} files were found, but none passed your rules (see the rejected files on the right)."
+        n = int(m[1])
+        return (f"{n} file{' was' if n == 1 else 's were'} found, but none passed your rules "
+                "(see the rejected files on the right).")
     return note[:1].upper() + note[1:] + ("" if note.endswith(".") else ".")
 
 
@@ -859,6 +861,11 @@ class ReviewPage(QWidget):
         policy = self.ctx.settings.match_policy
         self.model.skip_flagged = bool(policy.skip_flagged_by_default)
         self.model.duration_tolerance_s = policy.duration_tolerance_s
+        # The alternatives list still holds (row, candidate) pairs of the PREVIOUS results; model.set_results()
+        # fires checks_changed -> _update_footer -> _update_use_button, which would index the new (shorter) rows
+        # with a stale row number (IndexError printed from a Qt slot, e.g. when "Find another source" loads a
+        # one-track replacement review).
+        self.detail.setRowCount(0)
         self.model.set_locked(locked)
         self.model.set_results(results, destination, existing)
         self.model.set_locked(locked)
@@ -1053,7 +1060,7 @@ class ReviewPage(QWidget):
     def _update_use_button(self) -> None:
         sel = self._selected_detail_candidate()
         ok = False
-        if sel is not None and not self._locked and not self._busy:
+        if sel is not None and not self._locked and not self._busy and sel[0] < len(self.model.rows):
             row, cand = sel
             cur = self.model.rows[row].chosen
             ok = self.model.is_selectable_candidate(row, cand) and (cur is None or file_key(cur) != file_key(cand))
@@ -1089,7 +1096,8 @@ class ReviewPage(QWidget):
             text = (f"Another source for {n} failed or declined track{'s' if n != 1 else ''}. Tick the ones you "
                     "want and download: this is a new confirmation that queues only those files.")
             if self._without_source:
-                text += (f" {self._without_source} of these tracks have no other eligible source: run the "
+                text += (f" {self._without_source} of these tracks {'has' if self._without_source == 1 else 'have'} "
+                         "no other eligible source: run the "
                          "search again later, or enable sharing in Settings and retry.")
             kind = "info"
         elif not self.model.rows:

@@ -24,6 +24,8 @@ from .util import item, make_table
 from .workers import run_async
 
 COL_NUM, COL_TRACK, COL_RESULT, COL_SOURCES = range(4)
+LOCKED_INFO = ("Downloads are already queued for this selection. To search again, use “Start another playlist” "
+               "on the Downloads page once they are done.")
 
 
 class _Progress(QObject):
@@ -271,6 +273,8 @@ class SearchPage(QWidget):
         super().showEvent(event)
         self.refresh_rules()
         self._refresh_start_text()
+        if self._downloads_queued():
+            self.info.setText(LOCKED_INFO)
 
     # ------------------------------------------------------------ display
 
@@ -278,9 +282,19 @@ class SearchPage(QWidget):
         c = self.ctx
         return (c.playlist.id if c.playlist else None, c.destination, tuple(t.apple_id for t in c.tracks))
 
+    def _downloads_queued(self) -> bool:
+        """True once the current selection was confirmed for download (an approval exists)."""
+        return self.ctx.approval_id is not None
+
     def _refresh_start_text(self) -> None:
         again = bool(self._shown) or bool(self.ctx.results)
         self.start_btn.setText("Search again" if again else "Start search")
+        # A new search starts a NEW import and drops the confirmed one: the Downloads page would stop following
+        # (and importing/archiving) the files that are still arriving. So searching is closed while downloads
+        # are queued; "Start another playlist" on the Downloads page is the way to a fresh search.
+        locked = self._downloads_queued() and not self._running
+        self.start_btn.setEnabled(not self._running and not locked)
+        self.start_btn.setToolTip(LOCKED_INFO if locked else "")
 
     def prepare(self) -> None:
         """Show one 'waiting' row per requested track."""
@@ -407,6 +421,9 @@ class SearchPage(QWidget):
         if self._running:
             return
         ctx = self.ctx
+        if self._downloads_queued():
+            self.info.setText(LOCKED_INFO)
+            return
         if not ctx.tracks or not ctx.destination or ctx.playlist is None:
             self.info.setText("Nothing to search: choose a playlist and a tracklist folder first.")
             return
@@ -464,7 +481,7 @@ class SearchPage(QWidget):
             self._search_timer.stop()
             self.searching_label.setVisible(False)
             self.bar.setVisible(False)
-        self.start_btn.setEnabled(not running)
+        self.start_btn.setEnabled(not running and not self._downloads_queued())
         self.cancel_btn.setEnabled(running)
         self.layout_combo.setEnabled(not running)
         self.rules_btn.setEnabled(not running)
