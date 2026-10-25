@@ -20,11 +20,11 @@ a packaged release is not available.
 | Playlist source | Status |
 | --- | --- |
 | Apple Music | Implemented using an unofficial API; live integration under testing |
-| Spotify | Planned; not implemented |
+| Spotify | Implemented: sign in inside the app (unofficial web API via SpotAPI), or paste a public playlist link without signing in; signed-in use not yet verified live |
 | SoundCloud | Planned; not implemented |
 
-The latest local validation passed **711 offline tests**, covering matching, download approvals, file
-organization, state management, and the desktop interface. These tests use synthetic data and simulated
+The test suite (about 800 offline tests) covers matching, download approvals, file organization, state
+management, and the desktop interface, including a simulated end-to-end run. These tests use synthetic data and simulated
 services; they do not verify live authentication or end-to-end downloads.
 
 ## Features
@@ -37,6 +37,8 @@ services; they do not verify live authentication or end-to-end downloads.
 - Optionally approve exact backup files for queued downloads: wait 45 seconds, try another source, and cancel redundant attempts when one starts.
 - Configure matching rules and save reusable rule sets.
 - Verify completed downloads and copy them into a flat tracklist folder.
+- Check the finished folder against the playlist in order, export an M3U8 playlist, or copy the tracks in
+  playlist order (numbered) to a USB stick or another folder.
 - Track failed transfers, review replacement sources, and resume the most recent import.
 - Inspect every playlist track in import history, filter outstanding work, and export remaining tracks to CSV.
 - Start another import without reconnecting accounts or losing import history.
@@ -79,20 +81,27 @@ The installation also provides an `s2s` GUI entry point.
 
 ## Import workflow
 
-Connect a supported service from the sidebar, then follow the five import steps:
+Connect a supported service from the sidebar (or paste a public Spotify playlist link on step 1), then follow
+the six steps. Ctrl+1 … Ctrl+6 jump between steps.
 
-1. **Choose playlist.** Select a connected source and playlist. Preview, filter, or sort its tracks before
-   continuing. Preview sorting does not change the source playlist order.
+1. **Choose playlist.** Select a connected source and playlist, or paste a Spotify playlist link. Preview,
+   filter, or sort its tracks before continuing. Preview sorting does not change the source playlist order.
 2. **Choose tracklist folder.** Select the final destination for verified audio files. Each import can use a
    separate library folder.
-3. **Find on Soulseek.** Search for eligible recordings using the selected matching rules. The interface
-   shows ongoing activity, per-track results, and found/error counts.
-4. **Review & confirm.** Inspect the proposed files and alternatives. Unresolved or flagged results remain
-   visible for review. Downloads begin only after explicit confirmation of the selected files. Optional queued
-   recovery lists the exact backup files in the same confirmation.
-5. **Downloads & import.** Monitor transfers and file verification. Successfully verified files are copied
-   into the tracklist folder. The completion summary identifies outstanding work or errors; **Start another
-   import** returns to playlist selection.
+3. **Find on Soulseek.** The search starts as soon as you arrive. Results read plainly ("Found · exact",
+   "Check needed: length differs by 60 s", "Not found") with live progress and counts.
+4. **Review & confirm.** A summary shows how many tracks are ready, need a look, or were not found; filters
+   and **Next to check** take you straight to the ones that need attention. Confident matches are ticked,
+   flagged ones are not. The details panel explains why a file was chosen or flagged and lists alternatives.
+   Downloads begin only after you confirm the exact files. Optional queued recovery (remembered once you turn
+   it on) lists the exact backup files in the same confirmation.
+5. **Downloads & import.** One row per track with a plain status ("In folder ✓", "Downloading 42%",
+   "Waiting on uploader", "Declined: wants you to share files"). Verified files are copied into the tracklist
+   folder automatically; problems come with one **Find another source** button (a replacement still needs
+   your confirmation).
+6. **Check & export.** Compares the tracklist folder with the playlist in order, lists anything missing or
+   unexpected, exports an M3U8 playlist, copies the tracks in order to a USB stick or folder, or exports the
+   missing list.
 
 **Import history / outstanding tracks** is available from the File menu and step 5. It preserves the full
 playlist view, including tracks without an eligible match, files not selected for download, failures, and
