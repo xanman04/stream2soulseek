@@ -74,8 +74,12 @@ class Sidebar(QWidget):
         lay.addStretch(1)
         lay.addWidget(self.settings_btn)
 
-        self.services.currentRowChanged.connect(self._service_row)
-        self.steps.currentRowChanged.connect(self._step_row)
+        # React to deliberate clicks / Enter only. currentRowChanged also fires when a list merely receives
+        # focus (Qt selects row 0 on focus-in), which used to open the Apple page - and start its embedded
+        # browser - by itself when the window first appeared, intermittently crashing the app.
+        for lst, handler in ((self.services, self._service_row), (self.steps, self._step_row)):
+            lst.itemClicked.connect(lambda it, lst=lst, handler=handler: handler(lst.row(it)))
+            lst.itemActivated.connect(lambda it, lst=lst, handler=handler: handler(lst.row(it)))
         self.soulseek_btn.clicked.connect(self.soulseek_login_requested)
         self.settings_btn.clicked.connect(self.settings_requested)
 
