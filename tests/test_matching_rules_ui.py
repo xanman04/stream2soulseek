@@ -117,7 +117,7 @@ def test_search_page_summary_and_stale_note(ctx):
     assert page.stale_label.isHidden()
     ctx.settings.match_policy = MatchPolicy(formats=[FormatRule("flac")], version_mode="exact_only")
     page.refresh_rules()
-    assert not page.stale_label.isHidden() and "run it again" in page.stale_label.text()
+    assert not page.stale_label.isHidden() and "search again" in page.stale_label.text()
     assert page.rules_label.text().startswith("Accepting: FLAC \u00b7 exact version only")
 
 
@@ -153,4 +153,4 @@ def test_review_blocks_confirmation_when_rules_changed_since_search(ctx):
     assert rp.rules_stale() and not rp.confirm_btn.isEnabled()
     rp.confirm_download()
     assert not asked and ctx.approval_id is None  # never even asked
-    assert "run it again" in rp.banner.text()
+    assert "run the search again" in rp.banner.text().lower()

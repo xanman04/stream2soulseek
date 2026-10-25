@@ -47,17 +47,14 @@ def test_activity_animation_cycles_and_stops_on_success(qapp):
     page._set_running(True)
     assert not page.searching_label.isHidden()
     assert page.bar.minimum() == 0 and page.bar.maximum() == 0
-    labels = []
-    for _ in range(5):
-        page._animate_search_label()
-        labels.append(page.searching_label.text())
-    assert labels == ["Searching for tracks.", "Searching for tracks..",
-                      "Searching for tracks...", "Searching for tracks", "Searching for tracks."]
+    page._done, page._total = 0, 1
+    page._tick()
+    assert page.searching_label.text() == "Searching 0 of 1 · 0 found"
     result = MatchResult(page.ctx.tracks[0], MatchStatus.PROPOSED, _candidate("peer"))
     page._finished(("import", [result], False, page.ctx.settings.match_policy.fingerprint()))
     assert not page._running and not page._search_timer.isActive()
     assert page.searching_label.isHidden() and page.bar.isHidden()
-    assert page.summary_label.text() == "1/1 songs found, 0 errors"
+    assert page.chip_found.text() == "1 found" and not page.chip_missing.isVisible()
     page.close()
 
 
@@ -78,7 +75,7 @@ def test_segments_distinguish_found_flagged_unresolved_error_and_pending(qapp):
     assert "search failed" in page.track_bar.toolTip()
     assert page.track_bar.toolTip().endswith("Track 6: Waiting to search")
     page._finished(("import", results, True, page.ctx.settings.match_policy.fingerprint()))
-    assert page.summary_label.text() == "1/6 songs found, 3 errors"
+    assert [c.text() for c in page._chips if not c.isHidden()] == ["1 found", "1 to check", "1 not found", "1 failed", "1 skipped"]
     page.close()
 
 
@@ -87,8 +84,8 @@ def test_live_summary_updates_without_waiting_for_whole_playlist(qapp):
     page._set_running(True)
     result = MatchResult(page.ctx.tracks[0], MatchStatus.PROPOSED, _candidate("peer"))
     page._on_step(1, 3, result)
-    assert page.summary_label.text() == "1/3 songs found, 0 errors"
-    assert page.info.text() == "Checked 1 of 3 tracks."
+    assert page.chip_found.text() == "1 found"
+    assert page.searching_label.text() == "Searching 1 of 3 · 1 found"
     assert page._search_timer.isActive()
     page._set_running(False)
     page.close()
@@ -102,9 +99,10 @@ def test_cancel_keeps_unsearched_tracks_pending_and_marks_tooltip(qapp):
     assert page.track_bar._states == ["found", "pending", "pending"]
     assert "Not searched (cancelled)" in page.track_bar.toolTip()
     assert "Cancelled" in page.info.text()
-    assert page.summary_label.text() == "1/3 songs found, 0 errors"
+    assert page.chip_found.text() == "1 found"
+    assert "cancelled" in page.summary_label.text()
     assert not page._search_timer.isActive()
-    assert page.table.item(1, 3).text() == "waiting"
+    assert page.table.item(1, 2).text() == "Not searched"
     page.close()
 
 

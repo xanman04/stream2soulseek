@@ -184,6 +184,10 @@ class MainWindow(QMainWindow):
             self.transfers.stop()
         if index == STEP_FINISH:
             self.finish.refresh()
+        if index == STEP_SEARCH and hasattr(self.search, "auto_start_if_needed"):
+            # Arriving at Search with a playlist and folder but no results starts the search (searching
+            # never downloads anything); it runs once per selection, so an offline slskd cannot loop.
+            self.search.auto_start_if_needed()
 
     def _soulseek_status(self, text: str) -> None:
         self.sidebar.set_soulseek_text(text)
