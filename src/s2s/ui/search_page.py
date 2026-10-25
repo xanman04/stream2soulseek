@@ -38,7 +38,11 @@ def classify(res: MatchResult) -> tuple[str, str, str]:
         best = res.best
         detail = f"{best.file.username}: {best.file.filename}"
         if best.flagged:
-            reasons = "; ".join(best.reasons[:2]) or res.note or "look at it in Review"
+            # Show WHY it needs a look (e.g. "length differs by 60 s"), not the reasons it was accepted.
+            from .review_page import _flag_reasons
+            flags = _flag_reasons(best)
+            reasons = (flags[0] + (f" (+{len(flags) - 1} more)" if len(flags) > 1 else "")) if flags else (
+                res.note or "look at it in Review")
             return "warn", f"Check needed: {reasons}", detail + "\n" + "; ".join(best.reasons)
         how = "extended mix" if best.tier == Tier.EXTENDED_FALLBACK else "exact"
         return "ok", f"Found · {how}", detail
