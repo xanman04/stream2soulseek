@@ -5,7 +5,7 @@ QUEUED with raw_state "enqueue_pending". A crash between the record and the HTTP
 looking queued, so a restart will NOT enqueue it again (no double-enqueue); refresh() reconciles it with
 slskd's transfer list by exact (username, filename, size). If slskd never saw it, the user cancels it
 (-> FAILED) and uses retry(). On a client error the item is recorded FAILED with the error text.
-There is no automatic fallback to any other candidate.
+Automatic backup attempts require a separately reviewed, fingerprinted pool of exact files.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from .approval import ApprovalError, verify_approval
 from .rejections import classify
 from .models import RemoteFile, SelectionItem, TransferState, TransferStatus
 from .store import Store
+
+_RECOVERY_LOCK = threading.RLock()
 
 PENDING = "enqueue_pending"
 ACCEPTED = "enqueue_accepted"
@@ -126,7 +128,7 @@ class DownloadService:
     # -------------------------------------------------------------- retry / cancel
 
     def retry(self, approval_id: str, apple_id: str, expected_fingerprint: str) -> TransferStatus:
-        with self._lock:
+        with _RECOVERY_LOCK, self._lock:
             approval = verify_approval(self._store, approval_id, expected_fingerprint)
             item = next((i for i in approval.items if i.apple_id == apple_id), None)
             if item is None:
@@ -134,6 +136,15 @@ class DownloadService:
             rec = self._store.get_transfer(approval_id, apple_id)
             if rec is None or rec.status.state != TransferState.FAILED:
                 raise DownloadError("only a FAILED transfer can be retried")
+            from .queue_recovery import effective_item, pool_for_track, verified_plan
+            pool = pool_for_track(self._store, approval_id, apple_id)
+            if pool is not None:
+                item = effective_item(self._store, approval_id, item)
+                self.pause_backup_pool(pool["id"])
+                _ap, primary, backups = verified_plan(self._store, pool)
+                ordinal = next(n for n, candidate in [(-1, primary), *enumerate(backups)] if candidate == item)
+                self._store.update_fallback_plan(pool["id"], status="manual", winner_ordinal=ordinal,
+                                                error="Manual retry; automatic backup switching is disabled")
             if rec.status.transfer_id:
                 try:  # clear just this stale entry so it cannot shadow the new transfer
                     self._client.cancel_download(item.username, rec.status.transfer_id, remove=True)
@@ -142,15 +153,34 @@ class DownloadService:
             self._send(approval_id, item.username, [item])
             new = self._store.get_transfer(approval_id, apple_id)
             assert new is not None
+            if pool is not None:
+                from .queue_recovery import _save_status
+                try:
+                    current = [s for s in self._client.list_downloads()
+                               if (s.username, s.filename, s.size) == (item.username, item.filename, item.size)
+                               and s.state in (TransferState.QUEUED, TransferState.IN_PROGRESS)]
+                    if new.status.raw_state == ACCEPTED and current:
+                        self._store.upsert_transfer(approval_id, apple_id, min(current, key=lambda s: _PRIORITY[s.state]))
+                        new = self._store.get_transfer(approval_id, apple_id)
+                except Exception:
+                    pass  # accepted dispatch remains recorded; a later refresh can resolve its id
+                _save_status(self._store, pool["id"], ordinal, new.status)
             return new.status
 
     def cancel(self, approval_id: str, apple_id: str) -> None:
-        with self._lock:
+        with _RECOVERY_LOCK, self._lock:
             rec = self._store.get_transfer(approval_id, apple_id)
             if rec is None:
                 raise DownloadError("no transfer recorded for this track")
             st = rec.status
             if st.state not in (TransferState.QUEUED, TransferState.IN_PROGRESS):
+                return
+            from .queue_recovery import pool_for_track
+            pool = pool_for_track(self._store, approval_id, apple_id)
+            if pool is not None:
+                self.pause_backup_pool(pool["id"])
+                self._store.upsert_transfer(approval_id, apple_id,
+                    replace(st, state=TransferState.FAILED, raw_state=CANCELLED, error="cancelled by user"))
                 return
             if st.transfer_id:
                 self._client.cancel_download(st.username, st.transfer_id)
@@ -158,3 +188,74 @@ class DownloadService:
                 approval_id, apple_id,
                 replace(st, state=TransferState.FAILED, raw_state=CANCELLED, error="cancelled by user"),
             )
+
+    # -------------------------------------------------------------- reviewed backup recovery
+
+    def recover_queued(self, approval_id: str, policy_fingerprint: str, *, now=None) -> None:
+        from .queue_recovery import advance
+        approval = self._store.get_approval(approval_id)
+        if approval is None or not any(p["primary_approval_id"] == approval_id
+                                       for p in self._store.fallback_plans(approval.import_id)):
+            return
+        with _RECOVERY_LOCK, self._lock:
+            advance(self._store, self, approval_id, self._client.list_downloads(), policy_fingerprint, now=now)
+
+    def enqueue_backup(self, plan_id: str, ordinal: int) -> TransferStatus:
+        from .queue_recovery import _save_status, verified_plan
+        plan = self._store.get_fallback_plan(plan_id)
+        approval, _primary, backups = verified_plan(self._store, plan)
+        if plan["status"] != "active" or plan["winner_ordinal"] is not None:
+            raise DownloadError("Backup pool is no longer waiting")
+        row = next((r for r in self._store.fallback_attempts(plan_id) if r["ordinal"] == ordinal), None)
+        if row is None or row["state"] != TransferState.NOT_QUEUED.value:
+            raise DownloadError("Backup attempt was already submitted; refresh its status")
+        item = backups[ordinal]
+        candidate = self._store.find_candidate(approval.import_id, item.apple_id, item.username, item.filename, item.size)
+        if candidate is None or candidate.flagged or candidate.tier.value == 9 or candidate.format_rank == 9:
+            raise ApprovalError("Reviewed backup is no longer eligible; review again")
+        # Exact file and destination are bound by the verified pool; no other file can be dispatched.
+        _save_status(self._store, plan_id, ordinal, _status(item, TransferState.QUEUED, PENDING))
+        try:
+            self._client.enqueue_downloads(item.username, [RemoteFile(item.username, item.filename, item.size)])
+        except Exception as exc:
+            status = _status(item, TransferState.FAILED, "enqueue_failed", _err(exc))
+        else:
+            status = _status(item, TransferState.QUEUED, ACCEPTED)
+        _save_status(self._store, plan_id, ordinal, status)
+        return status
+
+    def cancel_backup_attempt(self, plan_id: str, ordinal: int) -> None:
+        from .queue_recovery import CANCELLED_BACKUP, attempt_status, _save_status, verified_plan
+        plan = self._store.get_fallback_plan(plan_id)
+        _approval, primary, backups = verified_plan(self._store, plan)
+        item = primary if ordinal == -1 else backups[ordinal]
+        row = next(r for r in self._store.fallback_attempts(plan_id) if r["ordinal"] == ordinal)
+        status = attempt_status(item, row)
+        if status.raw_state == CANCELLED_BACKUP:
+            return
+        if status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS, TransferState.UNKNOWN):
+            if not status.transfer_id:
+                # Resolve an id from a fresh snapshot before cancelling; never guess another transfer.
+                matches = [s for s in self._client.list_downloads()
+                           if (s.username, s.filename, s.size) == (item.username, item.filename, item.size)]
+                if matches:
+                    status = min(matches, key=lambda s: _PRIORITY[s.state])
+            if status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS, TransferState.UNKNOWN):
+                if not status.transfer_id:
+                    raise DownloadError("Transfer id is unavailable; refresh before cancelling this attempt")
+                self._client.cancel_download(item.username, status.transfer_id, remove=False)
+        _save_status(self._store, plan_id, ordinal, replace(status, state=TransferState.FAILED,
+            raw_state=CANCELLED_BACKUP, error="Redundant reviewed backup cancelled; files were not deleted"))
+
+    def pause_backup_pool(self, plan_id: str, *, reason="Automatic backup recovery was stopped") -> None:
+        self._store.update_fallback_plan(plan_id, status="stopping", error=reason)
+        errors = []
+        for row in self._store.fallback_attempts(plan_id):
+            try:
+                self.cancel_backup_attempt(plan_id, row["ordinal"])
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+        if errors:
+            self._store.update_fallback_plan(plan_id, error="Some attempts could not be cancelled; refresh to retry")
+            raise DownloadError("Some backup attempts could not be cancelled; refresh and retry")
+        self._store.update_fallback_plan(plan_id, status="paused", error=reason)

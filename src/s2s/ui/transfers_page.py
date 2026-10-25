@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -46,15 +47,15 @@ def completion_feedback(*, relevant_ids: set[str], states: dict[str, TransferSta
             detail += f" to {location}"
         return "success", "Import complete", detail
     if refresh_error or unknown:
-        return "issues", "Transfer status unavailable", "Refresh the transfers to confirm their current state."
+        return "issues", "Transfer status unavailable", "Check the Soulseek connection and Settings, then refresh the transfers."
     if active:
         if issues or archive_waiting:
             return "issues", "In progress with issues", "Some transfers need attention while other downloads are still running."
         return "progress", "Downloads are still in progress", f"{completed} of {total} downloads finished."
     if total and completed == total and len(imported_ids) < total and not issues:
-        return "needed", "Downloads finished — import needed", "Completed downloads are waiting to be imported."
+        return "needed", "Downloads finished — import needed", "Completed downloads are waiting to be imported. Use Process completed now to import them."
     if issues:
-        return "issues", "Finished with issues", "Review the transfer, import and archive details below."
+        return "issues", "Finished with issues", "See the transfer, import and archive details below for the affected items and next steps."
     if archive_waiting:
         return "issues", "Downloads and imports finished", "Peer folders are still waiting to be archived."
     return "progress", "Downloads are not complete yet", f"{completed} of {total} downloads finished."
@@ -86,6 +87,10 @@ def can_start_another_import(*, kind: str, relevant_ids: set[str], states: dict[
 class TransfersPage(QWidget):
     find_another_source = Signal()  # user asked for a replacement review (nothing is queued by this)
     new_import_requested = Signal()  # parent owns reset and navigation; this page performs no workflow mutation
+    history_requested = Signal()
+    settings_requested = Signal()
+    review_requested = Signal()
+    queued_backups_requested = Signal()
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -106,6 +111,9 @@ class TransfersPage(QWidget):
         self.new_import_btn = QPushButton("Start another import")
         self.new_import_btn.setVisible(False)
         self.new_import_btn.setEnabled(False)
+        self.history_btn = QPushButton("Import history / outstanding tracks")
+        self.review_btn = QPushButton("Review alternatives")
+        self.settings_btn = QPushButton("Settings...")
         self.table = make_table(["Track", "Set", "Peer", "Remote file", "Size (MiB)", "State", "slskd state", "%",
                                  "Problem", "Error (raw)"])
         self.declined_label = QLabel("")
@@ -121,6 +129,10 @@ class TransfersPage(QWidget):
         self.cancel_btn = QPushButton("Cancel transfer")
         self.refresh_btn = QPushButton("Refresh now")
         self.import_btn = QPushButton("Process completed now")
+        self.queued_backups_btn = QPushButton("Review queued backups...")
+        self.queued_backups_btn.setEnabled(False)
+        self.recovery_info = QLabel("")
+        self.recovery_info.setWordWrap(True)
         self.import_table = make_table(["Track", "Outcome", "Final file", "Detail"])
         self.archive_table = make_table(["Peer", "Archive status"])
         self._blocked: dict[str, str] = {}
@@ -136,10 +148,17 @@ class TransfersPage(QWidget):
         completion_row = QHBoxLayout()
         completion_row.addWidget(self.completion, 1)
         completion_row.addWidget(self.new_import_btn)
+        completion_row.addWidget(self.history_btn)
+        completion_row.addWidget(self.review_btn)
+        completion_row.addWidget(self.settings_btn)
         lay.addLayout(completion_row)
         lay.addWidget(self.declined_banner)
         lay.addWidget(self.table, 3)
         lay.addLayout(row)
+        recovery_row = QHBoxLayout()
+        recovery_row.addWidget(self.queued_backups_btn)
+        recovery_row.addWidget(self.recovery_info, 1)
+        lay.addLayout(recovery_row)
         lay.addWidget(QLabel("Import results (conflicts are shown, never resolved automatically):"))
         lay.addWidget(self.import_table, 2)
         lay.addWidget(QLabel("Peer folders (moved into the archive folder once everything from that peer is "
@@ -151,17 +170,32 @@ class TransfersPage(QWidget):
         self.timer.timeout.connect(self.refresh)
         self.declined_btn.clicked.connect(lambda *_: self.find_another_source.emit())
         self.new_import_btn.clicked.connect(lambda *_: self.new_import_requested.emit())
+        self.history_btn.clicked.connect(lambda *_: self.history_requested.emit())
+        self.review_btn.clicked.connect(lambda *_: self.review_requested.emit())
+        self.settings_btn.clicked.connect(lambda *_: self.settings_requested.emit())
+        self.queued_backups_btn.clicked.connect(lambda *_: self.queued_backups_requested.emit())
         self.retry_btn.clicked.connect(self.retry_selected)
         self.cancel_btn.clicked.connect(self.cancel_selected)
         self.refresh_btn.clicked.connect(lambda *_: self.refresh())
         self.import_btn.clicked.connect(lambda *_: self.process_now())
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_row_actions())
         self._set_enabled(False)
+        self.history_btn.setEnabled(False)
+        self.review_btn.setEnabled(False)
+        self.settings_btn.setEnabled(False)
 
     # ------------------------------------------------------------ lifecycle
 
     def _set_enabled(self, on: bool) -> None:
-        for b in (self.retry_btn, self.cancel_btn, self.refresh_btn, self.import_btn):
-            b.setEnabled(on)
+        self.refresh_btn.setEnabled(on)
+        self.import_btn.setEnabled(on)
+        self._update_row_actions()
+
+    def _update_row_actions(self) -> None:
+        selected = self._selected()
+        state = self._states.get(selected) if selected else None
+        self.retry_btn.setEnabled(state == TransferState.FAILED)
+        self.cancel_btn.setEnabled(state in (TransferState.QUEUED, TransferState.IN_PROGRESS))
 
     def start(self) -> None:
         """Begin showing/refreshing the current approval."""
@@ -180,6 +214,8 @@ class TransfersPage(QWidget):
         if not self._names and self.ctx.import_id:
             self._names = {t.apple_id: f"{t.name} - {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
         self._set_enabled(True)
+        self.history_btn.setEnabled(True)
+        self.settings_btn.setEnabled(True)
         self.refresh()
         self.timer.start()
 
@@ -214,6 +250,9 @@ class TransfersPage(QWidget):
                 with ctx.download_service() as svc:
                     for aid in aids:
                         svc.refresh(aid)
+                    if hasattr(svc, "recover_queued"):
+                        for aid in aids:
+                            svc.recover_queued(aid, ctx.settings.match_policy.fingerprint())
             except Exception as exc:  # noqa: BLE001 - show stored state anyway
                 err = ctx.describe(exc)
             if do_process and err is None:
@@ -240,14 +279,26 @@ class TransfersPage(QWidget):
             return (err, records, (ctx.store.import_results(iid) if iid else []), archives, reports, proc_err,
                     aids, fps, declined, relevant)
 
-        run_async(self, work, self._refreshed, self._refresh_failed)
+        def current_result(payload):
+            if ctx.import_id != iid or ctx.approval_id != latest:
+                self._inflight = False
+                return
+            self._refreshed(payload)
+
+        def current_error(exc):
+            if ctx.import_id != iid or ctx.approval_id != latest:
+                self._inflight = False
+                return
+            self._refresh_failed(exc)
+
+        run_async(self, work, current_result, current_error)
 
     def _refresh_failed(self, exc: object) -> None:
         self._inflight = False
         self.info.setText(f"Refresh failed: {self.ctx.describe(exc)}")
         self.new_import_btn.setEnabled(True)
         if self.ctx.approval_id:
-            self.completion.setText("Transfer status unavailable\nThe transfer status could not be refreshed.")
+            self.completion.setText("Transfer status unavailable\nCheck the Soulseek connection and Settings, then refresh the transfers.")
             self.completion.setStyleSheet(
                 "QLabel { padding: 10px; font-weight: 600; color: #17212b; background: #fce8e6; }")
             self.completion.setVisible(True)
@@ -285,26 +336,61 @@ class TransfersPage(QWidget):
                     it.setData(APPROVAL_ROLE, rec.approval_id)
                 self.table.setItem(r, c, it)
         self.table.resizeColumnsToContents()
+        self._update_row_actions()
         self._show_declined(declined)
-        done = sum(1 for rec in records if rec.status.state == TransferState.SUCCEEDED)
-        failed = sum(1 for rec in records if rec.status.state == TransferState.FAILED)
-        msg = f"{done} of {len(records)} complete, {failed} failed."
-        if err:
-            msg += f" slskd refresh problem (showing last known state): {err}"
-        if proc_err:
-            msg += f" Import/archive problem: {proc_err}"
+        playlist_tracks = len(self.ctx.tracks)
+        if not playlist_tracks and self.ctx.import_id:
+            playlist_tracks = len(self.ctx.store.load_tracks(self.ctx.import_id))
+        selected_count = len(relevant)
         counts = {o: sum(1 for x in results if x.outcome == o) for o in ImportOutcome}
-        if results:
-            msg += (f" Imported: {counts[ImportOutcome.COPIED]} copied, {counts[ImportOutcome.ALREADY_PRESENT]} "
-                    f"already present, {counts[ImportOutcome.CONFLICT]} conflicts, "
-                    f"{counts[ImportOutcome.INVALID]} invalid.")
-        self.info.setText(msg)
         latest_states = {}
         by_transfer = {(rec.approval_id, rec.apple_id): rec for rec in records}
         for track_id, aid in relevant.items():
             rec = by_transfer.get((aid, track_id))
             if rec is not None:
                 latest_states[track_id] = rec.status.state
+        # Report only each track's newest approval; replacement attempts supersede old failures.
+        done = sum(state == TransferState.SUCCEEDED for state in latest_states.values())
+        failed = sum(state == TransferState.FAILED for state in latest_states.values())
+        queued = sum(state == TransferState.QUEUED for state in latest_states.values())
+        running = sum(state == TransferState.IN_PROGRESS for state in latest_states.values())
+        msg = f"{selected_count} selected for download out of {playlist_tracks} playlist tracks; " if playlist_tracks else ""
+        msg += f"{done} complete, {failed} failed, {queued} queued, {running} running."
+        if playlist_tracks:
+            msg += " See Import history / outstanding tracks for the full playlist."
+        if err:
+            msg += f" slskd refresh problem (showing last known state): {err}"
+        if proc_err:
+            msg += f" Import/archive problem: {proc_err}"
+        if results:
+            msg += (f" Imported: {counts[ImportOutcome.COPIED]} copied, {counts[ImportOutcome.ALREADY_PRESENT]} "
+                    f"already present, {counts[ImportOutcome.CONFLICT]} conflicts, "
+                    f"{counts[ImportOutcome.INVALID]} invalid.")
+        if queued:
+            msg += " Queued transfers are waiting on uploaders; refresh later or review alternatives if waiting is not useful."
+        self.info.setText(msg)
+        self.queued_backups_btn.setEnabled(any(
+            rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS)
+            and rec.status.bytes_transferred == 0 and rec.status.percent == 0
+            for rec in records if relevant.get(rec.apple_id) == rec.approval_id))
+        plans = self.ctx.store.fallback_plans(self.ctx.import_id) if self.ctx.import_id else []
+        notes = []
+        for plan in plans:
+            if relevant.get(plan["apple_id"]) != plan["primary_approval_id"]:
+                continue
+            attempts = self.ctx.store.fallback_attempts(plan["id"])
+            tried = max(0, len(attempts) - 1)
+            status = plan["status"]
+            if status == "active":
+                status = ("backups exhausted; waiting on remaining sources" if plan["next_index"] >= len(json.loads(plan["items_json"]))
+                          else f"waiting; try next backup after {plan['wait_seconds']} seconds")
+            notes.append(f"{self._names.get(plan['apple_id'], plan['apple_id'])}: {status}; {tried} backups tried"
+                         + (f" — {plan['error']}" if plan["error"] else ""))
+        self.recovery_info.setToolTip("\n".join(notes))
+        self.recovery_info.setText("Reviewed backup recovery\n" + "\n".join(notes[:3])
+                                   + (f"\n{len(notes) - 3} more tracks (hover for details)" if len(notes) > 3 else "") if notes else
+                                   "Waiting on an uploader? Review exact backup files before enabling automatic recovery.")
+        self.review_btn.setEnabled(bool(declined) or failed > 0)
         archived_peers = {entry.username.casefold() for entry in archives}
         pending_archive = any(
             rec.status.state == TransferState.SUCCEEDED
@@ -323,6 +409,33 @@ class TransfersPage(QWidget):
             archive_errors=bool(self._archive_errors), archive_waiting=archive_waiting,
             pending_declines=bool(declined),
         )
+        if kind == "success" and selected_count < playlist_tracks:
+            headline = "Selected subset imported"
+            detail = f"All {selected_count} approved tracks were imported; the playlist has {playlist_tracks} tracks."
+        elif kind == "success" and playlist_tracks:
+            headline = "Selected downloads imported"
+        elif kind == "issues":
+            reasons = []
+            if failed:
+                reasons.append(f"{failed} transfer(s) failed; select a failed row to retry the same file or review alternatives.")
+            if err:
+                reasons.append("Check the Soulseek connection and Settings, then refresh.")
+            if proc_err:
+                reasons.append(f"Import processing failed: {proc_err}. See the import table and process again.")
+            conflicts = counts[ImportOutcome.CONFLICT] + counts[ImportOutcome.INVALID]
+            if conflicts:
+                reasons.append(f"{conflicts} import result(s) need attention; resolve the conflict or verification issue in the import table, then process again.")
+            if self._blocked or self._archive_errors or archive_waiting:
+                blocks = [f"{peer}: {reason}" for peer, reason in self._blocked.items()]
+                blocks += [f"{peer}: {reason}" for peer, reason in self._archive_errors.items()]
+                extra = f"; plus {len(blocks) - 3} more (see archive table)" if len(blocks) > 3 else ""
+                reasons.append((f"Archive is blocked for {len(blocks)} peer(s): " + "; ".join(blocks[:3]) + extra
+                                + ". Resolve the stated block, then process again.") if blocks else
+                               "Archive is still waiting to be archived; see archive details below for eligible peer folders.")
+            if declined:
+                reasons.append(f"{len(declined)} declined track(s) need a reviewed replacement; use Review alternatives.")
+            if reasons:
+                detail = " ".join(reasons)
         self.completion.setText(f"{headline}\n{detail}")
         colors = {"success": "#e6f4ea", "needed": "#fff4ce", "issues": "#fce8e6", "progress": "#e8f0fe"}
         self.completion.setStyleSheet(
@@ -333,6 +446,7 @@ class TransfersPage(QWidget):
             archive_waiting=archive_waiting))
         self._show_import_results(results)
         self._show_archives(records, archives)
+        self.history_btn.setEnabled(bool(self.ctx.import_id))
         if self._manual:
             self._manual = False
             self.import_btn.setEnabled(True)

@@ -12,21 +12,21 @@ import shutil
 from dataclasses import dataclass, field
 
 
-# ---------------------------------------------------------------- Apple Music
+# ---------------------------------------------------------------- Playlist metadata
 
 
 @dataclass(frozen=True)
 class Playlist:
-    id: str  # Apple library playlist id, e.g. "p.XXXX"
+    id: str  # provider ID; Spotify IDs are prefixed with "spotify:playlist:"
     name: str
     track_count: int | None = None  # may be unknown until tracks are fetched
 
 
 @dataclass(frozen=True)
 class AppleTrack:
-    """A requested track exactly as Apple reports it. Never strip version text from `name`."""
+    """Requested source metadata. Legacy class name; never strip version text from `name`."""
 
-    apple_id: str  # library song id ("i.XXXX")
+    apple_id: str  # legacy field name; Spotify uses a namespaced playlist-occurrence ID
     name: str  # full Apple title, e.g. "Bassline Growler (VIP Mix)"
     artist: str
     album: str | None = None

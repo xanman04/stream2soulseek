@@ -160,3 +160,150 @@ def test_changing_shared_folders_restarts_slskd(win, monkeypatch):
     assert restarts == [True]
     win.open_settings()  # nothing changed this time
     assert restarts == [True]
+
+
+
+def test_queue_submission_keeps_current_page_until_approved(win, monkeypatch, tmp_path):
+    from s2s.matching import match
+    from s2s.models import AppleTrack, Playlist, RemoteFile
+    track = AppleTrack("one", "Song", "Artist")
+    win.ctx.playlist = Playlist("p", "Playlist")
+    win.ctx.tracks = [track]
+    win.ctx.destination = str(tmp_path)
+    win.ctx.results = [match(track, [RemoteFile("peer", "Artist - Song.mp3", 100, "mp3", 320, False)])]
+    win.go_step(3)
+    assert win.stack.currentWidget() is win.frames[3]
+    win._queueing_changed(True)
+    win.go_step(0)
+    win._open_service()
+    win.refresh_navigation()
+    assert win.stack.currentWidget() is win.frames[3]
+    assert not win.sidebar.isEnabled()
+    win.ctx.approval_id = "synthetic-approved"
+    monkeypatch.setattr(win.transfers, "start", lambda: None)
+    win._queueing_changed(False)
+    win._approved()
+    assert win.stack.currentWidget() is win.frames[4]
+    assert win.sidebar.isEnabled()
+
+
+def test_sidebar_state_updates_never_emit_navigation(win):
+    selected = []
+    win.sidebar.step_selected.connect(selected.append)
+    win.sidebar.show_step(3)
+    win.sidebar.set_step_states([True, True, False, False, False], [True, True, True, False, False])
+    assert selected == []
+
+
+def test_flagged_track_has_visible_alternatives_control(win, tmp_path):
+    from dataclasses import replace
+    from s2s.matching import match
+    from s2s.models import AppleTrack, RemoteFile
+    track = AppleTrack("one", "Song", "Artist")
+    result = match(track, [RemoteFile("primary", "Artist - Song.mp3", 100, "mp3", 320, False),
+                           RemoteFile("backup", "Artist - Song.mp3", 100, "mp3", 320, False)])
+    result = replace(result, best=replace(result.best, flagged=True))
+    page = win.review
+    page.set_results([result], str(tmp_path))
+    page.alternatives_btn.click()
+    assert page.detail.rowCount() == 2
+    assert "1 alternative" in page.detail_title.text()
+    page.detail.selectRow(1)
+    page.use_btn.click()
+    assert page.model.rows[0].chosen.file.username == result.alternatives[0].file.username
+    assert page.model.rows[0].checked
+
+
+def test_late_review_load_cannot_reset_confirmed_selection(win, monkeypatch, tmp_path):
+    from s2s.ui import review_page
+    callbacks = []
+    monkeypatch.setattr(review_page, "run_async", lambda owner, work, done, error: callbacks.append(done))
+    page = win.review
+    page.load([], str(tmp_path))
+    page._busy = True
+    page._locked = True
+    callbacks[0]({})
+    assert page._locked
+
+
+def test_search_result_from_previous_selection_does_not_navigate(win):
+    from s2s.models import Playlist, AppleTrack
+    win.ctx.playlist = Playlist("new", "New")
+    win.ctx.tracks = [AppleTrack("new-track", "New", "Artist")]
+    win.ctx.destination = "new-folder"
+    win.search._request_context = ("old", "old-folder", ("old-track",))
+    finished = []
+    win.search.search_finished.connect(finished.append)
+    win.search._finished(("old-import", [], False, "policy"))
+    assert win.ctx.import_id is None
+    assert finished == []
+    assert "changed" in win.search.info.text()
+
+
+
+def test_late_resume_cannot_replace_newer_playlist(win, monkeypatch):
+    from s2s.models import Playlist
+    from s2s.ui import main_window
+    callbacks = []
+    resumed = []
+    monkeypatch.setattr(main_window, "run_async", lambda owner, work, done, error: callbacks.append(done))
+    monkeypatch.setattr(win, "_resumed", resumed.append)
+    win.resume_last_import()
+    win.ctx.playlist = Playlist("new", "New selection")
+    callbacks[0](object())
+    assert resumed == []
+    assert win.ctx.playlist.id == "new"
+
+
+def test_late_replacement_review_respects_later_navigation(win, monkeypatch):
+    from s2s.ui import main_window
+    callbacks = []
+    loaded = []
+    win.ctx.import_id = "existing"
+    monkeypatch.setattr(main_window, "run_async", lambda owner, work, done, error: callbacks.append(done))
+    monkeypatch.setattr(win.review, "load_replacement", loaded.append)
+    win.start_replacement(include_failed=True)
+    win._open_service()
+    callbacks[0](object())
+    assert loaded == []
+    assert win.stack.currentWidget() is win.service
+
+
+def test_spotify_page_is_native_and_separate_from_step_one(win):
+    win.playlists.connect_spotify_btn.click()
+    assert win.stack.currentWidget() is win.spotify_service
+    assert win.spotify_service.stack.currentWidget() is win.spotify_service.account_page
+    assert win.spotify_service._login is None
+    win.go_step(0)
+    assert win.stack.currentWidget() is win.frames[0]
+
+
+def test_spotify_saved_session_populates_source_selector_without_touching_apple(win, monkeypatch):
+    import time
+    from s2s.spotify.session import save_session
+    from s2s.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
+    win.ctx.secrets.set(APPLE_DEVELOPER_TOKEN, 'synthetic-apple-dev')
+    win.ctx.secrets.set(APPLE_MEDIA_USER_TOKEN, 'synthetic-apple-user')
+    save_session(win.ctx.secrets, [{'name':'sp_dc','value':'synthetic-spotify-cookie',
+        'domain':'.spotify.com','path':'/','secure':True,'http_only':True,
+        'expires':int(time.time())+3600}], {'display_name':'Fixture account'})
+    monkeypatch.setattr(type(win.playlists), 'load_playlists', lambda self: None)
+    win._open_service('spotify')
+    win._source_signed_in('spotify')
+    assert win.stack.currentWidget() is win.spotify_service
+    assert win.playlists.current_source().name == 'Spotify'
+    assert win.playlists.source_combo.count() == 2
+    win.spotify_service.sign_out()
+    assert win.ctx.secrets.get(APPLE_DEVELOPER_TOKEN) == 'synthetic-apple-dev'
+    assert win.ctx.secrets.get(APPLE_MEDIA_USER_TOKEN) == 'synthetic-apple-user'
+    assert win.playlists.source_combo.count() == 1
+    assert win.playlists.current_source().name == 'Apple Music'
+
+
+def test_spotify_cookie_values_are_scrubbed_from_errors(win):
+    from s2s.secretstore import SPOTIFY_SESSION
+    import json
+    win.ctx.secrets.set(SPOTIFY_SESSION, json.dumps({'cookies':[{'value':'synthetic-cookie-value'}]}))
+    assert 'synthetic-cookie-value' not in win.ctx.describe(RuntimeError('bad synthetic-cookie-value'))
+    win.ctx.secrets.set(SPOTIFY_SESSION, '"malformed-session"')
+    assert win.ctx.describe(RuntimeError('ordinary failure')) == 'ordinary failure'

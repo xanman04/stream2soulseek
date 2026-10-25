@@ -169,7 +169,7 @@ def test_v2_database_migrates_to_v3(tmp_path):
     s = Store(path)
     try:
         assert s.get_import("i1").playlist_name == "P"
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert s.peer_rejections() == []
     finally:
         s.close()
@@ -328,3 +328,18 @@ def test_other_approval_with_unfinished_file_from_same_peer_blocks_archiving(env
     env.store.record_import_result(env.iid, ImportResult("i.3", ImportOutcome.COPIED, "s", "f"))
     assert workflow._archive_block_reason(env.store, ap, "u", None) is None
     assert workflow.approval_ids(env.store, env.iid) == [ap.id, ap2.id]
+
+
+
+def test_other_failure_can_review_backup_without_enqueuing(env):
+    ap = approve(env, ("i.1", env.c1u))
+    file = env.c1u.file
+    env.store.upsert_transfer(ap.id, "i.1", TransferStatus(file.username, file.filename, file.size,
+        TransferState.FAILED, "Completed, Errored", error="synthetic unexpected transfer error"))
+    assert not workflow.build_replacement_plan(env.store, env.iid, env.settings).results
+    before = len(env.store.approvals_for_import(env.iid))
+    plan = workflow.build_replacement_plan(env.store, env.iid, env.settings, include_failed=True)
+    assert [r.track.apple_id for r in plan.results] == ["i.1"]
+    assert plan.results[0].best.file.username == "v"
+    assert len(env.store.approvals_for_import(env.iid)) == before
+    assert env.store.get_transfer(ap.id, "i.1").status.state == TransferState.FAILED

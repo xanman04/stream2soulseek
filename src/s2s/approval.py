@@ -94,8 +94,9 @@ def check_destination(dest: str, downloads_dir: str, archive_name: str = "OLD") 
     return _validate_destination(dest, downloads_dir, archive_name)
 
 
-def create_approval(store: Store, import_id: str, items: list[SelectionItem], *, downloads_dir: str,
-                    archive_name: str = "OLD") -> Approval:
+def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *, downloads_dir: str,
+                     archive_name: str = "OLD") -> Approval:
+    """Validate an exact selection without persisting or queueing it."""
     if store.get_import(import_id) is None:
         raise ApprovalError("unknown import")
     if not items:
@@ -126,6 +127,12 @@ def create_approval(store: Store, import_id: str, items: list[SelectionItem], *,
         id=str(uuid.uuid4()), import_id=import_id, fingerprint=fp,
         items=tuple(sorted(resolved_items, key=_key)), created_at=utc_now(),
     )
+    return approval
+
+
+def create_approval(store: Store, import_id: str, items: list[SelectionItem], *, downloads_dir: str,
+                    archive_name: str = "OLD") -> Approval:
+    approval = prepare_approval(store, import_id, items, downloads_dir=downloads_dir, archive_name=archive_name)
     store.save_approval(approval)
     return approval
 

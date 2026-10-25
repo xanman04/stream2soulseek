@@ -5,11 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "s2s"
 version = "0.1.0"
-description = "Personal desktop tool: Apple Music playlists -> reviewed Soulseek (slskd) downloads -> flat DJ libraries"
+description = "Streaming-service playlists, reviewed Soulseek downloads, and flat music libraries"
 requires-python = ">=3.11"
 dependencies = [
     "PySide6>=6.8",
     "httpx>=0.27",
+    "spotapi @ https://github.com/Aran404/SpotAPI/archive/cb862571574e1ddbf5f8975f58a4f61a0e3d2050.zip",
+    "curl_cffi>=0.15,<0.17",
+    "websockets>=12,<18",
 ]
 
 [project.optional-dependencies]

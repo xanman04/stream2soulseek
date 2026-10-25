@@ -7,21 +7,25 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
 from .. import workflow
 from ..models import Playlist, Settings
+from ..queue_recovery import approve_backups
 from ..secretstore import SecretStore
 from ..slskd.service import SlskdService
 from ..store import Store
 from .context import AppContext
 from .destination_page import DestinationPage
+from .history_dialog import HistoryDialog
 from .playlist_page import PlaylistPage
 from .review_page import ReviewPage
+from .queued_recovery_dialog import QueuedRecoveryDialog
 from .search_page import SearchPage
 from .service_page import ServicePage
+from .spotify_service_page import SpotifyServicePage
 from .settings_dialog import SettingsDialog
-from .sidebar import APPLE_KEY, Sidebar
+from .sidebar import APPLE_KEY, SPOTIFY_KEY, Sidebar
 from .soulseek_login import SoulseekSession
 from .steps import STEPS, StepFrame
 from .transfers_page import TransfersPage
@@ -44,10 +48,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("S2S - Stream to Soulseek")
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
+        self._queueing = False
+        self._navigation_generation = 0
         self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
 
         self.sidebar = Sidebar()
         self.service = ServicePage(self.ctx)
+        self.spotify_service = SpotifyServicePage(self.ctx)
+        self._service_pages = {APPLE_KEY: self.service, SPOTIFY_KEY: self.spotify_service}
         self.playlists = PlaylistPage(self.ctx)
         self.destination = DestinationPage(self.ctx)
         self.search = SearchPage(self.ctx)
@@ -59,6 +67,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.service)  # 0
         for f in self.frames:  # 1..5
             self.stack.addWidget(f)
+        self.stack.addWidget(self.spotify_service)
 
         central = QWidget()
         h = QHBoxLayout(central)
@@ -82,6 +91,9 @@ class MainWindow(QMainWindow):
         login_act = QAction("Soulseek login...", self)
         login_act.triggered.connect(lambda: self.soulseek.prompt())
         file_menu.addAction(login_act)
+        history_act = QAction("Import history / outstanding tracks...", self)
+        history_act.triggered.connect(self.open_history)
+        file_menu.addAction(history_act)
 
         self.sidebar.step_selected.connect(self.go_step)
         self.sidebar.service_selected.connect(self._open_service)
@@ -92,17 +104,26 @@ class MainWindow(QMainWindow):
         self.service.signed_in.connect(self._signed_in)
         self.service.signed_out.connect(self._signed_out)
         self.service.state_changed.connect(self.refresh_navigation)
+        self.spotify_service.signed_in.connect(lambda: self._source_signed_in(SPOTIFY_KEY))
+        self.spotify_service.signed_out.connect(lambda: self._source_signed_out(SPOTIFY_KEY))
+        self.spotify_service.state_changed.connect(self.refresh_navigation)
         self.playlists.tracks_changed.connect(self.refresh_navigation)
         self.playlists.resume_requested.connect(self.resume_last_import)
-        self.playlists.open_service_requested.connect(lambda: self._open_service(APPLE_KEY))
+        self.playlists.open_service_requested.connect(self._open_available_service)
+        self.playlists.open_spotify_requested.connect(lambda: self._open_service(SPOTIFY_KEY))
         self.playlists.auth_failed.connect(self._auth_failed)
         self.destination.destination_changed.connect(self.refresh_navigation)
         self.destination.settings_requested.connect(self.open_settings)
         self.search.state_changed.connect(self.refresh_navigation)
         self.search.search_finished.connect(self._search_finished)
         self.review.approved.connect(self._approved)
+        self.review.queueing_changed.connect(self._queueing_changed)
         self.transfers.find_another_source.connect(self.start_replacement)
         self.transfers.new_import_requested.connect(self.start_another_import)
+        self.transfers.history_requested.connect(self.open_history)
+        self.transfers.settings_requested.connect(self.open_settings)
+        self.transfers.review_requested.connect(lambda: self.start_replacement(include_failed=True))
+        self.transfers.queued_backups_requested.connect(self.review_queued_backups)
         self.go_step(STEP_PLAYLIST)
         if autostart:
             QTimer.singleShot(0, self.startup)
@@ -125,7 +146,8 @@ class MainWindow(QMainWindow):
         """Update sidebar states and every page's Next button from the current application state."""
         done, avail = self.step_done(), self.step_available()
         self.sidebar.set_step_states(done, avail)
-        self.sidebar.set_service_state(APPLE_KEY, self.service.state_text())
+        for key, page in self._service_pages.items():
+            self.sidebar.set_service_state(key, page.state_text())
         for f in self.frames:
             if f.index + 1 < len(STEPS):
                 hint = NEXT_HINTS[f.index]
@@ -134,9 +156,13 @@ class MainWindow(QMainWindow):
                 f.set_next(done[f.index], hint)
 
     def go_step(self, index: int) -> None:
+        if self._queueing:
+            return
         self.refresh_navigation()
         if not 0 <= index < len(STEPS) or not self.step_available()[index]:
             return
+        self._navigation_generation += 1
+        self.spotify_service.leave()
         self.stack.setCurrentIndex(index + 1)
         self.sidebar.show_step(index)
         if index == STEP_TRANSFERS:
@@ -149,29 +175,63 @@ class MainWindow(QMainWindow):
         self.sidebar.soulseek_btn.setText("Change login..." if self.soulseek.is_connected else "Log in...")
 
     def _open_service(self, key: str = APPLE_KEY) -> None:
+        if self._queueing:
+            return
+        page = self._service_pages.get(key)
+        if page is None:
+            return
+        self._navigation_generation += 1
+        if key != SPOTIFY_KEY:
+            self.spotify_service.leave()
         self.transfers.stop()
-        self.stack.setCurrentIndex(0)
+        self.stack.setCurrentWidget(page)
         self.sidebar.show_service(key)
-        self.service.enter()
+        page.enter()
+
+    def _open_available_service(self) -> None:
+        source = self.playlists.current_source()
+        self._open_service(SPOTIFY_KEY if getattr(source, "name", "") == "Spotify" else APPLE_KEY)
 
     def _signed_in(self) -> None:
-        self.playlists.refresh_sources()
+        self._source_signed_in(APPLE_KEY)
+
+    def _source_signed_in(self, key: str) -> None:
+        self.playlists.reset()
+        index = self.playlists.source_combo.findText("Spotify" if key == SPOTIFY_KEY else "Apple Music")
+        if index >= 0:
+            self.playlists.source_combo.blockSignals(True)
+            self.playlists.source_combo.setCurrentIndex(index)
+            self.playlists.source_combo.blockSignals(False)
         self.playlists.load_playlists()
         self.refresh_navigation()  # account page stays distinct; step 1 is selected in the sidebar
 
     def _signed_out(self) -> None:
-        self.playlists.reset()
+        self._source_signed_out(APPLE_KEY)
+
+    def _source_signed_out(self, key: str) -> None:
+        source = self.playlists.current_source()
+        name = "Spotify" if key == SPOTIFY_KEY else "Apple Music"
+        if source is None or source.name == name:
+            self.playlists.reset()
+        else:
+            self.playlists.refresh_sources()
         self.refresh_navigation()
 
-    def _auth_failed(self, _source: str) -> None:
+    def _auth_failed(self, source: str) -> None:
+        key = SPOTIFY_KEY if source == "Spotify" else APPLE_KEY
         self.playlists.reset()
-        self._open_service(APPLE_KEY)
-        self.service.session_rejected()
+        # session_rejected owns the fresh login; do not start the embedded page twice.
+        if not self._queueing:
+            self._navigation_generation += 1
+            self.transfers.stop()
+            self.stack.setCurrentWidget(self._service_pages[key])
+            self.sidebar.show_service(key)
+            self._service_pages[key].session_rejected()
 
     def startup(self) -> None:
         """Signed in: straight to step 1. Otherwise open the Apple Music page so the user can sign in."""
         self.refresh_navigation()
-        if self.service.is_connected():
+        if any(page.is_connected() for page in self._service_pages.values()):
             self.go_step(STEP_PLAYLIST)
             self.playlists.startup()
         else:
@@ -183,20 +243,24 @@ class MainWindow(QMainWindow):
         if not cancelled:
             self.go_step(STEP_REVIEW)
 
-    def start_replacement(self) -> None:
+    def start_replacement(self, *, include_failed: bool = False) -> None:
         """'Find another source...': open Review showing only the declined tracks. Queues nothing; the
         user ticks files and confirms through the normal dialog, which makes a new approval."""
         ctx = self.ctx
         iid = ctx.import_id
         if not iid:
             return
+        generation = self._navigation_generation
 
         def work():
-            return workflow.build_replacement_plan(ctx.store, iid, ctx.settings)
+            return workflow.build_replacement_plan(ctx.store, iid, ctx.settings, include_failed=include_failed)
 
         def done(plan) -> None:
+            if (ctx.import_id != iid or self._queueing
+                    or generation != self._navigation_generation):
+                return
             if not plan.results:
-                self.statusBar().showMessage("No declined downloads need another source.")
+                self.statusBar().showMessage("No failed downloads need another source. See import history for queued or unresolved tracks.")
                 return
             self.review.load_replacement(plan)
             self.refresh_navigation()
@@ -207,6 +271,54 @@ class MainWindow(QMainWindow):
     def _approved(self) -> None:
         self.refresh_navigation()
         self.go_step(STEP_TRANSFERS)
+
+    def open_history(self) -> None:
+        dialog = HistoryDialog(self.ctx, self, import_id=self.ctx.import_id)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def review_queued_backups(self) -> None:
+        if self._queueing or not self.ctx.import_id:
+            return
+        if self.transfers._inflight:
+            self.statusBar().showMessage("Transfer status is refreshing; try Review queued backups again in a moment.")
+            return
+        self.transfers.stop()
+        dialog = QueuedRecoveryDialog(self.ctx, self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        selections, approvals = dialog.approved_backups(), dict(dialog.approvals)
+        wait_seconds = dialog.wait_seconds.value()
+        dialog.deleteLater()
+        if not accepted or not selections:
+            self.transfers.timer.start()
+            return
+        ctx, iid, settings = self.ctx, self.ctx.import_id, self.ctx.settings
+        self._queueing_changed(True)
+        self.transfers.setEnabled(False)
+
+        def work():
+            return sum(len(approve_backups(ctx.store, approvals[aid], backups, settings,
+                                           wait_seconds=wait_seconds)) for aid, backups in selections.items())
+
+        def finish(error=None):
+            self.transfers.setEnabled(True)
+            self._queueing_changed(False)
+            if error is not None:
+                show_error(self, "Queued recovery", ctx.describe(error))
+            else:
+                self.statusBar().showMessage(f"Reviewed backup recovery enabled: wait {wait_seconds} seconds between attempts.")
+            if ctx.import_id == iid and self.stack.currentIndex() == STEP_TRANSFERS + 1:
+                self.transfers.start()
+
+        run_async(self, work, lambda _count: finish(), finish)
+
+    def _queueing_changed(self, busy: bool) -> None:
+        self._queueing = busy
+        self.sidebar.setEnabled(not busy)
+        for frame in self.frames:
+            frame.next_btn.setEnabled(not busy)
+        if not busy:
+            self.refresh_navigation()
 
     def start_another_import(self) -> None:
         """Begin a fresh selection while preserving accounts, settings and stored import history."""
@@ -245,6 +357,9 @@ class MainWindow(QMainWindow):
             self.open_settings()
 
     def open_settings(self) -> None:
+        if self._queueing:
+            self.statusBar().showMessage("Wait for the approved downloads to finish submitting before changing settings.")
+            return
         def slskd_inputs():  # settings that only take effect when slskd restarts with a new config
             s = self.ctx.settings
             return s.slskd_downloads_dir, list(s.shared_folders)
@@ -261,6 +376,9 @@ class MainWindow(QMainWindow):
     def resume_last_import(self) -> None:
         """Reopen the most recent import from the local database (no network)."""
         ctx = self.ctx
+        generation = self._navigation_generation
+        selection = (ctx.playlist.id if ctx.playlist else None, ctx.destination,
+                     tuple(t.apple_id for t in ctx.tracks), ctx.import_id)
 
         def work():
             imports = ctx.store.list_imports()
@@ -273,15 +391,29 @@ class MainWindow(QMainWindow):
             approval = ctx.store.get_approval(aid) if aid else None
             return imp, tracks, results, approval
 
-        run_async(self, work, self._resumed, lambda e: show_error(self, "Resume", ctx.describe(e)))
+        def done(payload):
+            current = (ctx.playlist.id if ctx.playlist else None, ctx.destination,
+                       tuple(t.apple_id for t in ctx.tracks), ctx.import_id)
+            if not self._queueing and generation == self._navigation_generation and selection == current:
+                self._resumed(payload)
+
+        run_async(self, work, done, lambda e: show_error(self, "Resume", ctx.describe(e)))
 
     def _resumed(self, payload) -> None:
+        if self._queueing:
+            return
         if payload is None:
             self.statusBar().showMessage("No earlier import found.")
             return
         imp, tracks, results, approval = payload
         ctx = self.ctx
         ctx.playlist = Playlist(imp.playlist_id, imp.playlist_name)
+        source_name = "Spotify" if imp.playlist_id.startswith("spotify:") else "Apple Music"
+        source_index = self.playlists.source_combo.findText(source_name)
+        if source_index >= 0:
+            self.playlists.source_combo.blockSignals(True)
+            self.playlists.source_combo.setCurrentIndex(source_index)
+            self.playlists.source_combo.blockSignals(False)
         ctx.tracks = tracks
         ctx.destination = imp.destination
         ctx.import_id = imp.id
@@ -304,5 +436,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         self.transfers.stop()
         self.search.cancel()
+        self.spotify_service.dispose()
         self.soulseek.shutdown()  # stop the slskd this app started
         super().closeEvent(event)

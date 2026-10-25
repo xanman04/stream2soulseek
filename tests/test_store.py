@@ -28,7 +28,7 @@ def store(tmp_path):
 
 
 def test_schema_and_wal(store, tmp_path):
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 4
     assert store._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     store.close()
     Store(tmp_path / "s.sqlite3").close()  # reopen ok
@@ -89,16 +89,21 @@ def test_transfers_upsert(store):
 
 def test_import_results_and_completed(store, tmp_path):
     dest = str(tmp_path / "House")
+    final = tmp_path / "House" / "saved.mp3"
+    final.parent.mkdir()
+    final.write_bytes(b"synthetic")
     i1 = store.create_import(Playlist("p.1", "A"), dest)
     i2 = store.create_import(Playlist("p.2", "B"), str(tmp_path / "Other"))
-    r = ImportResult("i.1", ImportOutcome.COPIED, "s", "f", "ok", "mp3", 320, "abc")
+    r = ImportResult("i.1", ImportOutcome.COPIED, "s", str(final), "ok", "mp3", 320, "abc")
     store.record_import_result(i1, r)
     store.record_import_result(i1, ImportResult("i.2", ImportOutcome.CONFLICT, "s", "f"))
-    store.record_import_result(i1, ImportResult("i.3", ImportOutcome.ALREADY_PRESENT, "s", "f"))
+    store.record_import_result(i1, ImportResult("i.3", ImportOutcome.ALREADY_PRESENT, "s", str(final)))
     store.record_import_result(i2, ImportResult("i.4", ImportOutcome.COPIED, "s", "f"))
     assert store.import_results(i1)[0] == r
     assert store.completed_apple_ids(dest) == {"i.1", "i.3"}
     assert store.completed_apple_ids(dest.upper() + "\\") == {"i.1", "i.3"}
+    final.unlink()
+    assert store.completed_apple_ids(dest) == set()
 
 
 def test_threaded_use(store):
@@ -120,7 +125,7 @@ def test_threaded_use(store):
 
 
 def test_schema_version_is_2_with_archives_table(store):
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 4
     cols = {r[1] for r in store._conn.execute("PRAGMA table_info(archives)")}
     assert {"approval_id", "username", "archive_dir", "moved_json"} <= cols
 
@@ -142,7 +147,7 @@ def test_v1_database_migrates_without_losing_data(tmp_path):
     s = Store(path)
     try:
         assert s.get_import("i1").playlist_name == "P"
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert s.archives_for_approval("a") == []
     finally:
         s.close()

@@ -100,9 +100,9 @@ def test_sidebar_sections_and_disabled_future_services(env):
     sb = win.sidebar
     assert sb.services_header.text() == "Streaming services" and sb.steps_header.text() == "Workflow"
     labels = [sb.services.item(i).text() for i in range(sb.services.count())]
-    assert labels[0].startswith("Apple Music") and labels[1:] == ["Spotify (coming soon)", "SoundCloud (coming soon)"]
+    assert labels[0].startswith("Apple Music") and labels[1].startswith("Spotify") and labels[2] == "SoundCloud (coming soon)"
     flags = [bool(sb.services.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(3)]
-    assert flags == [True, False, False]
+    assert flags == [True, True, False]
     assert [t.split(". ", 1)[1] for t in sb.step_texts()] == [
         "Choose playlist", "Choose tracklist folder", "Find on Soulseek", "Review & confirm",
         "Downloads & import"]
