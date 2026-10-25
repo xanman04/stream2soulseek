@@ -38,12 +38,7 @@ def test_page_shows_checklist_and_actions(tmp_path, monkeypatch):
         assert page.table.item(3, 2).text() == "Still waiting to download"
         assert "2 of 6 tracks" in page.verdict.text()
         assert "1 other file" in page.chip_extra.text() and not page.chip_extra.isHidden()
-        assert not page.find_button.isHidden()
-
-        emitted = []
-        page.find_missing_requested.connect(lambda: emitted.append(1))
-        page.find_button.click()
-        assert emitted == [1]
+        assert page.find_button.isHidden()  # nothing failed or was declined, so a replacement review cannot help
 
         target = lib / "My_ Mix.m3u8"
         monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a: (str(target), "")))

@@ -436,7 +436,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     assert wt.fix_btn.isVisibleTo(wt) and not wt.check_btn.isVisibleTo(wt)  # Atlantis is still queued
     assert wt.chip_folder.text() == "6 in folder" and wt.chip_attention.text() == "1 need attention"
     assert wt.chip_waiting.text() == "1 waiting on uploader"
-    assert not wt.new_import_btn.isVisibleTo(wt)
+    assert wt.new_import_btn.isVisibleTo(wt)  # never blocked by a queued track (asks first)
     assert win.stack.currentIndex() == STEP_TRANSFERS + 1
     # the declined peer is remembered for later searches
     assert store.declining_peers().get("rejecter")
@@ -498,7 +498,10 @@ def test_whole_app_flow(app_env, monkeypatch):
     assert fp.table.item(0, 1).text() == "Innerbloom — RÜFÜS DU SOL"
     assert fp.table.item(6, 2).text() == "In folder" and fp.table.item(7, 2).text() == "Still waiting to download"
     assert fp.table.item(3, 2).text() == "No file chosen" and fp.table.item(4, 2).text() == "Not found on Soulseek"
-    assert fp.export_button.isEnabled() and fp.find_button.isVisibleTo(fp)
+    assert fp.export_button.isEnabled() and not fp.find_button.isVisibleTo(fp)
+    # nothing failed, so no replacement button; each kind of missing track is explained instead
+    assert "1 was not found on Soulseek" in fp.advice.text() and "left out by choice" in fp.advice.text()
+    assert "still downloading" in fp.advice.text()
 
     out = tmp_path / "export" / "Liquid Sunday.m3u8"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), "Playlist (*.m3u8)"))
@@ -729,7 +732,7 @@ def test_slskd_going_away_mid_download_is_reported_and_recovers(app_env, monkeyp
     wt = win.transfers
     assert wt.banner.isVisibleTo(wt) and "Can't reach Soulseek" in wt.banner.text()
     assert not (dest / "Innerbloom - RÜFÜS DU SOL.mp3").exists()     # nothing imported on stale information
-    assert not wt.new_import_btn.isVisibleTo(wt) and win.stack.currentIndex() == STEP_TRANSFERS + 1
+    assert wt.new_import_btn.isVisibleTo(wt) and win.stack.currentIndex() == STEP_TRANSFERS + 1
     assert nav(win)[0] == [True] * 6                                  # no step got locked by the outage
     fake.list_downloads = real_list
     refresh(win)
