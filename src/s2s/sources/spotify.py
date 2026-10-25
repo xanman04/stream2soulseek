@@ -6,7 +6,7 @@ from ..models import AppleTrack, Playlist
 from ..secretstore import SecretStore
 from ..spotify.client import SpotifyAuthError, SpotifyClient, SpotifyError
 from ..spotify.session import SPOTIFY_SESSION, load_session
-from .base import SourceAuthError
+from .base import SourceAuthError, SourceError, TrackList
 
 
 class SpotifySource:
@@ -37,8 +37,9 @@ class SpotifySource:
                 return client.validate_session()
         except SpotifyAuthError as exc:
             raise SourceAuthError(str(exc)) from None
-        except SpotifyError:
-            raise SourceAuthError("Could not verify the Spotify session.") from None
+        except SpotifyError as exc:
+            # Only an authentication failure may discard the stored session; anything else keeps it.
+            raise SourceError(str(exc) or "Could not verify the Spotify session.") from None
 
     def list_playlists(self) -> list[Playlist]:
         try:
@@ -46,18 +47,18 @@ class SpotifySource:
                 return client.list_playlists()
         except SpotifyAuthError as exc:
             raise SourceAuthError(str(exc)) from None
-        except SpotifyError:
-            raise SourceAuthError("Could not load Spotify playlists.") from None
+        except SpotifyError as exc:
+            raise SourceError(str(exc) or "Could not load Spotify playlists.") from None
 
     def get_tracks(self, playlist_id: str) -> list[AppleTrack]:
         try:
             with self._client() as client:
-                return client.get_playlist_tracks(playlist_id)
+                tracks = client.get_playlist_tracks(playlist_id)
+                return TrackList(tracks, client.skipped)
         except SpotifyAuthError as exc:
             raise SourceAuthError(str(exc)) from None
         except SpotifyError as exc:
-            # Preserve the safe, position-specific unavailable-item message.
-            raise SourceAuthError(str(exc)) from None
+            raise SourceError(str(exc) or "Could not load Spotify playlist tracks.") from None
 
 
 __all__ = ["SpotifySource"]

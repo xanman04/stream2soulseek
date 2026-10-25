@@ -78,3 +78,18 @@ def test_signout_invalidates_pending_validation(_qt_application_lifetime, monkey
     page._candidate([cookie(value="late-stale-cookie")])
     assert pending["done"] is done
     page.deleteLater()
+
+
+def test_closing_one_popup_keeps_tracking_the_others():
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+    from s2s.spotify.login import SpotifyLoginWidget
+
+    w = SpotifyLoginWidget()
+    a, b = object(), object()
+    w._popup_dialogs = [a, b]
+    w._forget_popup(id(a))
+    assert w._popup_dialogs == [b]
+    w._popup_dialogs = []
+    w.dispose()

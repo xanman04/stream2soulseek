@@ -52,6 +52,9 @@ class SpotifyClient:
         self._factory = factory
         self._adapter = factory(self) if factory else None
         self._closed = False
+        # Notes on playlist entries the last get_playlist_tracks() skipped (removed, region-locked,
+        # podcast episodes, missing metadata). One unusable entry must not fail the whole playlist.
+        self.skipped: list[str] = []
 
     def __repr__(self) -> str:
         return "SpotifyClient()"
@@ -137,6 +140,7 @@ class SpotifyClient:
     def get_playlist_tracks(self, playlist_id: str) -> list[AppleTrack]:
         self._require_valid_session()
         ident = self._playlist_id(playlist_id)
+        self.skipped = []
         try:
             out: list[AppleTrack] = []
             offset = 0
@@ -147,7 +151,9 @@ class SpotifyClient:
                 else:
                     from spotapi.playlist import PublicPlaylist
 
-                    body = PublicPlaylist(f"spotify:playlist:{ident}", client=self._spotapi_client()).get_playlist_info(
+                    # SpotAPI wants the bare ID: it only strips ".../playlist/" links, so a
+                    # "spotify:playlist:<id>" URI becomes an invalid ID and Spotify answers GenericError.
+                    body = PublicPlaylist(ident, client=self._spotapi_client()).get_playlist_info(
                         limit=100, offset=offset
                     )
                 content = self._playlist_content(body)
@@ -156,9 +162,13 @@ class SpotifyClient:
                 entries = content.get("items")
                 if not isinstance(entries, list):
                     raise SpotifyError("Spotify returned an unexpected playlist response.")
-                for entry in entries:
-                    track = self._track_from_entry(entry, ident, len(out))
-                    out.append(track)
+                for i, entry in enumerate(entries):
+                    # position = the entry's place in the Spotify playlist, so skipped entries leave gaps
+                    # and the numbering still matches what the user sees in Spotify.
+                    try:
+                        out.append(self._track_from_entry(entry, ident, offset + i))
+                    except SpotifyError as exc:
+                        self.skipped.append(str(exc))
                 offset += len(entries)
                 if offset >= total:
                     return out
@@ -301,7 +311,7 @@ class SpotifyClient:
             raise SpotifyError(f"Playlist item {position + 1} is missing track metadata.")
         album = data.get("albumOfTrack") or data.get("album") or {}
         album_name = album.get("name") if isinstance(album, Mapping) else None
-        duration = data.get("duration") or {}
+        duration = data.get("trackDuration") or data.get("duration") or {}  # live web API uses trackDuration
         duration_ms = duration.get("totalMilliseconds") if isinstance(duration, Mapping) else None
         return AppleTrack(
             apple_id=f"spotify:{playlist_id}:{uri}:{position}",
@@ -315,11 +325,13 @@ class SpotifyClient:
 
     @staticmethod
     def _is_playlist(item: Any) -> bool:
+        """Only entries whose URI is a playlist URI. Folders, Liked Songs, episodes etc. are not playlists,
+        whatever their type name says; treating them as playlists would fail the whole library load."""
         if not isinstance(item, Mapping):
             return False
-        uri = item.get("uri") or item.get("item", {}).get("uri") if isinstance(item.get("item", {}), Mapping) else item.get("uri")
-        typename = item.get("__typename") or item.get("type")
-        return isinstance(uri, str) and uri.startswith("spotify:playlist:") or typename in ("Playlist", "FolderPlaylist")
+        entry = item.get("item") if isinstance(item.get("item"), Mapping) else item
+        uri = entry.get("uri") or item.get("uri")
+        return isinstance(uri, str) and uri.startswith("spotify:playlist:")
 
     @classmethod
     def _library_item(cls, item: Mapping[str, Any]) -> Playlist:
