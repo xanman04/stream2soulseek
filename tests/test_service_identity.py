@@ -60,3 +60,19 @@ def test_service_messages_remain_visible_and_cannot_render_markup():
         assert label.textFormat() == Qt.TextFormat.PlainText
     finally:
         label.deleteLater()
+
+
+def test_service_pages_use_the_official_logos():
+    from PySide6.QtWidgets import QApplication
+
+    from s2s.ui import service_identity
+
+    QApplication.instance() or QApplication([])
+    for key, name in service_identity.LOGO_FILES.items():
+        assert (service_identity.LOGO_DIR / name).is_file()
+        renderer = service_identity.logo_renderer(key)
+        assert renderer.isValid()
+        mark = service_identity.BrandMark(key)
+        assert mark._logo.isValid()
+        mark.deleteLater()
+    assert (service_identity.LOGO_DIR / "NOTICE.md").is_file()

@@ -1,8 +1,11 @@
 """Native service identities and account cards. Decorative artwork contains no account data."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QFormLayout, QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget,
 )
@@ -36,12 +39,24 @@ class ServiceStatus(QLabel):
         self.setVisible(bool(text) and text not in (f"{self._name}: signed in", f"{self._name}: not signed in"))
 
 
+LOGO_DIR = Path(__file__).with_name("assets") / "logos"
+LOGO_FILES = {"apple": "applemusic.svg", "spotify": "spotify.svg", "soundcloud": "soundcloud.svg"}  # see NOTICE.md
+
+
+def logo_renderer(key: str) -> QSvgRenderer:
+    """The service's official logo (Simple Icons, CC0), filled with the brand colour."""
+    svg = (LOGO_DIR / LOGO_FILES[key]).read_text(encoding="utf-8")
+    svg = svg.replace("<svg ", f'<svg fill="{BRANDS[key][1]}" ', 1)
+    return QSvgRenderer(QByteArray(svg.encode("utf-8")))
+
+
 class BrandMark(QWidget):
     def __init__(self, key, parent=None):
         super().__init__(parent)
         self.key = key
         self.setFixedSize(72, 72)
         self.setAccessibleName(BRANDS[key][0])
+        self._logo = logo_renderer(key)
 
     def paintEvent(self, event):  # noqa: N802
         with QPainter(self) as p:
@@ -49,40 +64,7 @@ class BrandMark(QWidget):
 
     def _paint(self, p):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.scale(self.width() / 72, self.height() / 72)
-        color = QColor(BRANDS[self.key][1])
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(color)
-        if self.key == "spotify":
-            p.drawEllipse(QRectF(2, 2, 68, 68))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            for y, width in ((25, 41), (36, 35), (47, 29)):
-                path = QPainterPath(QPointF(16, y))
-                path.cubicTo(28, y - 6, 43, y - 4, 16 + width, y + 4)
-                p.setPen(QPen(QColor("#143422"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-                p.drawPath(path)
-        elif self.key == "apple":
-            p.drawRoundedRect(QRectF(2, 2, 68, 68), 16, 16)
-            p.setBrush(QColor("#ffffff"))
-            path = QPainterPath()
-            path.moveTo(29, 22)
-            path.lineTo(53, 17)
-            path.lineTo(53, 47)
-            path.cubicTo(53, 57, 39, 60, 39, 51)
-            path.cubicTo(39, 45, 45, 43, 49, 44)
-            path.lineTo(49, 27)
-            path.lineTo(33, 30)
-            path.lineTo(33, 52)
-            path.cubicTo(33, 63, 19, 65, 19, 56)
-            path.cubicTo(19, 50, 25, 48, 29, 49)
-            path.closeSubpath()
-            p.drawPath(path)
-        else:
-            for i, height in enumerate((13, 24, 34, 43, 51)):
-                p.drawRoundedRect(QRectF(3 + i * 7, 48 - height / 2, 4, height), 2, 2)
-            p.drawEllipse(QRectF(31, 20, 30, 38))
-            p.drawEllipse(QRectF(49, 34, 21, 24))
-            p.drawRoundedRect(QRectF(33, 39, 29, 19), 4, 4)
+        self._logo.render(p, QRectF(self.rect()).adjusted(2, 2, -2, -2))
 
 
 class ServiceHero(QFrame):

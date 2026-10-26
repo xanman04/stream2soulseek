@@ -25,7 +25,7 @@ s2s = "s2s.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-s2s = ["ui/assets/*.png"]
+s2s = ["ui/assets/*.png", "ui/assets/logos/*.svg", "ui/assets/logos/NOTICE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
