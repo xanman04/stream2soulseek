@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-10-26
 
 - Fixed every download failing its check on a Mac ("ffprobe failed"): S2S saved the path of the ffprobe inside
   the app, which moves on a Mac (a new temporary folder each launch when opened from Downloads, a new place after
