@@ -1,3 +1,6 @@
-"""DJ playlist import tool."""
+"""S2S (Stream to Soulseek): streaming playlists to reviewed Soulseek downloads.
 
-__version__ = "0.1.0"
+Copyright (C) 2026 xanman04. Licensed under the GNU GPL v3 or later; see LICENSE.
+"""
+
+__version__ = "1.0.0"

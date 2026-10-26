@@ -4,7 +4,8 @@
 
 # S2S — Stream to Soulseek
 
-S2S is a Windows desktop application for building local music libraries from streaming-service playlists.
+S2S is a desktop application for Windows and macOS that builds local music libraries from streaming-service
+playlists.
 It uses playlist metadata to find matching recordings on Soulseek, presents the results for review, and
 organizes approved downloads into a flat folder of verified audio files.
 
@@ -13,8 +14,10 @@ downloads run through [slskd](https://github.com/slskd/slskd), a Soulseek client
 
 ## Project status
 
-S2S is a development prototype undergoing user testing. Installation currently requires running from source;
-a packaged release is not available.
+Version 1.0 is available as a standalone app for macOS and Windows on the
+[Releases page](https://github.com/xanman04/stream2soulseek/releases): download, unzip and open it. slskd and
+FFmpeg are included. The release notes explain the first start on a Mac (S2S is not signed with a paid Apple
+developer certificate). To run from source instead, see [Installation](#installation).
 
 | Playlist source | Status |
 | --- | --- |
@@ -219,6 +222,23 @@ Run the offline test suite from the repository root:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+### Building the standalone app
+
+`python packaging/build.py` builds the app for the computer it runs on (a Mac app can only be built on a Mac):
+it downloads the pinned slskd and FFmpeg builds, checks their SHA-256, runs PyInstaller, adds the licence notices,
+signs the macOS app ad hoc, runs the app's `--self-test` and writes `dist/S2S-<version>-<platform>.zip`. Install
+the build tools first with `python -m pip install . -c packaging/constraints.txt pyinstaller pillow`.
+
+Pushing a version tag (for example `v1.0`) runs [.github/workflows/release.yml](.github/workflows/release.yml),
+which builds on GitHub's macOS (Apple silicon and Intel) and Windows machines and publishes the archives as a
+release.
+
+## License
+
+S2S is free software under the [GNU General Public License v3](LICENSE) or later. The packaged app bundles
+slskd (AGPL-3.0), FFmpeg (GPL-3.0) and Qt/PySide6 (LGPL-3.0) as separate components; their licences are listed
+in [packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md).
 
 See [AGENTS.md](AGENTS.md) for development context and project constraints. Keep credentials, session data,
 music, and personal playlist exports out of commits.

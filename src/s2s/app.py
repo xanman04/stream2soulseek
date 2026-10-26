@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 
 
@@ -119,7 +121,75 @@ PACKAGED_WARNING = (
     "or Windows Terminal window.")
 
 
+def self_test(report_path: str) -> int:
+    """`S2S --self-test <report>`: check the packaged app's parts without opening a window. Exit code 0 = all ok.
+
+    Run by packaging/build.py on every build. Writes a plain-text report (a windowed app has no console).
+    """
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    lines: list[str] = []
+    failed = False
+
+    def check(name, fn):
+        nonlocal failed
+        try:
+            lines.append(f"ok    {name}: {fn()}")
+        except Exception as exc:  # noqa: BLE001 - report every failure
+            failed = True
+            lines.append(f"FAIL  {name}: {type(exc).__name__}: {exc}")
+
+    def run_tool(path):
+        if not path:
+            raise FileNotFoundError("not found")
+        from .organize import NO_WINDOW
+
+        proc = subprocess.run([str(path), "--version" if "slskd" in str(path).lower() else "-version"],
+                              capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        if proc.returncode != 0:
+            raise RuntimeError(f"exit code {proc.returncode}")
+        first = (proc.stdout or proc.stderr).decode("utf-8", "replace").strip().splitlines()
+        return f"{path} ({first[0][:60] if first else 'ran'})"
+
+    from . import __version__
+    from .models import Settings, find_tool
+    from .slskd.service import find_slskd_exe
+
+    check("S2S", lambda: __version__)
+    check("Qt WebEngine", lambda: __import__("PySide6.QtWebEngineWidgets") and "imports")
+    check("Spotify library", lambda: __import__("spotapi") and __import__("curl_cffi") and "imports")
+    if sys.platform == "darwin":
+        check("Keychain", lambda: __import__("keyring.backends.macOS") and "imports")
+
+    def logos():
+        from PySide6.QtWidgets import QApplication
+
+        from .ui.service_identity import LOGO_FILES, logo_renderer
+
+        QApplication.instance() or QApplication([])
+        bad = [k for k in LOGO_FILES if not logo_renderer(k).isValid()]
+        if bad:
+            raise RuntimeError(f"invalid: {bad}")
+        return "valid"
+
+    check("service logos", logos)
+    check("ffprobe", lambda: run_tool(find_tool("ffprobe")))
+    check("ffmpeg", lambda: run_tool(find_tool("ffmpeg")))
+    def slskd_path():
+        from .models import bundled_tools_dir
+        from .slskd.service import SLSKD_BINARY
+
+        tools = bundled_tools_dir()  # in the packaged app, check the copy it ships, not one installed elsewhere
+        return tools / "slskd" / SLSKD_BINARY if tools is not None else find_slskd_exe(Settings())
+
+    check("slskd", lambda: run_tool(slskd_path()))
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return 1 if failed else 0
+
+
 def main() -> int:
+    if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
+        return self_test(sys.argv[2])
     from PySide6.QtCore import QCoreApplication, Qt
     from PySide6.QtWidgets import QApplication
 

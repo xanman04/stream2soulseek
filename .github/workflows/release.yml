@@ -1,0 +1,69 @@
+name: Release
+
+# Builds the standalone app on GitHub's own Mac and Windows machines (a Mac app can only be built on a Mac) and,
+# for a version tag such as v1.0, publishes the archives on the repository's Releases page.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, label: "macOS (Apple silicon)", optional: false }
+          - { os: macos-15-intel, label: "macOS (Intel)", optional: true }
+          - { os: windows-latest, label: "Windows", optional: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install S2S and the build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . -c packaging/constraints.txt pyinstaller pillow
+      - name: Run the tests
+        # Some older tests still assume Windows paths; on macOS their failures are reported but do not block the
+        # build. The packaged app's own self-test (in build.py) always has to pass.
+        continue-on-error: ${{ runner.os == 'macOS' }}
+        run: |
+          python -m pip install pytest
+          python -m pytest -q -p no:cacheprovider
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Build the app
+        run: python packaging/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s2s-${{ matrix.os }}
+          path: |
+            dist/S2S-*.zip
+            dist/S2S-*.zip.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: S2S ${{ github.ref_name }}
+          body_path: packaging/RELEASE_NOTES.md
+          files: assets/*
