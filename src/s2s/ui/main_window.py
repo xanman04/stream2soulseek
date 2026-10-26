@@ -129,7 +129,6 @@ class MainWindow(QMainWindow):
         self.soundcloud_service.signed_out.connect(lambda: self._source_signed_out(SOUNDCLOUD_KEY))
         self.soundcloud_service.state_changed.connect(self.refresh_navigation)
         self.playlists.tracks_changed.connect(self.refresh_navigation)
-        self.playlists.resume_requested.connect(self.resume_last_import)
         self.playlists.open_service_requested.connect(self._open_available_service)
         self.playlists.open_spotify_requested.connect(lambda: self._open_service(SPOTIFY_KEY))
         self.playlists.open_soundcloud_requested.connect(lambda: self._open_service(SOUNDCLOUD_KEY))
@@ -292,13 +291,32 @@ class MainWindow(QMainWindow):
             self._service_pages[key].session_rejected()
 
     def startup(self) -> None:
-        """Signed in: straight to step 1. Otherwise open the Apple Music page so the user can sign in."""
+        """Open on step 1. When the last playlist still has downloads running, reopen it at Downloads instead
+        (a confirmed run can only be finished or cancelled, so it must stay reachable after a restart)."""
         self.refresh_navigation()
-        if any(page.is_connected() for page in self._service_pages.values()):
-            self.go_step(STEP_PLAYLIST)
-            self.playlists.startup()
-        else:
-            self._open_service(APPLE_KEY)
+        self.go_step(STEP_PLAYLIST)
+        self.playlists.startup()
+        if self._downloads_running_in_last_import():
+            self.resume_last_import()
+
+    def _downloads_running_in_last_import(self) -> bool:
+        store = self.ctx.store
+        try:
+            imports = store.list_imports()
+            if not imports:
+                return False
+            iid = imports[0].id
+            active = (TransferState.QUEUED, TransferState.IN_PROGRESS, TransferState.NOT_QUEUED,
+                      TransferState.UNKNOWN)
+            for approval in store.approvals_for_import(iid):
+                transfers = {r.apple_id: r for r in store.transfers_for_approval(approval.id)}
+                for item in approval.items:
+                    rec = transfers.get(item.apple_id)
+                    if rec is None or rec.status.state in active:
+                        return True
+        except Exception:  # noqa: BLE001 - a damaged history never blocks opening the app
+            return False
+        return False
 
     def _search_finished(self, cancelled: bool) -> None:
         self.review.load(self.ctx.results, self.ctx.destination or "")
@@ -458,7 +476,6 @@ class MainWindow(QMainWindow):
         self.playlists.playlist_search.clear()
         self.playlists.track_search.clear()
         self.playlists.reset()
-        self.playlists.refresh_resume_button()
         self.go_step(STEP_PLAYLIST)
         if self.service.is_connected():
             self.playlists.load_playlists()
