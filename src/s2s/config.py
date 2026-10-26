@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import time
 from pathlib import Path
 
 from .models import MatchPolicy, Settings, default_ffprobe_path
@@ -100,4 +101,11 @@ def save_settings(settings: Settings) -> None:
     data = {**dataclasses.asdict(settings), "match_policy": settings.match_policy.to_dict(),
             "rule_layouts": {n: p.to_dict() for n, p in settings.rule_layouts.items()}}
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(20):  # Windows can briefly lock the file (antivirus, indexer) right after a save
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)

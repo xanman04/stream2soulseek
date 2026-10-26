@@ -146,18 +146,40 @@ def test_existing_files_hint(ctx, tmp_path):
     page.close()
 
 
-def test_suggestion_is_offered_never_created_and_one_click(ctx, tmp_path):
+def test_suggested_folder_is_filled_in_never_created(ctx, tmp_path):
     ctx.settings.recent_destinations = [str(tmp_path / "Tracks" / "House")]
     ctx.playlist = Playlist("p", "Liquid Sunday")
     page = DestinationPage(ctx)
     page._update_suggestion()
-    assert not page.suggest_btn.isHidden()
     target = tmp_path / "Tracks" / "Liquid Sunday"
-    assert page._suggestion == str(target)
-    assert ctx.destination is None and not target.exists()
-    page.suggest_btn.click()
-    assert ctx.destination == str(target) and not target.exists()
-    assert page.suggest_btn.isHidden()
+    assert page.dest_edit.text() == str(target) and ctx.destination == str(target)
+    assert not target.exists()  # only filled in; nothing is created until tracks are copied
+    assert not hasattr(page, "suggest_btn")
+    page.close()
+
+
+def test_a_suggestion_follows_the_playlist_but_a_chosen_folder_stays(ctx, tmp_path):
+    ctx.settings.recent_destinations = [str(tmp_path / "Tracks" / "House")]
+    ctx.playlist = Playlist("p", "Liquid Sunday")
+    page = DestinationPage(ctx)
+    page._update_suggestion()
+    ctx.playlist = Playlist("q", "Peak Time")
+    page._update_suggestion()  # still the earlier suggestion: replaced for the new playlist
+    assert ctx.destination == str(tmp_path / "Tracks" / "Peak Time")
+    mine = tmp_path / "Elsewhere"
+    page.set_destination(str(mine))  # Browse / recent list
+    ctx.playlist = Playlist("r", "Sunrise")
+    page._update_suggestion()
+    assert ctx.destination == str(mine)  # the user's own choice is never replaced
+    page.close()
+
+
+def test_no_suggestion_without_a_recent_folder(ctx):
+    ctx.settings.recent_destinations = []
+    ctx.playlist = Playlist("p", "Liquid Sunday")
+    page = DestinationPage(ctx)
+    page._update_suggestion()
+    assert page.dest_edit.text() == "" and ctx.destination is None
     page.close()
 
 

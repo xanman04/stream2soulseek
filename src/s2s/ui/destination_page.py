@@ -1,6 +1,8 @@
-"""Step 2: choose the tracklist folder (Browse + recent folders + a one-click suggestion).
+"""Step 2: choose the tracklist folder (Browse + recent folders; a suggested folder is filled in).
 
-No default is applied: nothing counts as chosen until the user picks it, and nothing is created here.
+When S2S can suggest a folder (beside the most recent one, named after the playlist) it is filled in and counts
+as chosen; Browse or the recent list changes it. Without a suggestion nothing is chosen until the user picks.
+Nothing is created here.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from ..approval import ApprovalError, check_destination
 from .context import AppContext
-from .theme import button_text, set_banner, subtle
+from .theme import set_banner, subtle
 from .workers import run_async
 
 AUDIO_EXTENSIONS = frozenset({".mp3", ".flac", ".wav", ".aiff", ".aif", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".alac"})
@@ -49,6 +51,7 @@ class DestinationPage(QWidget):
         self._resumed_dest: str | None = None  # destination of a resumed import, shown as-is
         self._count_request = 0
         self._suggestion: str | None = None
+        self._autofilled: str | None = None  # the suggestion currently filled in (replaced if the playlist changes)
 
         heading = QLabel("Tracklist folder")
         font = heading.font()
@@ -65,8 +68,6 @@ class DestinationPage(QWidget):
         self.browse_btn = QPushButton("Browse...")
         self.recent_combo = QComboBox()
         self.recent_combo.setToolTip("Recently used tracklist folders")
-        self.suggest_btn = QPushButton()
-        self.suggest_btn.setVisible(False)
         self.existing_label = subtle(QLabel(""))
         self.existing_label.setWordWrap(True)
         self.dest_error = QLabel("")
@@ -111,10 +112,6 @@ class DestinationPage(QWidget):
         row.addWidget(self.browse_btn)
         lay.addLayout(row)
         lay.addWidget(self.recent_combo)
-        suggest_row = QHBoxLayout()
-        suggest_row.addWidget(self.suggest_btn)
-        suggest_row.addStretch(1)
-        lay.addLayout(suggest_row)
         lay.addWidget(self.existing_label)
         lay.addWidget(self.dest_error)
         lay.addSpacing(16)
@@ -125,7 +122,6 @@ class DestinationPage(QWidget):
         self.browse_btn.clicked.connect(self._browse)
         self.recent_combo.activated.connect(self._recent_chosen)
         self.working_btn.clicked.connect(self.settings_requested)
-        self.suggest_btn.clicked.connect(self._accept_suggestion)
         self.downloads_toggle.toggled.connect(self._toggle_downloads)
         self.refresh_destinations()
 
@@ -166,17 +162,19 @@ class DestinationPage(QWidget):
         return os.path.normpath(str(parent / name))
 
     def _update_suggestion(self) -> None:
+        """Fill in the suggested folder when the field is empty (or still holds an earlier suggestion)."""
         self._suggestion = None
-        show = False
-        if not self.dest_edit.text().strip() and self._resumed_dest is None:
-            sug = self.suggested_folder()
-            if sug and self._valid(sug):
-                self._suggestion = sug
-                p = Path(sug)
-                self.suggest_btn.setText(button_text(f"Use suggestion: ...\\{p.parent.name}\\{p.name}"))
-                self.suggest_btn.setToolTip(f"{sug}\nNothing is created until tracks are copied.")
-                show = True
-        self.suggest_btn.setVisible(show)
+        if self._resumed_dest is not None:
+            return
+        current = self.dest_edit.text().strip()
+        if current and current != self._autofilled:
+            return  # the user chose this folder: never replace it
+        sug = self.suggested_folder()
+        if not sug or not self._valid(sug):
+            return
+        self._suggestion = sug
+        if current != sug:
+            self.set_destination(sug, suggested=True)
 
     def _valid(self, path: str) -> bool:
         s = self.ctx.settings
@@ -187,10 +185,6 @@ class DestinationPage(QWidget):
             return True
         except ApprovalError:
             return False
-
-    def _accept_suggestion(self) -> None:
-        if self._suggestion:
-            self.set_destination(self._suggestion)
 
     # ------------------------------------------------------------ choosing
 
@@ -205,9 +199,14 @@ class DestinationPage(QWidget):
         if path:
             self.set_destination(path)
 
-    def set_destination(self, path: str) -> None:
+    def set_destination(self, path: str, *, suggested: bool = False) -> None:
         self._resumed_dest = None
-        self.dest_edit.setText(os.path.normpath(path))
+        path = os.path.normpath(path)
+        self._autofilled = path if suggested else None
+        self.dest_edit.setText(path)
+        self.dest_edit.setToolTip("Suggested: beside your last tracklist folder, named after the playlist. Use "
+                                  "Browse to change it. Nothing is created until tracks are copied."
+                                  if suggested else "")
         self._dest_changed()
 
     def chosen_destination(self) -> tuple[str | None, str | None]:
@@ -284,5 +283,6 @@ class DestinationPage(QWidget):
     def reset(self) -> None:
         """Clear the previous import's choice without changing saved folder settings."""
         self._resumed_dest = None
+        self._autofilled = None
         self.dest_edit.clear()
         self.refresh_destinations()
