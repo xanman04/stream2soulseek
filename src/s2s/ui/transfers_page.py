@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QMenu, QProgres
 
 from .. import workflow
 from ..models import ImportOutcome, TransferState
+from ..organize import checker_failed
 from ..rejections import RejectionKind, classify, pending_declined
 from .context import AppContext
 from .theme import accent, chip, set_banner, set_chip, subtle, tint
@@ -74,6 +75,11 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
                                f"{why}\nNothing was overwritten.", recheck=True,
                                help="Your tracklist folder already has a different file with this name, so nothing "
                                     "was copied or overwritten. Rename or remove that file, then press Check again.")
+        if outcome == ImportOutcome.INVALID and checker_failed(getattr(result, "detail", "")):
+            return TrackStatus("Downloaded, not checked yet", "warn", ATTENTION,
+                               f"{result.detail}\nNothing was copied into your folder.", recheck=True,
+                               help="The file downloaded, but S2S could not run its file check, so it was not "
+                                    "copied into your folder yet. The file is probably fine: press Check again.")
         if outcome == ImportOutcome.INVALID:
             why = getattr(result, "detail", "") or "the file failed verification"
             return TrackStatus(f"Downloaded, check needed: {_lower_first(why)[:70]}", "warn", ATTENTION,

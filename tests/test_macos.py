@@ -66,13 +66,72 @@ def test_secrets_go_to_the_keychain_on_mac(tmp_path):
         store.get("../escape")  # names are validated for every backend
 
 
-def test_mac_uses_the_keyring_module_by_default(tmp_path, monkeypatch):
-    fake = FakeKeychain()
-    monkeypatch.setitem(sys.modules, "keyring", fake)
+def test_mac_uses_apples_security_tool_by_default(tmp_path, monkeypatch):
+    """S2S is ad hoc signed, so macOS sees each update as a new app and kept asking for Keychain access (even after
+    the right password). Apple's own `security` tool keeps one identity, so its item stays readable."""
+    from s2s import secretstore
+
     monkeypatch.setattr(sys, "platform", "darwin")
     store = SecretStore(tmp_path / "sec")
-    store.set("slskd_api_key", "v")
-    assert fake.stored() == {"slskd_api_key": "v"}
+    assert isinstance(store._keychain, secretstore.SecurityTool)
+
+
+class FakeSecurity:
+    """Stands in for /usr/bin/security: same exit codes and output."""
+
+    def __init__(self) -> None:
+        self.items: dict[tuple[str, str], bytes] = {}
+        self.calls: list[list[str]] = []
+
+    def __call__(self, args):
+        from types import SimpleNamespace
+
+        self.calls.append(args)
+        assert args[0] == "/usr/bin/security"
+        cmd, opts = args[1], args[2:]
+        val = lambda flag: opts[opts.index(flag) + 1]  # noqa: E731
+        key = (val("-s"), val("-a"))
+        if cmd == "find-generic-password":
+            if key not in self.items:
+                return SimpleNamespace(returncode=44, stdout=b"", stderr=b"not found")
+            return SimpleNamespace(returncode=0, stdout=self.items[key] + b"\n", stderr=b"")
+        if cmd == "add-generic-password":
+            assert "-U" in opts and "-A" not in opts  # update in place; no "any app" access
+            self.items[key] = bytes.fromhex(val("-X"))
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+        if cmd == "delete-generic-password":
+            return SimpleNamespace(returncode=0 if self.items.pop(key, None) is not None else 44, stdout=b"",
+                                   stderr=b"")
+        raise AssertionError(cmd)
+
+
+def test_security_tool_round_trip_keeps_secrets_out_of_plain_arguments(tmp_path):
+    from s2s.secretstore import KEYCHAIN_ACCOUNT, SecurityTool
+
+    fake = FakeSecurity()
+    store = SecretStore(tmp_path / "sec", keychain=SecurityTool(run=fake))
+    assert store.get("spotify_session") is None
+    store.update({"soulseek_username": "someone", "soulseek_password": 'synthetic "pass" ü'})
+    assert all("synthetic" not in " ".join(c) for c in fake.calls)  # the value travels hex-encoded
+    again = SecretStore(tmp_path / "sec", keychain=SecurityTool(run=fake))  # next launch
+    assert again.get("soulseek_password") == 'synthetic "pass" ü'
+    again.update({"soulseek_username": None, "soulseek_password": None})
+    assert (KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) not in fake.items
+    assert not list((tmp_path / "sec").iterdir())
+
+
+def test_security_tool_errors_stop_asking_for_the_launch(tmp_path):
+    from types import SimpleNamespace
+
+    from s2s.secretstore import SecurityTool
+
+    calls = []
+    store = SecretStore(tmp_path / "sec", keychain=SecurityTool(
+        run=lambda a: calls.append(a) or SimpleNamespace(returncode=51, stdout=b"", stderr=b"denied")))
+    for _ in range(10):
+        assert store.get("slskd_api_key") is None
+    store.set("slskd_api_key", "k")
+    assert len(calls) == 1 and store.get("slskd_api_key") == "k"
 
 
 def test_keychain_is_read_once_per_launch(tmp_path):

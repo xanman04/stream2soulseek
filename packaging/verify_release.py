@@ -13,6 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ("windows-x64", "macos-arm64", "macos-x64")
 
 
+def installer_names(version: str) -> set[str]:
+    """What people download (the ZIPs are for the in-app updater)."""
+    return {f"S2S-{version}-windows-x64-setup.exe", f"S2S-{version}-macos-arm64.dmg",
+            f"S2S-{version}-macos-x64.dmg"}
+
+
 def project_version(root: Path = ROOT) -> str:
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     source = (root / "src" / "s2s" / "__init__.py").read_text(encoding="utf-8")
@@ -29,7 +35,8 @@ def verify_assets(folder: Path, tag: str, *, root: Path = ROOT, signed: bool = F
     if tag != f"v{version}":
         raise ValueError(f"release tag {tag!r} must be v{version}")
     zips = {f"S2S-{version}-{target}.zip" for target in TARGETS}
-    expected = zips | {name + ".sha256" for name in zips}
+    downloads = zips | installer_names(version)
+    expected = downloads | {name + ".sha256" for name in downloads}
     if signed:
         expected |= {name + ".sig" for name in zips}
     actual = {path.name for path in folder.iterdir()}
@@ -48,6 +55,14 @@ def verify_assets(folder: Path, tag: str, *, root: Path = ROOT, signed: bool = F
         if signed and not _signature_ok(archive, digest, root):
             raise ValueError(f"invalid updater signature: {archive.name}")
         archives.append(archive)
+    for name in sorted(installer_names(version)):
+        path = folder / name
+        if path.stat().st_size == 0:
+            raise ValueError(f"empty installer: {name}")
+        checksum = path.with_name(name + ".sha256").read_text(encoding="utf-8").strip().split()
+        with path.open("rb") as stream:
+            if checksum != [hashlib.file_digest(stream, "sha256").hexdigest(), name]:
+                raise ValueError(f"invalid checksum or filename: {name}")
     return archives
 
 

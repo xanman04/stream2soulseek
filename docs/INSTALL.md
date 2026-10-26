@@ -9,7 +9,8 @@ Python, slskd, FFmpeg and ffprobe are already included in the app download.
 macOS 14.4 or newer is required. **Apple menu → About This Mac** shows the chip and operating-system version.
 Choose **Apple silicon** for an M-series chip, or **Intel** for an Intel processor.
 
-1. Extract the ZIP, then move **S2S.app** into **Applications**.
+1. Open the `.dmg` and drag **S2S** onto the **Applications** shortcut beside it, then eject the disk image.
+   Always open S2S from Applications: run from Downloads, macOS starts it from a temporary read-only copy.
 2. Open it. The app is ad hoc signed but does not have an Apple Developer ID signature or notarization.
 3. If macOS blocks it, try **System Settings → Privacy & Security → Open Anyway** after that launch attempt.
    See [Apple's instructions](https://support.apple.com/en-us/102445).
@@ -19,26 +20,29 @@ Choose **Apple silicon** for an M-series chip, or **Intel** for an Intel process
    xattr -dr com.apple.quarantine /Applications/S2S.app
    ```
 
-5. Open S2S and allow Keychain access when prompted to save account sessions.
+5. Saved logins are kept in your Keychain. S2S reads and writes them through macOS's own `security` tool,
+   so an update does not ask for Keychain access again.
 
 ## Windows
 
-Use 64-bit Windows 10 (1809+) or Windows 11. Extract the entire ZIP, then open `S2S/S2S.exe`.
-Keep the extracted folder together. If SmartScreen blocks the unsigned app and you trust the release,
+Use 64-bit Windows 10 (1809+) or Windows 11. Run `S2S-<version>-windows-x64-setup.exe`. It installs S2S for
+your user account into `%LOCALAPPDATA%\Programs\S2S` (no administrator rights), adds S2S to the Start menu
+(and the desktop if you tick it) and can be removed under **Settings → Apps**. Uninstalling keeps your settings
+and history in `%LOCALAPPDATA%\S2S`. If SmartScreen blocks the unsigned installer and you trust the release,
 choose **More info → Run anyway**, where offered.
 
 ## Verify a download
 
-Each ZIP has a `.sha256` file next to it. Compare its digest with the output of:
+Each installer and ZIP has a `.sha256` file next to it. Compare its digest with the output of:
 
 ```powershell
-Get-FileHash <archive> -Algorithm SHA256
+Get-FileHash <file> -Algorithm SHA256
 ```
 
 On macOS:
 
 ```sh
-shasum -a 256 <archive>
+shasum -a 256 <file>
 ```
 
 ## First run and initial Mac testing

@@ -51,7 +51,53 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
 
 
 KEYCHAIN_SERVICE = "S2S"
-KEYCHAIN_ACCOUNT = "secrets"  # one Keychain item ("S2S" / "secrets") holds all of S2S's secrets as JSON
+# One Keychain item ("S2S" / "logins") holds all of S2S's secrets as JSON. 1.0.6-1.0.7 used "secrets", written
+# through `keyring`; that item's access list names an S2S build that no longer exists, so it is not read.
+KEYCHAIN_ACCOUNT = "logins"
+SECURITY_TOOL = "/usr/bin/security"
+
+
+class SecurityTool:
+    """The login Keychain through Apple's `security` command (same interface as `keyring`).
+
+    The Keychain remembers WHICH program may read an item. S2S is ad hoc signed, so macOS sees every update as a
+    new program: its access was asked for again and again (1.0.5-1.0.7, even after the right password). The
+    `security` tool is part of macOS and keeps one identity, so the item it creates stays readable by it, across
+    every S2S update, without prompts. The value is passed hex-encoded on the command line; only processes of
+    the same user can see that briefly, and those could run `security` themselves anyway.
+    """
+
+    NOT_FOUND = 44  # errSecItemNotFound
+
+    def __init__(self, run=None) -> None:
+        import subprocess
+
+        self._run = run or (lambda args: subprocess.run(args, capture_output=True, timeout=120))
+
+    def _call(self, *args: str):
+        return self._run([SECURITY_TOOL, *args])
+
+    def get_password(self, service: str, account: str) -> str | None:
+        proc = self._call("find-generic-password", "-s", service, "-a", account, "-w")
+        if proc.returncode == self.NOT_FOUND:
+            return None
+        if proc.returncode != 0:
+            raise RuntimeError(f"security find-generic-password exited with {proc.returncode}")
+        out = proc.stdout.decode("utf-8", errors="replace").strip()
+        if out and not out.startswith("{") and re.fullmatch(r"[0-9a-fA-F]+", out):  # non-text data comes as hex
+            out = bytes.fromhex(out).decode("utf-8", errors="replace")
+        return out
+
+    def set_password(self, service: str, account: str, value: str) -> None:
+        proc = self._call("add-generic-password", "-U", "-s", service, "-a", account, "-l", "S2S logins",
+                          "-X", value.encode("utf-8").hex())
+        if proc.returncode != 0:
+            raise RuntimeError(f"security add-generic-password exited with {proc.returncode}")
+
+    def delete_password(self, service: str, account: str) -> None:
+        proc = self._call("delete-generic-password", "-s", service, "-a", account)
+        if proc.returncode not in (0, self.NOT_FOUND):
+            raise RuntimeError(f"security delete-generic-password exited with {proc.returncode}")
 
 
 def protection_text() -> str:
@@ -62,7 +108,7 @@ def protection_text() -> str:
 
 
 class SecretStore:
-    """Per-user secrets. Windows: DPAPI-encrypted files. macOS: the login Keychain (via `keyring`).
+    """Per-user secrets. Windows: DPAPI-encrypted files. macOS: the login Keychain (via SecurityTool).
 
     On macOS all secrets live in ONE Keychain item, read once per launch and then kept in memory. Every Keychain
     read can show a password prompt (and an ad hoc signed app is a "new app" to macOS after every update), so
@@ -85,9 +131,7 @@ class SecretStore:
             raise ValueError("protect and unprotect must be given together")
         if protect is None and keychain is None:
             if sys.platform == "darwin":
-                import keyring  # macOS backend talks to the Security framework directly
-
-                keychain = keyring
+                keychain = SecurityTool()
             elif sys.platform == "win32":
                 protect = lambda b: _dpapi(b, True)  # noqa: E731
                 unprotect = lambda b: _dpapi(b, False)  # noqa: E731

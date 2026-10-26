@@ -103,9 +103,10 @@ class MatchingRulesWidget(QWidget):
         self.ex_radio = QCheckBox("Reject radio edits")
         self.ex_live = QCheckBox("Reject live recordings")
         self.ex_mixed = QCheckBox("Reject [Mixed] / DJ-mixed tracks")
+        self.ex_clean = QCheckBox("Reject clean (censored) versions")
         ebox = QGroupBox("Rejections")
         el = QVBoxLayout(ebox)
-        for w in (self.ex_radio, self.ex_live, self.ex_mixed):
+        for w in (self.ex_radio, self.ex_live, self.ex_mixed, self.ex_clean):
             el.addWidget(w)
         help_ = QLabel(EXCLUSION_HELP)
         help_.setWordWrap(True)
@@ -274,6 +275,7 @@ class MatchingRulesWidget(QWidget):
         self.ex_radio.setChecked(p.exclude_radio_edits)
         self.ex_live.setChecked(p.exclude_live)
         self.ex_mixed.setChecked(p.exclude_mixed)
+        self.ex_clean.setChecked(p.exclude_clean)
         self.tolerance.setValue(p.duration_tolerance_s)
         self.skip_flagged.setChecked(p.skip_flagged_by_default)
 
@@ -302,6 +304,7 @@ class MatchingRulesWidget(QWidget):
             version_mode="exact_only" if self.mode_exact.isChecked() else "exact_then_extended",
             tier_before_format=self.tier_first.isChecked(),
             exclude_radio_edits=self.ex_radio.isChecked(), exclude_live=self.ex_live.isChecked(),
-            exclude_mixed=self.ex_mixed.isChecked(), duration_tolerance_s=self.tolerance.value(),
+            exclude_mixed=self.ex_mixed.isChecked(), exclude_clean=self.ex_clean.isChecked(),
+            duration_tolerance_s=self.tolerance.value(),
             skip_flagged_by_default=self.skip_flagged.isChecked(),
         )

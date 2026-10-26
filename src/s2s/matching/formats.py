@@ -106,6 +106,6 @@ def describe_policy(policy: MatchPolicy) -> str:
     """One line for the Search page."""
     vers = "exact version only" if policy.version_mode == "exact_only" else "exact or extended"
     rej = [n for n, on in (("radio edits", policy.exclude_radio_edits), ("live", policy.exclude_live),
-                           ("mixed", policy.exclude_mixed)) if on]
+                           ("mixed", policy.exclude_mixed), ("clean", policy.exclude_clean)) if on]
     return f"Accepting: {accepted_text(policy)} · {vers} · " + (
         "rejecting " + ", ".join(rej) if rej else "no label exclusions")

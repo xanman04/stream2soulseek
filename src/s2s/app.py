@@ -158,7 +158,7 @@ def self_test(report_path: str) -> int:
     check("Qt WebEngine", lambda: __import__("PySide6.QtWebEngineWidgets") and "imports")
     check("Spotify library", lambda: __import__("spotapi") and __import__("curl_cffi") and "imports")
     if sys.platform == "darwin":
-        check("Keychain", lambda: __import__("keyring.backends.macOS") and "imports")
+        check("Keychain", lambda: os.path.isfile("/usr/bin/security") and "security tool present")
 
     def logos():
         from PySide6.QtWidgets import QApplication

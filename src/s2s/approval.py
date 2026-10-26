@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 
-from .models import Approval, SelectionItem, Tier
+from .models import Approval, ImportOutcome, SelectionItem, Tier
 from .rejections import declined_transfers
 from .store import Store, utc_now
 
@@ -102,6 +102,10 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
     if not items:
         raise ApprovalError("selection is empty")
     declined = {(d.apple_id, d.username.casefold()) for d in declined_transfers(store, import_id)}
+    # Never download a track again once its file is in the tracklist folder (a second copy is a duplicate).
+    in_folder = {r.apple_id for r in store.import_results(import_id)
+                 if r.outcome in (ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT)
+                 and r.final_path and os.path.isfile(r.final_path)}
     seen: set[str] = set()
     dests: set[str] = set()
     resolved_items: list[SelectionItem] = []
@@ -109,6 +113,8 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
         if it.apple_id in seen:
             raise ApprovalError(f"more than one file selected for track {it.apple_id}")
         seen.add(it.apple_id)
+        if it.apple_id in in_folder:
+            raise ApprovalError(f"track {it.apple_id} is already in your folder; it is not downloaded again")
         cand = store.find_candidate(import_id, it.apple_id, it.username, it.filename, it.size)
         if cand is None:
             raise ApprovalError(f"file is not a stored candidate for track {it.apple_id}")

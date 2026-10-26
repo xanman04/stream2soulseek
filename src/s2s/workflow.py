@@ -379,7 +379,8 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
             for selected in approval.items:
                 latest[selected.apple_id] = (approval.id, selected)
         pending = []
-        failed_check = {r.apple_id for r in store.import_results(import_id) if r.outcome == ImportOutcome.INVALID}
+        failed_check = {r.apple_id for r in store.import_results(import_id)
+                        if r.outcome == ImportOutcome.INVALID and not organize.checker_failed(r.detail)}
         for track_id, (aid, selected) in latest.items():
             record = store.get_transfer(aid, track_id)
             if record is None:

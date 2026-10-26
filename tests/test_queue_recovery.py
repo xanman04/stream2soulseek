@@ -126,22 +126,19 @@ def test_default_wait_is_45_seconds_and_first_backup_respects_gate(pool):
     assert len(_attempts(pool)) == 2
 
 
-def test_primary_activity_claims_lead_and_cancels_backup_without_removing(pool):
+def test_switching_cancels_the_waiting_attempt_before_queuing_the_next(pool):
+    """One uploader at a time: two waiting attempts could both start and finish before the slower one is
+    cancelled, downloading the track twice (seen on a real run)."""
     _, approval, _, client, service, _, start, primary, _ = pool
     wait = _plan(pool)["wait_seconds"]
     _tick(pool, start)
     _tick(pool, start + timedelta(seconds=wait))
-    backup = _attempts(pool)[1]
-    backup_item = backup
+    assert [(u, remove) for u, _, remove in client.cancelled] == [(primary.username, False)]  # file kept
     backup_user = next(u for u, _ in client.enqueued if u != primary.username)
-    _set_state(client, primary.username, TransferState.IN_PROGRESS, percent=1.0)
+    _set_state(client, backup_user, TransferState.IN_PROGRESS, percent=1.0)
     _tick(pool, start + timedelta(seconds=wait + 1))
-    plan = _plan(pool)
-    assert plan["winner_ordinal"] == -1
-    assert client.cancelled and all(remove is False for _, _, remove in client.cancelled)
-    assert effective_item(pool[0], approval.id, primary) == primary
-    assert pool[0].get_transfer(approval.id, primary.apple_id).status.username == primary.username
-    assert backup_item["ordinal"] == 0
+    assert _plan(pool)["winner_ordinal"] == 0
+    assert pool[0].get_transfer(approval.id, primary.apple_id).status.username == backup_user
 
 
 def test_backup_activity_claims_lead_and_cancels_primary(pool):
@@ -160,7 +157,7 @@ def test_backup_activity_claims_lead_and_cancels_primary(pool):
     assert effective_item(pool[0], approval.id, primary, for_import=True) is None
 
 
-def test_first_completed_attempt_wins_even_when_other_also_completed(pool):
+def test_a_cancelled_attempt_that_finished_anyway_does_not_take_the_lead(pool):
     _, approval, _, client, _, _, start, primary, _ = pool
     wait = _plan(pool)["wait_seconds"]
     _tick(pool, start)
@@ -169,8 +166,7 @@ def test_first_completed_attempt_wins_even_when_other_also_completed(pool):
     _set_state(client, primary.username, TransferState.SUCCEEDED, percent=100)
     _set_state(client, backup_user, TransferState.SUCCEEDED, percent=100)
     _tick(pool, start + timedelta(seconds=wait + 1))
-    assert _plan(pool)["winner_ordinal"] == -1
-    assert effective_item(pool[0], approval.id, primary) == primary
+    assert _plan(pool)["winner_ordinal"] == 0  # only the attempt that was not cancelled counts
 
 
 def test_initializing_zero_progress_does_not_claim_backup_lead(pool):
@@ -251,19 +247,14 @@ def test_leader_failure_releases_pool_for_next_unused_backup(pool):
 
 
 
-def test_failed_redundant_cancel_keeps_winner_and_reports_retryable_error(pool):
+def test_no_next_uploader_is_queued_while_the_waiting_one_cannot_be_cancelled(pool):
     store, approval, settings, client, _, _, start, primary, _ = pool
     wait = _plan(pool)["wait_seconds"]
     _tick(pool, start)
-    _tick(pool, start + timedelta(seconds=wait))
-    backup_user = next(u for u, _ in client.enqueued if u != primary.username)
-    _set_state(client, backup_user, TransferState.IN_PROGRESS, percent=3.0)
     client.fail_cancel = True
-    _tick(pool, start + timedelta(seconds=wait + 1))
-    plan = _plan(pool)
-    assert plan["winner_ordinal"] == 0
-    assert "Could not cancel redundant attempt" in plan["error"]
-    assert client.cancelled and all(remove is False for _, _, remove in client.cancelled)
+    _tick(pool, start + timedelta(seconds=wait))
+    assert all(u == primary.username for u, _ in client.enqueued)  # never two at once
+    assert "refresh to retry" in _plan(pool)["error"]
 
 
 def test_parallel_cap_replaces_oldest_backup_without_deleting_its_file(capacity_pool):

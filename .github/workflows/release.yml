@@ -37,6 +37,11 @@ jobs:
           python -m pytest -q -p no:cacheprovider
         env:
           QT_QPA_PLATFORM: offscreen
+      - name: Install Inno Setup (Windows installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Build the app
         run: python packaging/build.py
       - uses: actions/upload-artifact@v6
@@ -45,6 +50,10 @@ jobs:
           path: |
             dist/S2S-*.zip
             dist/S2S-*.zip.sha256
+            dist/S2S-*-setup.exe
+            dist/S2S-*-setup.exe.sha256
+            dist/S2S-*.dmg
+            dist/S2S-*.dmg.sha256
           if-no-files-found: error
 
   release:
@@ -87,5 +96,5 @@ jobs:
             const repo = {owner: context.repo.owner, repo: context.repo.repo};
             const release_id = Number('${{ steps.draft.outputs.id }}');
             const {data: assets} = await github.rest.repos.listReleaseAssets({...repo, release_id, per_page: 100});
-            if (assets.length !== 9) throw new Error(`Expected three archives, three checksums and three signatures, found ${assets.length}`);
+            if (assets.length !== 15) throw new Error(`Expected 3 archives, 3 installers, their 6 checksums and 3 signatures, found ${assets.length}`);
             await github.rest.repos.updateRelease({...repo, release_id, draft: false, make_latest: 'true'});

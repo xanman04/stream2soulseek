@@ -9,6 +9,16 @@
   confirm to download it. No more trip back to Review.
 - Review: the lower panel always fits the window (only the lists scroll), "search with your own words" is a
   search bar in that panel instead of a small popup, and queuing shows a popup instead of a banner.
+- No more duplicate downloads: a file S2S could not check (the ffprobe problem) only offers Check again, not
+  another copy; "Choose another uploader" tries one uploader at a time (two waiting ones could both finish);
+  and a track already in your tracklist folder is never queued again.
+- New rule, on by default: reject clean (censored) versions. A playlist track that is itself the clean version
+  still gets clean files. Existing searches count as made under older rules: search again before confirming.
+- Mac: saved logins go through macOS's own `security` tool, whose identity does not change between S2S
+  updates, so an update no longer asks for Keychain access over and over (which also signed you out). Sign in
+  once more after this update.
+- Installers: a Windows setup program (per-user, Start menu, uninstaller) and a Mac disk image to drag into
+  Applications. The ZIPs remain for the in-app updater.
 - New app icon: the S2S letters on a rounded grey tile.
 - Release builds use the Node 24 versions of the GitHub Actions.
 
