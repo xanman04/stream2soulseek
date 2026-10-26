@@ -8,8 +8,8 @@ S2S is a Windows desktop application for building local music libraries from str
 It uses playlist metadata to find matching recordings on Soulseek, presents the results for review, and
 organizes approved downloads into a flat folder of verified audio files.
 
-The application is designed to support multiple playlist sources. **Apple Music is the first implemented
-integration; Spotify and SoundCloud are planned.** Streaming services provide playlist metadata. File
+The application supports Apple Music, Spotify and SoundCloud playlist sources, with live account testing
+still in progress. Streaming services provide playlist metadata. File
 searches and downloads run through [slskd](https://github.com/slskd/slskd), a Soulseek client with a local API.
 
 ## Project status
@@ -20,8 +20,8 @@ a packaged release is not available.
 | Playlist source | Status |
 | --- | --- |
 | Apple Music | Implemented using an unofficial API; live integration under testing |
-| Spotify | Planned; not implemented |
-| SoundCloud | Planned; not implemented |
+| Spotify | Implemented using a website session; live account integration under testing |
+| SoundCloud | Opt-in website session integration; public metadata verified, account sign-in awaits testing ([details](docs/SOUNDCLOUD.md)) |
 
 The latest local validation passed **711 offline tests**, covering matching, download approvals, file
 organization, state management, and the desktop interface. These tests use synthetic data and simulated

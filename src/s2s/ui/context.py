@@ -9,6 +9,7 @@ from ..models import AppleTrack, MatchResult, Playlist, Settings
 from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SPOTIFY_SESSION, SecretStore
 from ..slskd.client import SlskdClient, SlskdError
 from ..store import Store
+from ..soundcloud.session import SOUNDCLOUD_SESSION
 from ..workflow import scrub
 
 
@@ -39,7 +40,7 @@ class AppContext:
 
     def secret_values(self) -> list[str]:
         out = []
-        for name in (APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SPOTIFY_SESSION):
+        for name in (APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, SLSKD_API_KEY, SPOTIFY_SESSION, SOUNDCLOUD_SESSION):
             try:
                 v = self.secrets.get(name)
             except Exception:  # noqa: BLE001
@@ -53,6 +54,14 @@ class AppContext:
                         cookies = data.get("cookies", []) if isinstance(data, dict) else []
                         out.extend(cookie["value"] for cookie in cookies if isinstance(cookies, list)
                                    if isinstance(cookie, dict) and isinstance(cookie.get("value"), str))
+                    except (ValueError, TypeError):
+                        pass
+                if name == SOUNDCLOUD_SESSION:
+                    try:
+                        import json
+                        data = json.loads(v)
+                        if isinstance(data, dict) and isinstance(data.get("token"), str):
+                            out.append(data["token"])
                     except (ValueError, TypeError):
                         pass
         return out
@@ -69,7 +78,11 @@ class AppContext:
         from ..sources import AppleSource
         from ..sources.spotify import SpotifySource
 
-        return [AppleSource(self.secrets), SpotifySource(self.secrets)]
+        sources = [AppleSource(self.secrets), SpotifySource(self.secrets)]
+        if self.settings.extra.get("soundcloud_web_session_enabled", False):
+            from ..sources.soundcloud import SoundCloudSource
+            sources.append(SoundCloudSource(self.secrets))
+        return sources
 
     def slskd_client(self, *, url: str | None = None, api_key: str | None = None) -> SlskdClient:
         key = api_key if api_key else self.secrets.get(SLSKD_API_KEY)
