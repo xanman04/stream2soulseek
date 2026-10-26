@@ -27,8 +27,10 @@ from .workers import run_async
 
 COL_NUM, COL_TRACK, COL_RESULT, COL_SOURCES = range(4)
 EXPECTED_SEARCHES_PER_TRACK = 2.0  # until enough tracks finished to measure it (the ladder runs 1-3 on most)
-DISCONNECTED_WAIT = ("Soulseek disconnected — probably a temporary search limit. Waiting to reconnect "
-                     "({left})… Searches resume automatically.")
+DISCONNECTED_WAIT = "Soulseek disconnected. Waiting {left} for it to reconnect; otherwise searching stops."
+SEARCH_STOPPED = ("Searching stopped: Soulseek disconnected S2S and did not reconnect, so {n} track{s} could not be "
+                  "searched. This can be a network problem or a temporary Soulseek search ban (about 30 minutes). "
+                  "Check the Soulseek connection, then use “Retry failed searches”.")
 LOCKED_INFO = ("Downloads are already queued for this selection. To search again, use “Start another playlist” "
                "on the Downloads page once they are done.")
 
@@ -69,8 +71,7 @@ def sources_text(res: MatchResult) -> str:
 
 
 def _left_text(seconds: float) -> str:
-    minutes = math.ceil(seconds / 60.0)
-    return "less than 1 min left" if seconds < 60 else f"{minutes} min left"
+    return f"up to {max(1, math.ceil(seconds))} s"
 
 
 def _eta_text(seconds: float) -> str:
@@ -427,8 +428,7 @@ class SearchPage(QWidget):
         return int(math.ceil(remaining * max(avg, 1.0)))
 
     def _per_minute(self) -> float:
-        s = self.ctx.settings
-        return max(1, int(s.search_rate_limit)) * 60.0 / max(1, int(s.search_rate_window_s))
+        return search_mod.RATE_LIMIT * 60.0 / search_mod.RATE_WINDOW_S
 
     def _pace_seconds(self) -> float:
         """Minimum time the rate limit forces for the searches still expected (a free burst is not counted)."""
@@ -437,13 +437,12 @@ class SearchPage(QWidget):
 
     def _pace_text(self) -> str:
         lim = search_mod.LIMITER
-        s = self.ctx.settings
         used = lim.total_started - self._limiter_base
         reused = f" ({self._cache.hits} answered from earlier results)" if self._cache.hits else ""
-        return (f"{used} searches run{reused} · {lim.used()} of {int(s.search_rate_limit)} allowed in the "
-                f"current {int(s.search_rate_window_s)} s window · "
-                f"about {self._per_minute():.0f} searches per minute to avoid Soulseek's search limit · "
-                f"about {self._expected_searches()} more searches expected")
+        text = f"{used} searches run{reused} · about {self._expected_searches()} more expected"
+        if self._pace_seconds() > 0:  # more searches needed than Soulseek allows at once: say why it slows down
+            text += f" · paced to about {self._per_minute():.0f} searches a minute to stay under Soulseek's search limit"
+        return text
 
     def _tick(self) -> None:
         if self._running:
@@ -632,6 +631,9 @@ class SearchPage(QWidget):
         elif cancelled:
             set_banner(self.summary_label, "Retry cancelled; the other tracks keep their failed state.", "warn")
             self.info.setText("Retry cancelled.")
+        elif stopped := sum(1 for r in results if "soulseek disconnected" in (r.note or "").lower()):
+            set_banner(self.summary_label, SEARCH_STOPPED.format(n=stopped, s="" if stopped == 1 else "s"), "error")
+            self.info.setText("Searching stopped because Soulseek disconnected.")
         else:
             self.info.setText(f"Done: {n['ok']} of {total} tracks found" + (
                 f", {n['warn']} to check" if n["warn"] else "") + ". Next, review what was found.")
