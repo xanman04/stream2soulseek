@@ -592,7 +592,8 @@ def test_changing_the_folder_after_a_search_forgets_it_and_searches_again(app_en
     win.go_step(STEP_REVIEW)  # locked
     assert win.stack.currentIndex() == STEP_DESTINATION + 1
     win.go_step(STEP_SEARCH)
-    assert len(fake.queries) > first                       # searched again for the new folder
+    assert win.ctx.results and win.ctx.import_id is not None  # searched again for the new folder ...
+    assert len(fake.queries) == first  # ... answered from the recent results: no query sent twice
     assert win.review.model.rows and win.review.dest_label.text().endswith(str(win.ctx.destination))
     assert Path(win.ctx.destination).name == "Elsewhere"
     # a different playlist selection also clears everything downstream

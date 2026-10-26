@@ -148,7 +148,7 @@ def search_and_match(
         raise ValueError("unknown import")
     configure_search_limits()
     if cache is None:
-        cache = _search.SearchCache()  # no query is sent twice within this run
+        cache = _search.SHARED_CACHE  # no query is re-sent while its answer is cached
     done_ids = store.completed_apple_ids(imp.destination)
     declined_peers = declined_peer_reasons(store)
     total = len(tracks)
@@ -275,7 +275,7 @@ def search_track_custom(
     found = run_search(
         client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
         response_limit=settings.response_limit, file_limit=settings.file_limit,
-        queries=[query], check_empty=True,
+        queries=[query], check_empty=True, cache=_search.SHARED_CACHE,
     )
     old = next((r for r in store.load_match_results(import_id) if r.track.apple_id == track.apple_id), None)
     files = list(found)

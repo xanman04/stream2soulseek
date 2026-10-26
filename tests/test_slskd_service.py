@@ -198,3 +198,24 @@ def test_service_reads_current_settings_not_a_stale_copy(tmp_path, store):
     current["s"] = Settings(slskd_downloads_dir=str(tmp_path / "dl"))  # Settings dialog replaced the object
     svc.start(CREDS)
     assert svc.running and (tmp_path / "dl").is_dir()
+
+
+def test_soulseek_logins_are_spaced_and_capped(tmp_path, settings, store):
+    """The server bans for reconnecting quickly: starts are 15 s apart and at most 4 in 10 minutes."""
+    from s2s.slskd import service
+
+    svc, launched = make(tmp_path, settings, store, ["in"] * 20)
+    wall = Clock()
+    wall.t = 10_000.0
+    svc._wall = wall
+    svc._sleep = lambda s: (wall.sleep(s), svc._clock.sleep(s))
+    for _ in range(service.LOGIN_LIMIT):
+        svc.start(CREDS)
+    assert len(launched) == service.LOGIN_LIMIT
+    assert wall.t >= 10_000 + (service.LOGIN_LIMIT - 1) * service.LOGIN_SPACING_S
+    with pytest.raises(SlskdServiceError, match="wait about"):
+        svc.start(CREDS)
+    assert len(launched) == service.LOGIN_LIMIT
+    wall.t += service.LOGIN_WINDOW_S
+    svc.start(CREDS)  # the window has passed
+    assert len(launched) == service.LOGIN_LIMIT + 1

@@ -195,11 +195,16 @@ def build_queries(track: AppleTrack) -> list[str]:
 
 # ---------------------------------------------------------------- rate limiting and connection loss
 
-# Fixed, not a setting: the Soulseek server bans an account for 30 minutes when it searches too fast, and no user
-# benefits from risking that. 34 per 220 s is slsk-batchdl's long-tested default. A small playlist still runs at
-# full speed: the window allows a burst of 34 searches, and only a run needing more than that is paced.
-RATE_LIMIT = 34
+# The search limit is fixed, not a setting. The Soulseek server bans an account for 30 minutes when it "quickly
+# repeats a search" or searches too much in a short time; the exact threshold is not published. Other tools use
+# 34 searches per 220 s (slsk-batchdl, counted per fixed period, which allows bursts of up to 68). S2S stays well
+# below that with a sliding window and margins on every side:
+RATE_LIMIT = 30  # search starts in any RATE_WINDOW_S, across every worker, run and S2S process together
 RATE_WINDOW_S = 220
+MIN_SPACING_S = 1.0  # never two search starts closer together than this (no bursts of simultaneous starts)
+REPEAT_COOLDOWN_S = 120  # the same query text is never sent again within this time
+# A small playlist still runs at full speed: up to 30 searches start without waiting (one a second); only a run
+# needing more than that is paced, at about 8 searches a minute.
 # A short outage (network blip) gets this long to recover. Anything longer is treated as a ban: searching stops
 # instead of making the user wait half an hour.
 RECONNECT_WAIT_S = 60
@@ -218,94 +223,248 @@ class SearchInterrupted(SlskdError):
         self.gave_up = gave_up
 
 
-class SearchRateLimiter:
-    """Process-wide sliding window: at most `limit` searches may start in any `window_s` seconds.
+class _FileLock:
+    """Exclusive lock on `<path>.lock`, shared by every S2S process (Windows: msvcrt; elsewhere: fcntl)."""
 
-    The Soulseek server bans users for 30 minutes when too many searches are made in a short time. Thread
-    safe; waiting honours the caller's cancel event. `clock`/`sleep` are injectable for tests. After
-    `attach(path)` the start times are also saved to disk, so closing and reopening S2S (or starting a second
-    run straight after a first) cannot exceed the limit either; the default clock is wall time for that reason.
+    def __init__(self, path: Path) -> None:
+        self._path = path.with_name(path.name + ".lock")
+        self._fh = None
+
+    def __enter__(self) -> "_FileLock":
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self._path, "a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                self._fh.seek(0)
+                while True:
+                    try:
+                        msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)  # retries ~10 s, then raises
+                        break
+                    except OSError:
+                        continue
+            else:  # pragma: no cover - macOS/Linux builds
+                import fcntl
+
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
+        except BaseException:
+            self._fh.close()
+            raise
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:  # pragma: no cover
+                import fcntl
+
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._fh.close()
+            self._fh = None
+
+
+def _merge_times(a, b) -> list[float]:
+    """Union of two lists of start times, keeping repeated equal times (two starts in the same clock tick)."""
+    from collections import Counter
+
+    ca, cb = Counter(a), Counter(b)
+    return sorted((ca | cb).elements())
+
+
+class SearchRateLimiter:
+    """Decides when a search may start, so the Soulseek search ban is never reached.
+
+    Rules, all enforced together: at most `limit` starts in any `window_s` seconds; at least `spacing_s`
+    between two starts; the same query text not again within `repeat_s`. Thread safe; waiting honours the
+    caller's cancel event.
+
+    After `attach(path)` the ledger lives in that file, read and written under a cross-process file lock on
+    every start, so a restart, a second run straight after a first, or a second S2S window all share one
+    budget. The ledger uses wall-clock time (it must survive restarts); this process also keeps a monotonic
+    copy and a start must pass both, so a wall clock jumping forward cannot release searches early. A clock
+    jumping backwards makes ledger entries count as "now", which only delays. `clock`/`mono`/`sleep` are
+    injectable for tests.
     """
 
     def __init__(self, limit: int = RATE_LIMIT, window_s: float = RATE_WINDOW_S, *,
-                 clock: Callable[[], float] = time.time,
+                 spacing_s: float = MIN_SPACING_S, repeat_s: float = REPEAT_COOLDOWN_S,
+                 clock: Callable[[], float] = time.time, mono: Callable[[], float] | None = None,
                  sleep: Callable[[float], None] | None = None) -> None:
         self._lock = threading.Lock()
-        self._times: deque[float] = deque()
         self._limit = max(1, int(limit))
         self._window = max(1.0, float(window_s))
+        self._spacing = max(0.0, float(spacing_s))
+        self._repeat = max(0.0, float(repeat_s))
         self._clock = clock
+        self._mono = mono or (time.monotonic if clock is time.time else clock)
         self._sleep = sleep
+        self._times: list[float] = []  # wall-clock ledger (mirrors the file when attached)
+        self._queries: dict[str, float] = {}  # query key -> wall-clock time it was last sent
+        self._local: deque[float] = deque()  # this process's own starts, monotonic
+        self._path: Path | None = None
         self.total_started = 0
         self.unlimited = False  # tests only
-        self._path: Path | None = None
+
+    @property
+    def limit(self) -> int:
+        return self._limit
+
+    @property
+    def window_s(self) -> float:
+        return self._window
 
     def attach(self, path: Path) -> None:
-        """Load recent search start times from `path` and save every new one there (best effort)."""
+        """Keep the ledger in `path` (shared with every S2S process) from now on."""
         with self._lock:
             if self._path == path:
                 return
             self._path = path
             try:
-                saved = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                return
-            now = self._clock()
-            if not isinstance(saved, list):
-                return
-            merged = sorted([*self._times, *(float(x) for x in saved if isinstance(x, (int, float)) and x <= now)])
-            self._times = deque(merged)
-            self._trim(now)
+                with _FileLock(path):
+                    self._load(self._clock())
+                    self._save()  # carry this process's earlier starts into the shared ledger
+            except OSError:
+                pass
+
+    # -- ledger
+
+    def _load(self, now: float) -> None:
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, list):  # the first format: a bare list of start times
+            data = {"starts": data}
+        if not isinstance(data, dict):
+            data = {}
+        starts = [min(float(x), now) for x in data.get("starts") or [] if isinstance(x, (int, float))]
+        queries = data.get("queries") if isinstance(data.get("queries"), dict) else {}
+        merged_q = {str(k): min(float(v), now) for k, v in queries.items() if isinstance(v, (int, float))}
+        for k, v in self._queries.items():
+            merged_q[k] = max(v, merged_q.get(k, v))
+        self._times = _merge_times(starts, self._times)
+        self._queries = merged_q
+        self._trim(now)
 
     def _save(self) -> None:
-        if self._path is None:
-            return
-        try:
-            tmp = self._path.with_name(self._path.name + ".tmp")
-            tmp.write_text(json.dumps(list(self._times)), encoding="utf-8")
-            os.replace(tmp, self._path)
-        except OSError:
-            pass  # the in-memory window still applies
+        tmp = self._path.with_name(self._path.name + ".tmp")
+        tmp.write_text(json.dumps({"starts": self._times, "queries": self._queries}), encoding="utf-8")
+        os.replace(tmp, self._path)
 
-    @property
-    def per_minute(self) -> float:
-        return self._limit * 60.0 / self._window
+    def _trim(self, now: float) -> None:
+        self._times = [t for t in self._times if t > now - self._window]
+        horizon = now - self._repeat
+        self._queries = {k: v for k, v in self._queries.items() if v > horizon}
+
+    def _trim_local(self, mono_now: float) -> None:
+        while self._local and self._local[0] <= mono_now - self._window:
+            self._local.popleft()
+
+    # -- decisions
+
+    def _wait_needed(self, now: float, mono_now: float, key: str | None) -> float:
+        """Seconds until a start is allowed (0 or less = now)."""
+        waits = [0.0]
+        if len(self._times) >= self._limit:
+            waits.append(self._times[len(self._times) - self._limit] + self._window - now)
+        if len(self._local) >= self._limit:
+            waits.append(self._local[len(self._local) - self._limit] + self._window - mono_now)
+        if self._times:
+            waits.append(self._times[-1] + self._spacing - now)
+        if self._local:
+            waits.append(self._local[-1] + self._spacing - mono_now)
+        if key is not None and key in self._queries:
+            waits.append(self._queries[key] + self._repeat - now)
+        return max(waits)
 
     def available(self) -> int:
-        """Searches that could start right now without waiting."""
+        """Searches that could start in the current window without waiting for it to roll on."""
         with self._lock:
             self._trim(self._clock())
-            return max(0, self._limit - len(self._times))
+            self._trim_local(self._mono())
+            return max(0, self._limit - max(len(self._times), len(self._local)))
 
     def used(self) -> int:
-        """Searches started in the current window."""
+        """Searches started in the current window (by any S2S process, as far as this one knows)."""
         with self._lock:
             self._trim(self._clock())
             return len(self._times)
 
-    def _trim(self, now: float) -> None:
-        while self._times and self._times[0] <= now - self._window:
-            self._times.popleft()
-
-    def acquire(self, cancel: threading.Event) -> None:
-        """Block until one more search may start, then count it. Raises SearchCancelled."""
+    def acquire(self, cancel: threading.Event, query: str | None = None) -> None:
+        """Block until one more search (of `query`) may start, then record it. Raises SearchCancelled."""
+        key = _query_key(query) if query is not None else None
         while True:
             if cancel.is_set():
                 raise SearchCancelled()
             with self._lock:
-                now = self._clock()
-                self._trim(now)
-                if self.unlimited or len(self._times) < self._limit:
-                    self._times.append(now)
+                if self.unlimited:
                     self.total_started += 1
-                    self._save()
                     return
-                wait = self._times[len(self._times) - self._limit] + self._window - now
+                wait = self._try_start(key)
+                if wait <= 0:
+                    return
             step = min(max(wait, 0.01), 0.5)
             if self._sleep is not None:
                 self._sleep(step)
             else:
                 cancel.wait(step)
+
+    def _try_start(self, key: str | None) -> float:
+        """Record a start if allowed now and return 0; else return the wait. Caller holds self._lock."""
+        if self._path is None:
+            return self._decide(key)
+        lock = _FileLock(self._path)
+        try:
+            lock.__enter__()
+        except OSError:
+            return self._decide(key)  # ledger unusable: this process's own limits still apply
+        try:
+            self._load(self._clock())
+            wait = self._decide(key)
+            if wait <= 0:
+                try:
+                    self._save()
+                except OSError:
+                    pass
+            return wait
+        finally:
+            lock.__exit__(None, None, None)
+
+    def forget_query(self, query: str) -> None:
+        """The search was refused before it reached the server: it does not start a repeat cooldown.
+
+        (Its start still counts towards the limit: that only ever errs on the safe side.)"""
+        key = _query_key(query)
+        with self._lock:
+            self._queries.pop(key, None)
+            if self._path is not None:
+                try:
+                    with _FileLock(self._path):
+                        self._load(self._clock())
+                        self._queries.pop(key, None)
+                        self._save()
+                except OSError:
+                    pass
+
+    def _decide(self, key: str | None) -> float:
+        now, mono_now = self._clock(), self._mono()
+        self._trim(now)
+        self._trim_local(mono_now)
+        wait = self._wait_needed(now, mono_now, key)
+        if wait > 0:
+            return wait
+        self._times.append(now)
+        self._local.append(mono_now)
+        if key is not None:
+            self._queries[key] = now
+        self.total_started += 1
+        return 0.0
 
 
 class ConnectionGate:
@@ -395,23 +554,36 @@ def _path_words(filename: str) -> set[str]:
 
 
 class SearchCache:
-    """Responses of every search run so far, by normalised query text (one cache per search run + its retries).
+    """Responses of searches already run, by normalised query text.
 
-    A query is never sent twice: an identical one is answered from the cache (or waits for the identical one
-    that is in flight on another worker). A query whose words include all words of an already-run query is
-    first answered from that query's files, as Soulseek matches whole words in the path; this is used only
-    when it yields files, so a thin or truncated earlier answer never turns into a false "nothing found".
+    A query is never sent twice while its answer is cached: an identical one is answered from the cache (or
+    waits for the identical one in flight on another worker). A query whose words include all words of an
+    already-run query is first answered from that query's files, as Soulseek matches whole words in the path.
+    That is used only when the earlier answer was complete (fewer uploaders than the response limit, so no peer
+    was cut off) and it yields files, so a thin or truncated answer never hides results. With `ttl_s`, answers
+    expire (the shared cache keeps them long enough that "Search again" or a rules change never re-sends them).
     """
 
     class _Entry:
         def __init__(self) -> None:
             self.files: list[RemoteFile] | None = None
+            self.complete = False  # the answer was not cut off by the response limit
+            self.at = 0.0
             self.event = threading.Event()
 
-    def __init__(self) -> None:
+    def __init__(self, ttl_s: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
         self._lock = threading.Lock()
         self._entries: dict[str, SearchCache._Entry] = {}
+        self._ttl = ttl_s
+        self._clock = clock
         self.hits = 0  # queries answered without a new search
+
+    def _expire(self) -> None:
+        if self._ttl is None:
+            return
+        cutoff = self._clock() - self._ttl
+        for k in [k for k, e in self._entries.items() if e.files is not None and e.at < cutoff]:
+            del self._entries[k]
 
     def __len__(self) -> int:
         with self._lock:
@@ -422,7 +594,7 @@ class SearchCache:
         out: list[RemoteFile] = []
         seen: set[tuple[str, str, int]] = set()
         for k, e in self._entries.items():
-            if e.files is None or not e.files or not set(k.split()) <= words:
+            if e.files is None or not e.files or not e.complete or not set(k.split()) <= words:
                 continue
             for f in e.files:
                 ident = (f.username, f.filename, f.size)
@@ -431,10 +603,12 @@ class SearchCache:
                     out.append(f)
         return out or None
 
-    def get_or_run(self, query: str, run: Callable[[], list[RemoteFile]], cancel: threading.Event) -> list[RemoteFile]:
+    def get_or_run(self, query: str, run: Callable[[], list[RemoteFile]], cancel: threading.Event, *,
+                   response_limit: int | None = None) -> list[RemoteFile]:
         key = _query_key(query)
         while True:
             with self._lock:
+                self._expire()
                 entry = self._entries.get(key)
                 if entry is not None and entry.files is not None:
                     self.hits += 1
@@ -444,6 +618,7 @@ class SearchCache:
                     if derived is not None:
                         done = self._Entry()
                         done.files = derived
+                        done.at = self._clock()
                         done.event.set()
                         self._entries[key] = done
                         self.hits += 1
@@ -460,6 +635,9 @@ class SearchCache:
                         self._entries.pop(key, None)
                     entry.event.set()
                     raise
+                users = {f.username for f in files}
+                entry.complete = response_limit is not None and len(users) < response_limit
+                entry.at = self._clock()
                 entry.files = list(files)
                 entry.event.set()
                 return list(files)
@@ -470,6 +648,8 @@ class SearchCache:
 
 LIMITER = SearchRateLimiter()
 GATE = ConnectionGate()
+SHARED_CACHE_TTL_S = 30 * 60
+SHARED_CACHE = SearchCache(ttl_s=SHARED_CACHE_TTL_S)  # every run in this process; outlives REPEAT_COOLDOWN_S
 
 _CONNECTION_MARKERS = (
     "must be connected and logged in",
@@ -566,7 +746,8 @@ def run_search(
             while True:
                 try:
                     if cache is not None:
-                        found = cache.get_or_run(query, lambda: attempt(query, budget), cancel)
+                        found = cache.get_or_run(query, lambda: attempt(query, budget), cancel,
+                                                 response_limit=response_limit)
                     else:
                         found = attempt(query, budget)
                     break
@@ -611,7 +792,19 @@ def run_search(
 def _start_when_free(client, search_id, query, cancel, timeout_s, response_limit, file_limit, sleep, clock):
     """POST the search, waiting out slskd's 429 'busy' answers (e.g. a previous search still finishing)."""
     GATE.wait_until_connected(client, cancel)  # no search starts while Soulseek is down
-    LIMITER.acquire(cancel)  # stay under the server's search limit
+    LIMITER.acquire(cancel, query)  # stay under the server's search limit; never repeat a query quickly
+    try:
+        _post_search(client, search_id, query, cancel, timeout_s, response_limit, file_limit, sleep, clock)
+    except (SearchCancelled, SlskdBusyError):
+        LIMITER.forget_query(query)  # never reached the server
+        raise
+    except SlskdError as exc:
+        if any(m in str(exc).lower() for m in _CONNECTION_MARKERS):
+            LIMITER.forget_query(query)  # slskd refused it: not connected to the server
+        raise
+
+
+def _post_search(client, search_id, query, cancel, timeout_s, response_limit, file_limit, sleep, clock):
     deadline = clock() + BUSY_WAIT_S
     delay = 1.0
     while True:

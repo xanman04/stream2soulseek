@@ -71,6 +71,31 @@ def running_inside_packaged_app(app_dir=None, local_appdata=None) -> bool:
             pass
 
 
+def single_instance_lock(name: str = "Local\\S2S-single-instance"):
+    """Hold a named mutex for this process's lifetime; None when another S2S already holds it.
+
+    Two S2S windows would mean two Soulseek logins from one PC and two search budgets; the Soulseek server bans
+    for both. (Not Windows: always succeeds; the search ledger is still shared through its file lock.)
+    """
+    if sys.platform != "win32":
+        return object()
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, name)
+    if not handle:
+        return object()  # cannot tell: do not block the app
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+        return None
+    return handle
+
+
+ALREADY_RUNNING = ("S2S is already open. Use the window that is already running: two S2S windows would connect "
+                   "to Soulseek twice, which the Soulseek server can punish with a temporary ban.")
+
+
 PACKAGED_WARNING = (
     "S2S was started from inside another app's terminal. Windows redirects S2S's data (settings, saved logins "
     "and import history) to that app's private folder, so this session will not see or keep your normal S2S "
@@ -90,6 +115,12 @@ def main() -> int:
     from .ui.theme import apply_app_style
 
     apply_app_style(app)
+    instance = single_instance_lock()
+    if instance is None:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.information(None, "S2S", ALREADY_RUNNING)
+        return 0
     _gc_timer = install_main_thread_gc(app)  # noqa: F841 - must stay referenced for the app's lifetime
 
     from . import config
