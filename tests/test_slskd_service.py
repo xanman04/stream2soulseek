@@ -123,8 +123,12 @@ def test_render_config_is_loopback_and_holds_no_soulseek_login():
     assert "soulseek:" not in text and "SLSK" not in text
 
 
-def test_incomplete_dir_defaults_beside_downloads(settings):
-    assert Path(incomplete_dir_for(settings)) == Path(settings.slskd_downloads_dir).parent / "downloading"
+def test_incomplete_dir_defaults_to_the_app_data_folder(settings):
+    """Unfinished downloads stay out of sight: never a folder beside the user's music folders."""
+    from s2s import config
+
+    assert Path(incomplete_dir_for(settings)) == config.app_dir() / "slskd" / "incomplete"
+    assert Path(settings.slskd_downloads_dir).parent not in Path(incomplete_dir_for(settings)).parents
     settings.extra["slskd_incomplete_dir"] = r"D:\inc"
     assert incomplete_dir_for(settings) == r"D:\inc"
 
@@ -139,7 +143,8 @@ def test_start_passes_login_only_via_environment(tmp_path, settings, store):
     cfg = (tmp_path / "app" / "slskd.yml").read_text(encoding="utf-8")
     assert "test-secret-pw" not in cfg and "test-user" not in cfg
     assert store.get(SLSKD_API_KEY) in cfg  # API key generated once and reused
-    assert (tmp_path / "Soulseek" / "downloading").is_dir()
+    assert Path(incomplete_dir_for(settings)).is_dir()
+    assert not (tmp_path / "Soulseek" / "downloading").exists()  # nothing is created beside the music folders
     assert (tmp_path / "app" / "s2s-slskd.pid").read_text() == "4242"
     assert svc.running
     svc.stop()

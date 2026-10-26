@@ -107,11 +107,14 @@ def find_slskd_exe(settings: Settings) -> Path | None:
 
 
 def incomplete_dir_for(settings: Settings) -> str:
-    """settings.extra['slskd_incomplete_dir'], else a 'downloading' folder beside the downloads folder."""
+    """Where slskd keeps unfinished downloads: settings.extra['slskd_incomplete_dir'], else S2S's own data folder.
+
+    (It used to be a 'downloading' folder beside the downloads folder, which put an empty folder next to the
+    user's tracklist folders.)"""
     explicit = settings.extra.get("slskd_incomplete_dir")
     if explicit:
         return str(explicit)
-    return str(Path(settings.slskd_downloads_dir).parent / "downloading")
+    return str(config.app_dir() / "slskd" / "incomplete")
 
 
 # ------------------------------------------------------------------ config
