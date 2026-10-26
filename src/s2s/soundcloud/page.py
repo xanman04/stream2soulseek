@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+    QCheckBox, QHBoxLayout, QLabel, QProgressBar, QPushButton,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -12,6 +12,7 @@ from ..sources.soundcloud import SoundCloudSource
 from ..ui.workers import run_async
 from .client import SoundCloudAuthError, SoundCloudClient
 from .session import clear_session, load_session, normalize_session, save_session
+from ..ui.service_identity import ServiceAccountCard, ServiceHero, ServiceStatus, account_layout
 
 ENABLED_SETTING = "soundcloud_web_session_enabled"
 
@@ -33,18 +34,9 @@ class SoundCloudServicePage(QWidget):
         self._verifying = False
         self.title_label = QLabel("SoundCloud")
         self.title_label.setObjectName("pageTitle")
-        self.status = QLabel()
-        self.status.setWordWrap(True)
+        self.hero = ServiceHero("soundcloud", self.title_label, self)
+        self.status = ServiceStatus("SoundCloud", self)
         self.sign_out_btn = QPushButton("Sign out")
-        top = QHBoxLayout()
-        top.addWidget(self.status, 1)
-        top.addWidget(self.sign_out_btn)
-
-        self.account_page = QWidget()
-        self.account_card = QFrame()
-        self.account_card.setObjectName("accountCard")
-        self.account_card.setFrameShape(QFrame.Shape.StyledPanel)
-        self.account_card.setMaximumWidth(650)
         self.connection_value = QLabel()
         self.account_name = QLabel("—")
         self.session_value = QLabel("Session saved on this PC, protected by Windows")
@@ -54,17 +46,10 @@ class SoundCloudServicePage(QWidget):
         self.enable_check.setChecked(bool(ctx.settings.extra.get(ENABLED_SETTING, False)))
         self.enable_check.setToolTip("Uses SoundCloud's website session instead of a registered developer app.")
         self.reconnect_btn = QPushButton()
-        form = QFormLayout(self.account_card)
-        form.addRow("Connection", self.connection_value)
-        form.addRow("Account", self.account_name)
-        form.addRow("Session", self.session_value)
-        form.addRow("Access", self.access_value)
-        form.addRow(self.enable_check)
-        form.addRow(self.reconnect_btn)
-        account_layout = QVBoxLayout(self.account_page)
-        account_layout.setContentsMargins(0, 12, 0, 0)
-        account_layout.addWidget(self.account_card)
-        account_layout.addStretch(1)
+        self.account_card = ServiceAccountCard("soundcloud", connection=self.connection_value,
+            session=self.session_value, access=self.access_value, reconnect=self.reconnect_btn,
+            sign_out=self.sign_out_btn, account=self.account_name, extra=self.enable_check, parent=self)
+        self.account_page = account_layout(self.account_card, self)
         self.login_holder = QWidget()
         self.login_layout = QVBoxLayout(self.login_holder)
         self.login_layout.setContentsMargins(0, 0, 0, 0)
@@ -88,11 +73,12 @@ class SoundCloudServicePage(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.account_page)
         self.stack.addWidget(self.login_holder)
+        self.stack.currentChanged.connect(self.hero.set_page_index)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 16)
         layout.setSpacing(12)
-        layout.addWidget(self.title_label)
-        layout.addLayout(top)
+        layout.addWidget(self.hero)
+        layout.addWidget(self.status)
         layout.addWidget(self.stack, 1)
         self.reconnect_btn.clicked.connect(self.reconnect)
         self.sign_out_btn.clicked.connect(self.sign_out)
@@ -118,6 +104,7 @@ class SoundCloudServicePage(QWidget):
                                    else "No session saved")
         self.reconnect_btn.setText("Reconnect SoundCloud…" if connected else "Sign in to SoundCloud…")
         self.reconnect_btn.setEnabled(self.enable_check.isChecked())
+        self.account_card.update_state(connected, self.account_name.text())
         self.stack.setCurrentIndex(0)
         self.state_changed.emit()
 

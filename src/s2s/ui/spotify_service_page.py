@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from ..spotify.session import clear_session, load_session, save_session
 from ..sources.spotify import SpotifySource
 from .context import AppContext
 from .workers import run_async
+from .service_identity import ServiceAccountCard, ServiceHero, ServiceStatus, account_layout
 
 
 class SpotifyServicePage(QWidget):
@@ -27,34 +28,19 @@ class SpotifyServicePage(QWidget):
 
         self.title_label = QLabel("Spotify")
         self.title_label.setObjectName("pageTitle")
-        self.status = QLabel("Spotify: not signed in")
-        self.status.setWordWrap(True)
+        self.hero = ServiceHero("spotify", self.title_label, self)
+        self.status = ServiceStatus("Spotify", self)
         self.sign_out_btn = QPushButton("Sign out")
-        top = QHBoxLayout()
-        top.addWidget(self.status, 1)
-        top.addWidget(self.sign_out_btn)
-
-        self.account_page = QWidget()
-        self.account_card = QFrame()
-        self.account_card.setObjectName("accountCard")
-        self.account_card.setFrameShape(QFrame.Shape.StyledPanel)
-        self.account_card.setMaximumWidth(650)
         self.connection_value = QLabel("Not signed in")
         self.session_value = QLabel("Spotify session is stored protected on this PC")
         self.session_value.setWordWrap(True)
         self.access_value = QLabel("Read playlists and track details")
         self.account_name = QLabel("—")
-        form = QFormLayout(self.account_card)
-        form.addRow("Connection", self.connection_value)
-        form.addRow("Account", self.account_name)
-        form.addRow("Session", self.session_value)
-        form.addRow("Access", self.access_value)
         self.reconnect_btn = QPushButton("Sign in to Spotify…")
-        form.addRow(self.reconnect_btn)
-        al = QVBoxLayout(self.account_page)
-        al.setContentsMargins(0, 12, 0, 0)
-        al.addWidget(self.account_card)
-        al.addStretch(1)
+        self.account_card = ServiceAccountCard("spotify", connection=self.connection_value,
+            session=self.session_value, access=self.access_value, reconnect=self.reconnect_btn,
+            sign_out=self.sign_out_btn, account=self.account_name, parent=self)
+        self.account_page = account_layout(self.account_card, self)
 
         self.login_holder = QWidget()
         self.login_layout = QVBoxLayout(self.login_holder)
@@ -62,11 +48,12 @@ class SpotifyServicePage(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.account_page)
         self.stack.addWidget(self.login_holder)
+        self.stack.currentChanged.connect(self.hero.set_page_index)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 16)
         layout.setSpacing(12)
-        layout.addWidget(self.title_label)
-        layout.addLayout(top)
+        layout.addWidget(self.hero)
+        layout.addWidget(self.status)
         layout.addWidget(self.stack, 1)
         self.reconnect_btn.clicked.connect(self.reconnect)
         self.sign_out_btn.clicked.connect(self.sign_out)
@@ -82,6 +69,7 @@ class SpotifyServicePage(QWidget):
         connected = self.is_connected()
         self.status.setText(self.state_text())
         self.connection_value.setText("Connected" if connected else "Not signed in")
+        self.session_value.setText("Saved on this PC, protected by Windows" if connected else "No session saved")
         self.sign_out_btn.setEnabled(connected)
         self.reconnect_btn.setText("Reconnect Spotify…" if connected else "Sign in to Spotify…")
         if connected and self.stack.count():
@@ -89,6 +77,9 @@ class SpotifyServicePage(QWidget):
             name = (session or {}).get("account", {}).get("display_name") or "Spotify account"
             self.account_name.setText(name)
             self.stack.setCurrentIndex(0)
+        if not connected:
+            self.account_name.setText("—")
+        self.account_card.update_state(connected, self.account_name.text())
         self.state_changed.emit()
 
     def enter(self) -> None:
