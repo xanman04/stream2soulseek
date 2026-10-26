@@ -95,15 +95,14 @@ def signed_message(archive_name: str, sha256: str) -> bytes:
 
 
 def verify_signature(archive_name: str, sha256: str, signature_b64: str, public_key_b64: str = PUBLIC_KEY_B64) -> bool:
-    from cryptography.exceptions import InvalidSignature
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from .ed25519 import verify  # plain Python: no native crypto library in the app (see ed25519.py)
 
     try:
-        key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
-        key.verify(base64.b64decode(signature_b64.strip()), signed_message(archive_name, sha256))
-        return True
-    except (InvalidSignature, ValueError):
+        key = base64.b64decode(public_key_b64, validate=True)
+        signature = base64.b64decode(signature_b64.strip(), validate=True)
+    except ValueError:
         return False
+    return verify(key, signed_message(archive_name, sha256), signature)
 
 
 def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=None) -> Path:

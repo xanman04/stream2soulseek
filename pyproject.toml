@@ -16,11 +16,10 @@ dependencies = [
     "curl_cffi>=0.15,<0.17",
     "websockets>=12,<18",
     "keyring>=24; sys_platform == 'darwin'",  # saved logins live in the macOS Keychain
-    "cryptography>=42",  # verifies the signature of in-app updates
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "cryptography>=42"]  # cryptography: signing releases and checking s2s.ed25519 in tests
 
 [project.gui-scripts]
 s2s = "s2s.app:main"
