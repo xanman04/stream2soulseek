@@ -59,6 +59,21 @@ def _unresolved(track: AppleTrack, note: str) -> MatchResult:
     return MatchResult(track, MatchStatus.UNRESOLVED, None, note=note)
 
 
+NOT_FOUND_PREFIX = "Not found after"
+
+
+def searched_note(tried: list[str]) -> str:
+    """'Not found after 3 searches: "a", "b", "c"' (the note kept on a track nothing usable was found for)."""
+    n = len(tried)
+    return f"{NOT_FOUND_PREFIX} {n} search{'es' if n != 1 else ''}: " + ", ".join(f'"{q}"' for q in tried)
+
+
+def searched_queries(note: str) -> list[str]:
+    """The searches listed by `searched_note` (empty when the note has none)."""
+    i = note.find(NOT_FOUND_PREFIX)
+    return re.findall(r'"([^"]*)"', note[i:]) if i >= 0 else []
+
+
 def declined_peer_reasons(store: Store) -> dict[str, str]:
     """casefolded username -> review flag text, for peers that declined us before (see Store peer memory)."""
     out: dict[str, str] = {}
@@ -131,6 +146,7 @@ def search_and_match(
             return None
         try:
             warnings: list[str] = []
+            tried: list[str] = []
 
             def ranked(found):
                 return match(track, found, settings.match_policy, declined_peers)
@@ -140,6 +156,8 @@ def search_and_match(
                 response_limit=settings.response_limit, file_limit=settings.file_limit,
                 has_eligible=lambda found: _source_count(ranked(found), preferred=True) >= TARGET_SOURCES,
                 fast_timeout_s=QUICK_SEARCH_S,
+                has_usable=lambda found: _source_count(ranked(found)) >= 1,
+                tried=tried,
                 needs_deep_search=lambda found: (
                     _source_count(ranked(found)) < MIN_SOURCES
                     or _source_count(ranked(found), preferred=True) == 0
@@ -161,6 +179,8 @@ def search_and_match(
                 if backups < MIN_SOURCES - 1:
                     summary += "; fewer than the target of 3-5 backups were found"
                 result = replace(result, note="; ".join(x for x in (result.note, summary) if x))
+            if result.best is None and result.status == MatchStatus.UNRESOLVED and tried:
+                result = replace(result, note="; ".join(x for x in (result.note, searched_note(tried)) if x))
             if warnings:
                 result = replace(result, note="; ".join(x for x in (result.note, *warnings) if x))
             return result
@@ -185,6 +205,51 @@ def search_and_match(
             ex.shutdown(wait=True, cancel_futures=True)
     results.sort(key=lambda r: (r.track.position, r.track.apple_id))
     return results
+
+
+def search_track_custom(
+    store: Store,
+    client,
+    import_id: str,
+    track: AppleTrack,
+    query: str,
+    settings: Settings,
+    *,
+    cancel: threading.Event | None = None,
+) -> MatchResult:
+    """Search ONE track with the user's own words and merge the files into what is already stored.
+
+    One full-budget query; the new files are ranked together with the stored candidates under the current
+    matching rules (same declined-peer handling as `search_and_match`) and the merged result replaces the
+    stored one. Never enqueues anything. Raises SlskdError/SearchCancelled; nothing is stored then.
+    """
+    query = " ".join(query.split())
+    if not query:
+        raise ValueError("empty search")
+    if store.get_import(import_id) is None:
+        raise ValueError("unknown import")
+    cancel = cancel or threading.Event()
+    found = run_search(
+        client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
+        response_limit=settings.response_limit, file_limit=settings.file_limit,
+        queries=[query],
+    )
+    old = next((r for r in store.load_match_results(import_id) if r.track.apple_id == track.apple_id), None)
+    files = list(found)
+    previous: list[str] = []
+    if old is not None:
+        previous = searched_queries(old.note)
+        for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected):
+            files.append(c.file)
+    result = match(track, files, settings.match_policy, declined_peer_reasons(store))
+    tried = previous + [query] if previous else [query]
+    if result.best is not None:
+        backups = backup_source_count(result)
+        result = replace(result, note="; ".join(x for x in (result.note, f"{backups} backup uploaders available") if x))
+    elif result.status == MatchStatus.UNRESOLVED:
+        result = replace(result, note="; ".join(x for x in (result.note, searched_note(tried)) if x))
+    store.save_match_results(import_id, [result])
+    return result
 
 
 def fill_unsearched(tracks: list[AppleTrack], results: list[MatchResult]) -> list[MatchResult]:

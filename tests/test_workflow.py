@@ -424,7 +424,7 @@ def test_rejected_primary_does_not_hide_eligible_fallback(env):
     client.get_search_responses = responses
     res, _ = run(env, client, [track])
     assert res[0].best.file.filename == right.filename
-    assert len(client.texts) == 2
+    assert len(client.texts) == 3  # stops once something usable is in hand (past the first three rungs)
     assert any(c.file.filename == wrong.filename for c in res[0].rejected)
 
 
@@ -433,7 +433,8 @@ def test_all_rejected_queries_remain_unresolved(env):
     res, _ = run(env, client, [AppleTrack("remix", "Song (Bob Remix)", "Artist")])
     assert res[0].status == MatchStatus.UNRESOLVED
     assert res[0].best is None
-    assert len(client.texts) == 2
+    assert len(client.texts) == 4  # the whole ladder was tried
+    assert res[0].note.startswith("1 files, none eligible; Not found after 4 searches:")
 
 
 @pytest.mark.parametrize("users,enough,needs_deep,backups", [

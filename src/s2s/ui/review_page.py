@@ -17,15 +17,16 @@ from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSortFilter
 from PySide6.QtGui import QBrush, QFont, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
-from .. import config, organize
+from .. import config, organize, workflow
 from ..approval import create_approval
 from ..matching.formats import ext_of
 from ..matching.versions import parse_title
 from ..models import Candidate, MatchResult, MatchStatus, RemoteFile, SelectionItem, Tier
 from ..queue_recovery import approve_backups, proposed_backups
+from ..slskd.search import build_queries
 from . import theme
 from .context import AppContext
 from .util import SORT_ROLE, fmt_duration_ms, fmt_mib, fmt_seconds, fold, item, make_table, show_error
@@ -146,7 +147,16 @@ def skipped_label(note: str) -> str:
     return "Skipped: " + note if note else "Skipped"
 
 
+def split_searched(note: str) -> tuple[str, list[str]]:
+    """(note without the searched list, the searches tried) for notes written by the search step."""
+    i = note.find(workflow.NOT_FOUND_PREFIX)
+    if i < 0:
+        return note, []
+    return note[:i].rstrip("; ").strip(), workflow.searched_queries(note)
+
+
 def not_found_detail(note: str) -> str:
+    note, _tried = split_searched(note)
     if not note or note == "no files returned":
         return "Soulseek returned no files for this search."
     if m := re.match(r"(\d+) files, none eligible", note):
@@ -191,6 +201,7 @@ class ReviewModel(QAbstractTableModel):
         self.locked = False
         self.skip_flagged = True  # MatchPolicy.skip_flagged_by_default
         self.duration_tolerance_s = 15  # MatchPolicy.duration_tolerance_s: tints the Length cell
+        self.searching: set[str] = set()  # apple ids with a custom search running
 
     # ------------------------------------------------------------ data
 
@@ -207,6 +218,19 @@ class ReviewModel(QAbstractTableModel):
             self.rows.append(row)
         self.endResetModel()
         self.checks_changed.emit()
+
+    def replace_result(self, row: int, res: MatchResult) -> None:
+        """Swap one track's result (after a custom search), re-ticked by the normal defaults."""
+        old = self.rows[row]
+        chosen = res.best if res.status == MatchStatus.PROPOSED else None
+        new = ReviewRow(res, chosen, existing=old.existing)
+        new.checked = bool(chosen is not None and not (chosen.flagged and self.skip_flagged))
+        self.rows[row] = new
+        self.row_changed(row)
+        self.checks_changed.emit()
+
+    def row_changed(self, row: int) -> None:
+        self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1))
 
     def set_locked(self, locked: bool) -> None:
         self.locked = locked
@@ -334,6 +358,8 @@ class ReviewModel(QAbstractTableModel):
 
     def _match_text(self, row: ReviewRow) -> str:
         res = row.result
+        if res.track.apple_id in self.searching:
+            return "Searching…"
         if res.status == MatchStatus.SKIPPED:
             return skipped_label(res.note)
         if row.chosen is None:
@@ -686,9 +712,20 @@ class ReviewPage(QWidget):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(2, 2)
         grid.setRowStretch(len(self.field_names) + 1, 1)
+        self.tried_label = theme.subtle(QLabel(""))
+        self.tried_label.setWordWrap(True)
+        self.tried_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.tried_label.setVisible(False)
+        self.custom_btn = QPushButton("Search again with my own words…")
+        self.custom_btn.setToolTip("Soulseek only matches the words you type. Try the track the way you would "
+                                   "by hand: results are added to this track's files, nothing is downloaded.")
+        self.custom_btn.setEnabled(False)
+        self.custom_btn.clicked.connect(self.search_custom)
         left = QVBoxLayout()
         left.addWidget(self.detail_title)
         left.addWidget(self.why)
+        left.addWidget(self.tried_label)
+        left.addWidget(self.custom_btn, 0, Qt.AlignmentFlag.AlignLeft)
         left.addLayout(grid, 1)
 
         self.alt_title = theme.subtle(QLabel("Other files for this track"))
@@ -958,6 +995,8 @@ class ReviewPage(QWidget):
                 lab.setStyleSheet("")
             self.path_edit.setText("")
             self.alt_hint.setText("")
+            self.tried_label.setVisible(False)
+            self.custom_btn.setEnabled(False)
             self._update_use_button()
             return
         r = self.model.rows[row]
@@ -967,7 +1006,14 @@ class ReviewPage(QWidget):
         counts = f"{n_alt} alternative file{'s' if n_alt != 1 else ''}" + (f", {n_rej} rejected" if n_rej else "")
         self.detail_title.setText(f"{t.name} — {t.artist}: {counts}")
         kind, text = self._explain(r)
+        if t.apple_id in self.model.searching:
+            kind, text = "info", "Searching…"
         theme.set_banner(self.why, text, kind)
+        _plain, tried = split_searched(res.note)
+        show_tried = bool(tried) and ch is None and res.status == MatchStatus.UNRESOLVED
+        self.tried_label.setText("Searched for: " + "; ".join(f"“{q}”" for q in tried) if show_tried else "")
+        self.tried_label.setVisible(show_tried)
+        self.custom_btn.setEnabled(t.apple_id not in self.model.searching)
 
         # requested vs proposed
         want = None if t.duration_ms is None else round(t.duration_ms / 1000)
@@ -1083,6 +1129,82 @@ class ReviewPage(QWidget):
         row, cand = sel
         if self.model.choose_candidate(row, cand) and self._current_row() == row:
             self._show_detail(row)
+
+    # ------------------------------------------------------------ custom search
+
+    def ask_custom_query(self, default: str) -> str | None:
+        """Ask for the words to search. Separate method so tests can replace the dialog."""
+        text, ok = QInputDialog.getText(self, "Search again", "Search Soulseek for:", QLineEdit.EchoMode.Normal,
+                                        default)
+        return text if ok else None
+
+    def _default_custom_query(self, res: MatchResult) -> str:
+        ladder = build_queries(res.track)
+        tried = set(split_searched(res.note)[1])
+        return next((q for q in ladder if q not in tried), ladder[0] if ladder else "")
+
+    def search_custom(self) -> None:
+        """Search the selected track with the user's own words; results join the track's files. Never queues."""
+        row = self._current_row()
+        if row < 0 or row >= len(self.model.rows):
+            return
+        res = self.model.rows[row].result
+        track = res.track
+        if self._locked:
+            self._flash("Downloads were already queued for this review, so it cannot be changed. "
+                        "Start a new search to look again.", "warn")
+            return
+        if self.replacement:
+            self._flash("This review only offers other sources for failed downloads; searching again is not "
+                        "available here.", "warn")
+            return
+        if self._busy or track.apple_id in self.model.searching:
+            self._flash("Please wait until the current action finishes.", "info")
+            return
+        query = self.ask_custom_query(self._default_custom_query(res))
+        query = " ".join((query or "").split())
+        import_id, generation = self.ctx.import_id, self._load_generation
+        if not query or import_id is None:
+            return
+        self._notice = None
+        self._refresh_banner()
+        self.model.searching.add(track.apple_id)
+        self.model.row_changed(row)
+        self._show_detail(row)
+
+        def work():
+            client = self.ctx.slskd_client()
+            return workflow.search_track_custom(self.ctx.store, client, import_id, track, query,
+                                                self.ctx.settings)
+
+        def finish() -> int:
+            self.model.searching.discard(track.apple_id)
+            return next((i for i, r in enumerate(self.model.rows) if r.result.track.apple_id == track.apple_id), -1)
+
+        def done(result):
+            idx = finish()
+            if generation != self._load_generation or import_id != self.ctx.import_id or idx < 0:
+                return
+            self._notice = None
+            self.model.replace_result(idx, result)
+            if self._current_row() == idx:
+                self._show_detail(idx)
+            self._refresh_banner()
+            self._update_footer()
+
+        def failed(exc):
+            idx = finish()
+            if idx >= 0:
+                self.model.row_changed(idx)
+                if self._current_row() == idx:
+                    self._show_detail(idx)
+            self._flash(f"Search failed: {workflow.scrub(exc)}", "error")
+
+        run_async(self, work, done, failed)
+
+    def _flash(self, text: str, kind: str) -> None:
+        self._notice = (text, kind)
+        self._refresh_banner()
 
     # ------------------------------------------------------------ banner / footer / confirm
 
