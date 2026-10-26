@@ -17,6 +17,7 @@ from ..slskd.service import (
     SlskdService, SoulseekCredentials, SoulseekLoginError, load_credentials, save_credentials,
     validate_credentials,
 )
+from .theme import accent
 from .workers import run_async
 
 
@@ -44,7 +45,7 @@ class SoulseekLoginDialog(QDialog):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.error = QLabel(message)
         self.error.setWordWrap(True)
-        self.error.setStyleSheet("color: #b00020;")
+        self.error.setStyleSheet(f"color: {accent('error').name()};")
 
         form = QFormLayout()
         form.addRow("Username", self.username)

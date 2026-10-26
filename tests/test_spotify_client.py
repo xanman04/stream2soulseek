@@ -196,3 +196,36 @@ def test_tracks_fetched_with_bare_playlist_id(monkeypatch):
     tracks = client.get_playlist_tracks("spotify:playlist:01234567890123456789")
     client.close()
     assert seen == ["01234567890123456789"] and [t.name for t in tracks] == ["A"]
+
+
+def test_unauthorised_library_response_is_an_auth_error():
+    body = {"data": {"me": None}, "errors": [{"message": "Exception while fetching data (/me) : User is not authorized"}]}
+    with pytest.raises(SpotifyAuthError):
+        SpotifyClient._library_page(body)
+
+
+def test_validation_falls_back_to_library_when_profile_endpoint_is_unhelpful(monkeypatch):
+    # The account-settings endpoint answers 400 even anonymously; a working library page proves the session.
+    def handler(request):
+        return httpx.Response(400, json={"error": "oops_something_went_wrong"})
+
+    client = SpotifyClient(COOKIES, transport=httpx.MockTransport(handler))
+    pages = []
+    monkeypatch.setattr(client, "_private_playlist", lambda: object())
+    monkeypatch.setattr(SpotifyClient, "_library_query",
+                        staticmethod(lambda private, offset, limit=50: pages.append((offset, limit)) or
+                                     {"data": {"me": {"library": {"items": {"totalCount": 0, "items": []}}}}}))
+    assert client.validate_session() == {"display_name": None}
+    assert pages == [(0, 1)]
+
+    monkeypatch.setattr(SpotifyClient, "_library_query",
+                        staticmethod(lambda private, offset, limit=50: {"data": {"me": None}}))
+    with pytest.raises(SpotifyAuthError):
+        client.validate_session()
+    client.close()
+
+
+def test_generic_error_playlist_gets_a_plain_message():
+    body = {"data": {"playlistV2": {"__typename": "GenericError", "message": "Failed to fetch playlist"}}}
+    with pytest.raises(SpotifyError, match="private, deleted or unavailable"):
+        SpotifyClient._playlist_content(body)

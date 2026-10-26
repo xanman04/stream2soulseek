@@ -1,64 +1,101 @@
-"""Step 5: transfer progress, retry/cancel, and verified import into the chosen library."""
+"""Step 5: Downloads & import. One row per selected track, one glance to see where everything is."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QMenu, QMessageBox, QProgressBar, QPushButton,
+                               QVBoxLayout, QWidget)
 
 from .. import workflow
 from ..models import ImportOutcome, TransferState
-from ..rejections import classify, pending_declined
+from ..rejections import RejectionKind, classify, pending_declined
 from .context import AppContext
+from .spectrogram_dialog import SpectrogramDialog
+from .theme import button_text, chip, primary, set_banner, set_chip, subtle, tint
 from .util import fmt_mib, item, make_table, show_error
 from .workers import run_async
 
 REFRESH_MS = 3000
 APPROVAL_ROLE = Qt.ItemDataRole.UserRole + 1
-(COL_TRACK, COL_SET, COL_PEER, COL_FILE, COL_SIZE, COL_STATE, COL_RAW, COL_PCT, COL_PROBLEM, COL_ERROR) = range(10)
+(COL_NUM, COL_TRACK, COL_STATUS, COL_SOURCE, COL_QUALITY) = range(5)
+
+# Where a track is, for the counts at the top.
+FOLDER, DOWNLOADING, WAITING, ATTENTION, IDLE = "folder", "downloading", "waiting", "attention", "idle"
+_IMPORTED = {ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT}
 
 
-def completion_feedback(*, relevant_ids: set[str], states: dict[str, TransferState], outcomes: dict[str, ImportOutcome],
-                        paths: dict[str, str], refresh_error: str | None = None,
-                        process_error: str | None = None, import_errors: bool = False,
-                        archive_errors: bool = False, archive_waiting: bool = False,
-                        pending_declines: bool = False) -> tuple[str, str, str]:
-    """Return (kind, headline, detail) for the currently relevant approved tracks."""
-    total = len(relevant_ids)
-    completed = sum(states.get(track_id) == TransferState.SUCCEEDED for track_id in relevant_ids)
-    failed = sum(states.get(track_id) == TransferState.FAILED for track_id in relevant_ids)
-    active = any(states.get(track_id) in (TransferState.QUEUED, TransferState.IN_PROGRESS)
-                 for track_id in relevant_ids)
-    unknown = any(states.get(track_id) not in (TransferState.QUEUED, TransferState.IN_PROGRESS,
-                                               TransferState.SUCCEEDED, TransferState.FAILED)
-                  for track_id in relevant_ids)
-    imported = {ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT}
-    imported_ids = {track_id for track_id in relevant_ids if outcomes.get(track_id) in imported}
-    bad_outcomes = {ImportOutcome.CONFLICT, ImportOutcome.INVALID}
-    issues = bool(refresh_error or process_error or failed or import_errors or archive_errors or pending_declines
-                   or any(outcomes.get(track_id) in bad_outcomes for track_id in relevant_ids))
-    if total and completed == total and len(imported_ids) == total and not issues and not archive_waiting:
-        folders = {paths.get(track_id, "") for track_id in imported_ids} - {""}
-        location = next(iter(folders)) if len(folders) == 1 else ""
-        detail = f"{total} track{'s' if total != 1 else ''} imported"
-        if location:
-            detail += f" to {location}"
-        return "success", "Import complete", detail
-    if refresh_error or unknown:
-        return "issues", "Transfer status unavailable", "Check the Soulseek connection and Settings, then refresh the transfers."
-    if active:
-        if issues or archive_waiting:
-            return "issues", "In progress with issues", "Some transfers need attention while other downloads are still running."
-        return "progress", "Downloads are still in progress", f"{completed} of {total} downloads finished."
-    if total and completed == total and len(imported_ids) < total and not issues:
-        return "needed", "Downloads finished — import needed", "Completed downloads are waiting to be imported. Use Process completed now to import them."
-    if issues:
-        return "issues", "Finished with issues", "See the transfer, import and archive details below for the affected items and next steps."
-    if archive_waiting:
-        return "issues", "Downloads and imports finished", "Peer folders are still waiting to be archived."
-    return "progress", "Downloads are not complete yet", f"{completed} of {total} downloads finished."
+@dataclass(frozen=True)
+class TrackStatus:
+    text: str  # plain words for the Status column
+    kind: str  # theme kind for the row tint
+    group: str  # FOLDER / DOWNLOADING / WAITING / ATTENTION / IDLE
+    detail: str = ""  # tooltip: reasons, raw slskd state
+    fixable: bool = False  # failed transfer a different source could fix
+    declined: bool = False  # the uploader refused (subset of fixable)
+
+
+def _lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:]
+
+
+def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
+    """Merge a track's newest transfer and its import outcome into one plain-English status."""
+    if rec is None:
+        return TrackStatus("Starting…", "info", DOWNLOADING)
+    s = rec.status
+    raw = getattr(s, "raw_state", "") or ""
+    error = getattr(s, "error", None)
+    raw_line = f"slskd: {raw}" + (f" ({error})" if error else "") if raw or error else ""
+    outcome = getattr(result, "outcome", None)
+    if s.state == TransferState.SUCCEEDED:
+        if outcome in _IMPORTED:
+            final = getattr(result, "final_path", None) or ""
+            return TrackStatus("In folder ✓", "ok", FOLDER, final)
+        if outcome == ImportOutcome.CONFLICT:
+            why = getattr(result, "detail", "") or "a different file already has this name"
+            return TrackStatus("Downloaded, check needed: file conflict", "warn", ATTENTION,
+                               f"{why}\nNothing was overwritten.")
+        if outcome == ImportOutcome.INVALID:
+            why = getattr(result, "detail", "") or "the file failed verification"
+            return TrackStatus(f"Downloaded, check needed: {_lower_first(why)[:70]}", "warn", ATTENTION,
+                               f"{why}\nNothing was copied into your folder.")
+        if auto_import:
+            return TrackStatus("Copying…", "info", DOWNLOADING, raw_line)
+        return TrackStatus("Downloaded, not copied yet", "info", DOWNLOADING,
+                           "Use “Copy finished downloads” to move it into your folder.")
+    if s.state == TransferState.IN_PROGRESS:
+        pct = float(getattr(s, "percent", 0) or 0)
+        if pct > 0:
+            return TrackStatus(f"Downloading {pct:.0f}%", "info", DOWNLOADING, raw_line)
+        return TrackStatus("Starting…", "info", DOWNLOADING, raw_line)
+    if s.state == TransferState.QUEUED:
+        if "locally" in raw.lower():
+            return TrackStatus("Starting…", "info", DOWNLOADING, raw_line)
+        return TrackStatus("Waiting on uploader", "warn", WAITING,
+                           "The uploader has not started sending yet.\n" + raw_line)
+    if s.state == TransferState.FAILED:
+        rej = classify(raw, error) or classify("Completed, Errored", error)
+        tip = f"{rej.explanation}\n{rej.action}\n\nRaw: {rej.raw or '(none)'}" if rej else raw_line
+        if rej is None:
+            return TrackStatus("Failed", "error", ATTENTION, tip, fixable=True)
+        if rej.kind == RejectionKind.CANCELLED_BY_USER:
+            return TrackStatus("Cancelled by you", "error", ATTENTION, tip, fixable=True)
+        if rej.kind == RejectionKind.DECLINED_OTHER:
+            return TrackStatus("Declined by uploader", "error", ATTENTION, tip, fixable=True, declined=True)
+        if rej.declined:
+            return TrackStatus(f"Declined: {_lower_first(rej.label)}", "error", ATTENTION, tip,
+                               fixable=True, declined=True)
+        if rej.kind == RejectionKind.OTHER:
+            more = f": {error[:60]}" if error else ""
+            return TrackStatus(f"Failed{more}", "error", ATTENTION, tip, fixable=True)
+        return TrackStatus(f"Failed: {_lower_first(rej.label)}", "error", ATTENTION, tip, fixable=True)
+    return TrackStatus("Not started" if s.state == TransferState.NOT_QUEUED else "Status unknown",
+                       "muted", IDLE, raw_line)
 
 
 def set_label(index: int) -> str:
@@ -76,20 +113,17 @@ def latest_approval_by_track(approvals) -> dict[str, str]:
     return latest
 
 
-def can_start_another_import(*, kind: str, relevant_ids: set[str], states: dict[str, TransferState],
-                             refresh_error: str | None = None, archive_waiting: bool = False) -> bool:
-    """Offer a new import only after success or a fully terminal, refreshed issue state."""
-    terminal = bool(relevant_ids) and all(
-        states.get(track_id) in (TransferState.SUCCEEDED, TransferState.FAILED) for track_id in relevant_ids)
-    return kind == "success" or (kind == "issues" and terminal and not refresh_error and not archive_waiting)
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
 class TransfersPage(QWidget):
     find_another_source = Signal()  # user asked for a replacement review (nothing is queued by this)
     new_import_requested = Signal()  # parent owns reset and navigation; this page performs no workflow mutation
+    check_requested = Signal()  # everything is in the folder: go verify it against the playlist and export
     history_requested = Signal()
-    settings_requested = Signal()
-    review_requested = Signal()
+    settings_requested = Signal()  # kept for compatibility; this page no longer has a Settings button
+    review_requested = Signal()  # failed (not only declined) tracks need a reviewed replacement
     queued_backups_requested = Signal()
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
@@ -101,88 +135,129 @@ class TransfersPage(QWidget):
         self._states: dict[tuple[str, str], TransferState] = {}  # (approval id, apple id) -> state
         self._fingerprints: dict[str, str] = {}  # approval id -> fingerprint (for retry)
         self._approval_ids: list[str] = []
-
-        self.info = QLabel("No approved downloads yet.")
-        self.info.setWordWrap(True)
-        self.completion = QLabel("")
-        self.completion.setWordWrap(True)
-        self.completion.setFrameShape(QFrame.Shape.StyledPanel)
-        self.completion.setVisible(False)
-        self.new_import_btn = QPushButton("Start another import")
-        self.new_import_btn.setVisible(False)
-        self.new_import_btn.setEnabled(False)
-        self.history_btn = QPushButton("Import history / outstanding tracks")
-        self.review_btn = QPushButton("Review alternatives")
-        self.settings_btn = QPushButton("Settings...")
-        self.table = make_table(["Track", "Set", "Peer", "Remote file", "Size (MiB)", "State", "slskd state", "%",
-                                 "Problem", "Error (raw)"])
-        self.declined_label = QLabel("")
-        self.declined_label.setWordWrap(True)
-        self.declined_btn = QPushButton("Find another source...")
-        self.declined_banner = QFrame()
-        self.declined_banner.setFrameShape(QFrame.Shape.StyledPanel)
-        bl = QHBoxLayout(self.declined_banner)
-        bl.addWidget(self.declined_label, 1)
-        bl.addWidget(self.declined_btn)
-        self.declined_banner.setVisible(False)
-        self.retry_btn = QPushButton("Retry failed (same file)")
-        self.cancel_btn = QPushButton("Cancel transfer")
-        self.refresh_btn = QPushButton("Refresh now")
-        self.import_btn = QPushButton("Process completed now")
-        self.queued_backups_btn = QPushButton("Review queued backups...")
-        self.queued_backups_btn.setEnabled(False)
-        self.recovery_info = QLabel("")
-        self.recovery_info.setWordWrap(True)
-        self.import_table = make_table(["Track", "Outcome", "Final file", "Detail"])
-        self.archive_table = make_table(["Peer", "Archive status"])
+        self._final_paths: dict[str, str] = {}  # apple id -> final file in the library
+        self._fix_mode = "declined"  # which signal the fix button emits
         self._blocked: dict[str, str] = {}
         self._archive_errors: dict[str, str] = {}
         self._manual = False
-        row = QHBoxLayout()
-        for b in (self.retry_btn, self.cancel_btn, self.refresh_btn):
-            row.addWidget(b)
-        row.addStretch(1)
-        row.addWidget(self.import_btn)
+        self._active = 0  # tracks still downloading, waiting or not started (from the last refresh)
+
+        # header: one bar, a few counts
+        self.progress = QProgressBar()
+        self.progress.setTextVisible(True)
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat("")
+        self.chip_folder = chip("", "ok")
+        self.chip_downloading = chip("", "info")
+        self.chip_waiting = chip("", "warn")
+        self.chip_attention = chip("", "error")
+        self._chips = (self.chip_folder, self.chip_downloading, self.chip_waiting, self.chip_attention)
+        for c in self._chips:
+            c.setVisible(False)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setFlat(True)
+        self.info = subtle(QLabel("No approved downloads yet."))
+        self.info.setWordWrap(True)
+
+        # one short banner, only when something needs the user
+        self.banner = QLabel("")
+        self.banner.setWordWrap(True)
+        self.banner.setVisible(False)
+        self.fix_btn = QPushButton("Find another source…")
+        self.fix_btn.setVisible(False)
+        self.check_btn = QPushButton(button_text("Check & export playlist →"))
+        self.check_btn.setVisible(False)
+
+        self.table = make_table(["#", "Track", "Status", "Source", "Quality"])
+        hh = self.table.horizontalHeader()
+        hh.setStretchLastSection(False)
+        hh.setSectionResizeMode(COL_NUM, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(COL_TRACK, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(COL_STATUS, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(COL_SOURCE, QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(COL_QUALITY, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setColumnWidth(COL_STATUS, 300)
+        self.table.setColumnWidth(COL_SOURCE, 140)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        # actions for the selected track
+        self.retry_btn = QPushButton("Retry same file")
+        self.cancel_btn = QPushButton("Cancel")
+        self.folder_btn = QPushButton("Show in folder")
+        self.spectrogram_btn = QPushButton("Spectrogram…")
+        self.spectrogram_btn.setToolTip("Check the real quality of a finished track (select a track that is in "
+                                        "your folder).")
+        self.queued_backups_btn = QPushButton("Try my approved backups…")
+        self.queued_backups_btn.setVisible(False)
+        self.import_btn = QPushButton("Copy finished downloads")  # only when automatic copying is off
+        self.import_btn.setVisible(False)
+
+        # secondary: peer-folder archive status, collapsed
+        self.details_btn = QPushButton("")
+        self.details_btn.setFlat(True)
+        self.details_btn.setCheckable(True)
+        self.details_btn.setVisible(False)
+        self.archive_table = make_table(["Peer", "Archive status"])
+        self.archive_table.setVisible(False)
+        self.archive_table.setMaximumHeight(160)
+
+        self.history_btn = QPushButton("Import history")
+        self.history_btn.setFlat(True)
+        self.history_btn.setEnabled(False)
+        self.new_import_btn = QPushButton("Start another playlist")
+        self.new_import_btn.setFlat(True)
+        self.new_import_btn.setVisible(False)
+        self.new_import_btn.setEnabled(False)
+
         lay = QVBoxLayout(self)
+        lay.addWidget(self.progress)
+        chips = QHBoxLayout()
+        for c in self._chips:
+            chips.addWidget(c)
+        chips.addStretch(1)
+        chips.addWidget(self.refresh_btn)
+        lay.addLayout(chips)
         lay.addWidget(self.info)
-        completion_row = QHBoxLayout()
-        completion_row.addWidget(self.completion, 1)
-        completion_row.addWidget(self.new_import_btn)
-        completion_row.addWidget(self.history_btn)
-        completion_row.addWidget(self.review_btn)
-        completion_row.addWidget(self.settings_btn)
-        lay.addLayout(completion_row)
-        lay.addWidget(self.declined_banner)
-        lay.addWidget(self.table, 3)
-        lay.addLayout(row)
-        recovery_row = QHBoxLayout()
-        recovery_row.addWidget(self.queued_backups_btn)
-        recovery_row.addWidget(self.recovery_info, 1)
-        lay.addLayout(recovery_row)
-        lay.addWidget(QLabel("Import results (conflicts are shown, never resolved automatically):"))
-        lay.addWidget(self.import_table, 2)
-        lay.addWidget(QLabel("Peer folders (moved into the archive folder once everything from that peer is "
-                             "imported and finished):"))
-        lay.addWidget(self.archive_table, 1)
+        banner_row = QHBoxLayout()
+        banner_row.addWidget(self.banner, 1)
+        banner_row.addWidget(self.fix_btn)
+        banner_row.addWidget(self.check_btn)
+        lay.addLayout(banner_row)
+        lay.addWidget(self.table, 1)
+        actions = QHBoxLayout()
+        for b in (self.retry_btn, self.cancel_btn, self.folder_btn, self.spectrogram_btn, self.queued_backups_btn):
+            actions.addWidget(b)
+        actions.addStretch(1)
+        actions.addWidget(self.import_btn)
+        lay.addLayout(actions)
+        lay.addWidget(self.details_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.archive_table)
+        footer = QHBoxLayout()
+        footer.addWidget(self.history_btn)
+        footer.addStretch(1)
+        footer.addWidget(self.new_import_btn)
+        lay.addLayout(footer)
 
         self.timer = QTimer(self)
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.refresh)
-        self.declined_btn.clicked.connect(lambda *_: self.find_another_source.emit())
-        self.new_import_btn.clicked.connect(lambda *_: self.new_import_requested.emit())
+        self.fix_btn.clicked.connect(lambda *_: self.request_fix())
+        self.check_btn.clicked.connect(lambda *_: self.check_requested.emit())
+        self.new_import_btn.clicked.connect(lambda *_: self.request_new_import())
         self.history_btn.clicked.connect(lambda *_: self.history_requested.emit())
-        self.review_btn.clicked.connect(lambda *_: self.review_requested.emit())
-        self.settings_btn.clicked.connect(lambda *_: self.settings_requested.emit())
         self.queued_backups_btn.clicked.connect(lambda *_: self.queued_backups_requested.emit())
         self.retry_btn.clicked.connect(self.retry_selected)
         self.cancel_btn.clicked.connect(self.cancel_selected)
+        self.folder_btn.clicked.connect(self.show_in_folder)
+        self.spectrogram_btn.clicked.connect(self.open_spectrogram)
+        self.table.cellDoubleClicked.connect(lambda *_: self.open_spectrogram())
         self.refresh_btn.clicked.connect(lambda *_: self.refresh())
         self.import_btn.clicked.connect(lambda *_: self.process_now())
+        self.details_btn.toggled.connect(self.archive_table.setVisible)
+        self.table.customContextMenuRequested.connect(self._context_menu)
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_row_actions())
         self._set_enabled(False)
-        self.history_btn.setEnabled(False)
-        self.review_btn.setEnabled(False)
-        self.settings_btn.setEnabled(False)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -196,12 +271,20 @@ class TransfersPage(QWidget):
         state = self._states.get(selected) if selected else None
         self.retry_btn.setEnabled(state == TransferState.FAILED)
         self.cancel_btn.setEnabled(state in (TransferState.QUEUED, TransferState.IN_PROGRESS))
+        self.folder_btn.setEnabled(bool(selected and self._final_paths.get(selected[1])))
+        self.spectrogram_btn.setEnabled(bool(selected and self._final_paths.get(selected[1])))
+
+    def _reset_header(self) -> None:
+        self.banner.setVisible(False)
+        self.fix_btn.setVisible(False)
+        self.check_btn.setVisible(False)
+        self.new_import_btn.setVisible(False)
+        self.new_import_btn.setEnabled(False)
+        self._active = 0
 
     def start(self) -> None:
         """Begin showing/refreshing the current approval."""
-        self.completion.setVisible(False)
-        self.new_import_btn.setVisible(False)
-        self.new_import_btn.setEnabled(False)
+        self._reset_header()
         if self._shown_import_id != self.ctx.import_id:
             self._blocked, self._archive_errors = {}, {}
             self._shown_import_id = self.ctx.import_id
@@ -210,12 +293,13 @@ class TransfersPage(QWidget):
             self.timer.stop()
             self._set_enabled(False)
             return
-        self._names = {t.apple_id: f"{t.name} - {t.artist}" for t in self.ctx.tracks}
+        self._names = {t.apple_id: f"{t.name} — {t.artist}" for t in self.ctx.tracks}
         if not self._names and self.ctx.import_id:
-            self._names = {t.apple_id: f"{t.name} - {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
+            self._names = {t.apple_id: f"{t.name} — {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
         self._set_enabled(True)
         self.history_btn.setEnabled(True)
-        self.settings_btn.setEnabled(True)
+        self.new_import_btn.setVisible(True)  # always available once downloads were confirmed
+        self.import_btn.setVisible(not self.ctx.settings.auto_import)
         self.refresh()
         self.timer.start()
 
@@ -228,13 +312,10 @@ class TransfersPage(QWidget):
         """Poll slskd, then (auto_import, or process=True from the button) import and archive."""
         latest, iid = self.ctx.approval_id, self.ctx.import_id
         if not latest:
-            self.completion.setVisible(False)
-            self.new_import_btn.setVisible(False)
-            self.new_import_btn.setEnabled(False)
+            self._reset_header()
             return
         if self._inflight:
             return
-        self.new_import_btn.setVisible(False)
         self.new_import_btn.setEnabled(False)
         self._inflight = True
         ctx = self.ctx
@@ -295,19 +376,22 @@ class TransfersPage(QWidget):
 
     def _refresh_failed(self, exc: object) -> None:
         self._inflight = False
-        self.info.setText(f"Refresh failed: {self.ctx.describe(exc)}")
+        self.new_import_btn.setVisible(bool(self.ctx.approval_id))
         self.new_import_btn.setEnabled(True)
+        self.fix_btn.setVisible(False)
+        self.check_btn.setVisible(False)
         if self.ctx.approval_id:
-            self.completion.setText("Transfer status unavailable\nCheck the Soulseek connection and Settings, then refresh the transfers.")
-            self.completion.setStyleSheet(
-                "QLabel { padding: 10px; font-weight: 600; color: #17212b; background: #fce8e6; }")
-            self.completion.setVisible(True)
+            set_banner(self.banner, "Can't read the download status from Soulseek. "
+                       f"Check the connection in Settings. ({self.ctx.describe(exc)})", "error")
         else:
-            self.completion.setVisible(False)
-        self.new_import_btn.setVisible(False)
+            self.banner.setVisible(False)
         if self._manual:
             self._manual = False
             self.import_btn.setEnabled(True)
+
+    def _track_order(self, relevant: dict[str, str]) -> list[str]:
+        ordered = [t for t in self._names if t in relevant]
+        return ordered + sorted(t for t in relevant if t not in self._names)
 
     def _refreshed(self, payload: tuple) -> None:
         self._inflight = False
@@ -321,191 +405,287 @@ class TransfersPage(QWidget):
                 self._archive_errors.update(rep_.errors)
         self._approval_ids, self._fingerprints = list(aids), dict(fps)
         self._states = {(rec.approval_id, rec.apple_id): rec.status.state for rec in records}
-        self.table.setRowCount(len(indexed))
-        for r, (n, rec) in enumerate(indexed):
-            s = rec.status
-            rej = classify(s.raw_state, s.error) if s.state == TransferState.FAILED else None
-            problem = rej.label if rej else ""
-            tip = (f"{rej.explanation}\n{rej.action}\n\nRaw: {rej.raw or '(none)'}") if rej else None
-            cells = [self._names.get(rec.apple_id, rec.apple_id), set_label(n), s.username, s.filename,
-                     fmt_mib(s.size), s.state.value, s.raw_state, f"{s.percent:.0f}", problem, s.error or ""]
-            for c, text in enumerate(cells):
-                it = item(text, tip if c == COL_PROBLEM and tip else text)
-                if c == COL_TRACK:
-                    it.setData(Qt.ItemDataRole.UserRole, rec.apple_id)
-                    it.setData(APPROVAL_ROLE, rec.approval_id)
-                self.table.setItem(r, c, it)
-        self.table.resizeColumnsToContents()
-        self._update_row_actions()
-        self._show_declined(declined)
+        by_transfer = {(rec.approval_id, rec.apple_id): rec for rec in records}
+        attempt_no = {rec.approval_id: n for n, rec in indexed}
+        result_by_track = {res.apple_id: res for res in results}
+        self._final_paths = {res.apple_id: res.final_path for res in results
+                             if res.final_path and res.outcome in _IMPORTED}
+        auto = self.ctx.settings.auto_import
+        self.import_btn.setVisible(not auto)
+
+        notes = self._backup_notes(relevant)
+        order = self._track_order(relevant)
+        statuses = {t: describe_track(by_transfer.get((relevant[t], t)), result_by_track.get(t), auto_import=auto)
+                    for t in order}
+        self._fill_table(order, relevant, by_transfer, attempt_no, statuses, notes)
+
+        counts = {g: sum(1 for st in statuses.values() if st.group == g)
+                  for g in (FOLDER, DOWNLOADING, WAITING, ATTENTION, IDLE)}
+        total = len(order)
         playlist_tracks = len(self.ctx.tracks)
         if not playlist_tracks and self.ctx.import_id:
             playlist_tracks = len(self.ctx.store.load_tracks(self.ctx.import_id))
-        selected_count = len(relevant)
-        counts = {o: sum(1 for x in results if x.outcome == o) for o in ImportOutcome}
-        latest_states = {}
-        by_transfer = {(rec.approval_id, rec.apple_id): rec for rec in records}
-        for track_id, aid in relevant.items():
-            rec = by_transfer.get((aid, track_id))
-            if rec is not None:
-                latest_states[track_id] = rec.status.state
-        # Report only each track's newest approval; replacement attempts supersede old failures.
-        done = sum(state == TransferState.SUCCEEDED for state in latest_states.values())
-        failed = sum(state == TransferState.FAILED for state in latest_states.values())
-        queued = sum(state == TransferState.QUEUED for state in latest_states.values())
-        running = sum(state == TransferState.IN_PROGRESS for state in latest_states.values())
-        msg = f"{selected_count} selected for download out of {playlist_tracks} playlist tracks; " if playlist_tracks else ""
-        msg += f"{done} complete, {failed} failed, {queued} queued, {running} running."
-        if playlist_tracks:
-            msg += " See Import history / outstanding tracks for the full playlist."
-        if err:
-            msg += f" slskd refresh problem (showing last known state): {err}"
-        if proc_err:
-            msg += f" Import/archive problem: {proc_err}"
-        if results:
-            msg += (f" Imported: {counts[ImportOutcome.COPIED]} copied, {counts[ImportOutcome.ALREADY_PRESENT]} "
-                    f"already present, {counts[ImportOutcome.CONFLICT]} conflicts, "
-                    f"{counts[ImportOutcome.INVALID]} invalid.")
-        if queued:
-            msg += " Queued transfers are waiting on uploaders; refresh later or review alternatives if waiting is not useful."
-        self.info.setText(msg)
-        self.queued_backups_btn.setEnabled(any(
+        self._show_header(total, playlist_tracks, counts)
+
+        fixable = [st for st in statuses.values() if st.fixable]
+        needs_check = sum(1 for st in statuses.values() if st.group == ATTENTION and not st.fixable)
+        active = counts[DOWNLOADING] + counts[WAITING] + counts[IDLE]
+        self._active = active
+        self._show_banner(err=err, proc_err=proc_err, total=total, playlist_tracks=playlist_tracks, counts=counts,
+                          fixable=fixable, needs_check=needs_check, active=active,
+                          paths=[self._final_paths.get(t, "") for t in order if statuses[t].group == FOLDER])
+
+        self.queued_backups_btn.setToolTip("\n".join(notes.values()))
+        self.queued_backups_btn.setVisible(any(
             rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS)
             and rec.status.bytes_transferred == 0 and rec.status.percent == 0
             for rec in records if relevant.get(rec.apple_id) == rec.approval_id))
-        plans = self.ctx.store.fallback_plans(self.ctx.import_id) if self.ctx.import_id else []
-        notes = []
-        for plan in plans:
+        self.new_import_btn.setVisible(bool(total) or bool(self.ctx.approval_id))
+        self.history_btn.setEnabled(bool(self.ctx.import_id))
+        self._show_archives(records, archives, relevant)
+        self._update_row_actions()
+        if self._manual:
+            self._manual = False
+            self.import_btn.setEnabled(True)
+            if any(r.outcome in (ImportOutcome.CONFLICT, ImportOutcome.INVALID) for r in results):
+                QMessageBox.warning(self, "Import", "Some files were not copied (conflict or failed "
+                                    "verification). Nothing was overwritten or archived for those peers; "
+                                    "see the Status column.")
+
+    def _backup_notes(self, relevant: dict[str, str]) -> dict[str, str]:
+        notes: dict[str, str] = {}
+        if not self.ctx.import_id:
+            return notes
+        for plan in self.ctx.store.fallback_plans(self.ctx.import_id):
             if relevant.get(plan["apple_id"]) != plan["primary_approval_id"]:
                 continue
             attempts = self.ctx.store.fallback_attempts(plan["id"])
             tried = max(0, len(attempts) - 1)
             status = plan["status"]
             if status == "active":
-                status = ("backups exhausted; waiting on remaining sources" if plan["next_index"] >= len(json.loads(plan["items_json"]))
-                          else f"waiting; try next backup after {plan['wait_seconds']} seconds")
-            notes.append(f"{self._names.get(plan['apple_id'], plan['apple_id'])}: {status}; {tried} backups tried"
-                         + (f" — {plan['error']}" if plan["error"] else ""))
-        self.recovery_info.setToolTip("\n".join(notes))
-        self.recovery_info.setText("Reviewed backup recovery\n" + "\n".join(notes[:3])
-                                   + (f"\n{len(notes) - 3} more tracks (hover for details)" if len(notes) > 3 else "") if notes else
-                                   "Waiting on an uploader? Review exact backup files before enabling automatic recovery.")
-        self.review_btn.setEnabled(bool(declined) or failed > 0)
-        archived_peers = {entry.username.casefold() for entry in archives}
-        pending_archive = any(
-            rec.status.state == TransferState.SUCCEEDED
-            and rec.status.username.casefold() not in archived_peers
-            for rec in records if relevant.get(rec.apple_id) == rec.approval_id
-        )
-        archive_waiting = bool(self._blocked) or pending_archive
-        outcome_by_track = {result.apple_id: result.outcome for result in results}
-        path_by_track = {result.apple_id: str(Path(result.final_path).parent) if result.final_path else ""
-                         for result in results}
-        kind, headline, detail = completion_feedback(
-            relevant_ids=set(relevant), states=latest_states, outcomes=outcome_by_track, paths=path_by_track,
-            refresh_error=err, process_error=proc_err,
-            import_errors=any(outcome_by_track.get(track_id) in (ImportOutcome.CONFLICT, ImportOutcome.INVALID)
-                              for track_id in relevant),
-            archive_errors=bool(self._archive_errors), archive_waiting=archive_waiting,
-            pending_declines=bool(declined),
-        )
-        if kind == "success" and selected_count < playlist_tracks:
-            headline = "Selected subset imported"
-            detail = f"All {selected_count} approved tracks were imported; the playlist has {playlist_tracks} tracks."
-        elif kind == "success" and playlist_tracks:
-            headline = "Selected downloads imported"
-        elif kind == "issues":
-            reasons = []
-            if failed:
-                reasons.append(f"{failed} transfer(s) failed; select a failed row to retry the same file or review alternatives.")
-            if err:
-                reasons.append("Check the Soulseek connection and Settings, then refresh.")
-            if proc_err:
-                reasons.append(f"Import processing failed: {proc_err}. See the import table and process again.")
-            conflicts = counts[ImportOutcome.CONFLICT] + counts[ImportOutcome.INVALID]
-            if conflicts:
-                reasons.append(f"{conflicts} import result(s) need attention; resolve the conflict or verification issue in the import table, then process again.")
-            if self._blocked or self._archive_errors or archive_waiting:
-                blocks = [f"{peer}: {reason}" for peer, reason in self._blocked.items()]
-                blocks += [f"{peer}: {reason}" for peer, reason in self._archive_errors.items()]
-                extra = f"; plus {len(blocks) - 3} more (see archive table)" if len(blocks) > 3 else ""
-                reasons.append((f"Archive is blocked for {len(blocks)} peer(s): " + "; ".join(blocks[:3]) + extra
-                                + ". Resolve the stated block, then process again.") if blocks else
-                               "Archive is still waiting to be archived; see archive details below for eligible peer folders.")
-            if declined:
-                reasons.append(f"{len(declined)} declined track(s) need a reviewed replacement; use Review alternatives.")
-            if reasons:
-                detail = " ".join(reasons)
-        self.completion.setText(f"{headline}\n{detail}")
-        colors = {"success": "#e6f4ea", "needed": "#fff4ce", "issues": "#fce8e6", "progress": "#e8f0fe"}
-        self.completion.setStyleSheet(
-            f"QLabel {{ padding: 10px; font-weight: 600; color: #17212b; background: {colors[kind]}; }}")
-        self.completion.setVisible(bool(relevant))
-        self.new_import_btn.setVisible(can_start_another_import(
-            kind=kind, relevant_ids=set(relevant), states=latest_states, refresh_error=err,
-            archive_waiting=archive_waiting))
-        self._show_import_results(results)
-        self._show_archives(records, archives)
-        self.history_btn.setEnabled(bool(self.ctx.import_id))
-        if self._manual:
-            self._manual = False
-            self.import_btn.setEnabled(True)
-            if counts[ImportOutcome.CONFLICT] or counts[ImportOutcome.INVALID]:
-                QMessageBox.warning(self, "Import", "Some files were not imported (conflict or failed "
-                                    "verification). Nothing was overwritten or archived for those peers; "
-                                    "see the results table.")
+                status = ("backups exhausted; waiting on remaining sources"
+                          if plan["next_index"] >= len(json.loads(plan["items_json"]))
+                          else f"waiting; will try the next backup after {plan['wait_seconds']} seconds")
+            name = self._names.get(plan["apple_id"], plan["apple_id"])
+            notes[plan["apple_id"]] = (f"{name}: {status}; {tried} backups tried"
+                                       + (f" — {plan['error']}" if plan["error"] else ""))
+        return notes
 
-    def _show_declined(self, declined: list) -> None:
-        """Banner for downloads the uploader refused and that have no replacement yet."""
-        n = len(declined)
-        if n == 0:
-            self.declined_banner.setVisible(False)
-            return
-        self.declined_label.setText(
-            f"{n} file{' was' if n == 1 else 's were'} declined by their uploader. "
-            + " ".join(dict.fromkeys(d.rejection.action for d in declined)))
-        self.declined_banner.setVisible(True)
+    def _fill_table(self, order, relevant, by_transfer, attempt_no, statuses, notes) -> None:
+        keep = self._selected()
+        self.table.setRowCount(len(order))
+        for r, track_id in enumerate(order):
+            aid = relevant[track_id]
+            rec = by_transfer.get((aid, track_id))
+            st = statuses[track_id]
+            replacement = attempt_no.get(aid, 0) > 0
+            name = self._names.get(track_id, track_id)
+            source = quality = source_tip = ""
+            if rec is not None:
+                s = rec.status
+                source = s.username + (" (replacement)" if replacement else "")
+                ext = s.filename.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[-1].upper() if "." in s.filename else ""
+                size = fmt_mib(s.size)
+                quality = " · ".join(x for x in (ext, f"{size} MiB" if size else "") if x)
+                source_tip = f"{s.username}\n{s.filename}"
+            elif replacement:
+                source = "(replacement)"
+            detail = st.detail
+            if replacement:
+                detail = "Replacement source you approved for this track.\n" + detail
+            if track_id in notes:
+                detail = (detail + "\n\n" if detail else "") + notes[track_id]
+            cells = [(str(r + 1), None), (name, name), (st.text, detail or st.text), (source, source_tip or source),
+                     (quality, quality)]
+            for c, (text, tip) in enumerate(cells):
+                it = item(text, tip)
+                it.setBackground(tint(st.kind))
+                if c == COL_NUM:
+                    it.setData(Qt.ItemDataRole.UserRole, track_id)
+                    it.setData(APPROVAL_ROLE, aid)
+                self.table.setItem(r, c, it)
+        if keep:
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, COL_NUM)
+                if it is not None and (it.data(APPROVAL_ROLE), it.data(Qt.ItemDataRole.UserRole)) == keep:
+                    self.table.selectRow(r)
+                    break
 
-    def _show_import_results(self, results: list) -> None:
-        self.import_table.setRowCount(len(results))
-        for r, res in enumerate(results):
-            for c, text in enumerate([self._names.get(res.apple_id, res.apple_id), res.outcome.value,
-                                      res.final_path or "", res.detail]):
-                self.import_table.setItem(r, c, item(text, text))
-        self.import_table.resizeColumnsToContents()
+    def _show_header(self, total: int, playlist_tracks: int, counts: dict[str, int]) -> None:
+        self.progress.setRange(0, max(total, 1))
+        self.progress.setValue(counts[FOLDER])
+        self.progress.setFormat(f"{counts[FOLDER]} of {total} in your folder" if total else "")
+        shown = {
+            self.chip_folder: (f"{counts[FOLDER]} in folder", "ok" if counts[FOLDER] else "muted", counts[FOLDER]),
+            self.chip_downloading: (f"{counts[DOWNLOADING]} downloading", "info", counts[DOWNLOADING]),
+            self.chip_waiting: (f"{counts[WAITING]} waiting on uploader", "warn", counts[WAITING]),
+            self.chip_attention: (f"{counts[ATTENTION]} need attention", "error", counts[ATTENTION]),
+        }
+        for lab, (text, kind, n) in shown.items():
+            set_chip(lab, text, kind)
+            lab.setVisible(bool(total) and (n > 0 or lab is self.chip_folder))
+        if total and playlist_tracks > total:
+            self.info.setText(f"{total} of the playlist's {playlist_tracks} tracks were selected for download.")
+            self.info.setVisible(True)
+        else:
+            self.info.setVisible(False)
 
-    def _show_archives(self, records: list, archives: list) -> None:
+    def _show_banner(self, *, err, proc_err, total, playlist_tracks, counts, fixable, needs_check, active, paths) -> None:
+        messages: list[str] = []
+        kind = "info"
+        if err:
+            messages.append("Can't reach Soulseek, so this status may be out of date. Check the connection in Settings.")
+            kind = "error"
+        if proc_err:
+            messages.append(f"Copying finished files hit a problem: {proc_err}")
+            kind = "error"
+        if fixable:
+            messages.append(f"{_plural(len(fixable), 'track needs', 'tracks need')} another source.")
+            kind = "error"
+        if needs_check:
+            messages.append(f"{_plural(needs_check, 'downloaded track needs', 'downloaded tracks need')} a check "
+                            "(see Status). Nothing was overwritten.")
+            if kind == "info":
+                kind = "warn"
+        all_done = bool(total) and counts[FOLDER] == total
+        can_check = bool(counts[FOLDER]) and not active and not err
+        if all_done and not messages:
+            folders = {str(Path(p).parent) for p in paths if p}
+            where = f" in {next(iter(folders))}" if len(folders) == 1 else ""
+            more = (f" The other {playlist_tracks - total} playlist tracks weren't selected."
+                    if playlist_tracks > total else "")
+            messages.append(f"All {total} selected tracks are in your folder{where}.{more}")
+            kind = "ok"
+        if messages:
+            set_banner(self.banner, " ".join(messages), kind)
+        else:
+            self.banner.setVisible(False)
+        self.fix_btn.setVisible(bool(fixable))
+        self._fix_mode = "failed" if any(not st.declined for st in fixable) else "declined"
+        self.check_btn.setVisible(can_check)
+        clean = not fixable and not needs_check and not proc_err
+        if clean:
+            primary(self.check_btn)
+        else:
+            self._unprimary(self.check_btn)
+
+    @staticmethod
+    def _unprimary(button: QPushButton) -> None:
+        button.setProperty("primary", False)
+        button.style().unpolish(button)
+        button.style().polish(button)
+
+    def _show_archives(self, records: list, archives: list, relevant: dict[str, str]) -> None:
         done = {a.username: a for a in archives}  # later approvals win
         peers = sorted({r.status.username for r in records} | set(done), key=str.casefold)
         name = self.ctx.settings.archive_dir_name
         self.archive_table.setRowCount(len(peers))
+        archived = waiting = problems = 0
         for r, peer in enumerate(peers):
             a = done.get(peer)
             if peer in self._archive_errors:
                 text = f"Archive problem: {self._archive_errors[peer]}"
+                problems += 1
             elif peer in self._blocked:
                 text = f"Waiting: {self._blocked[peer]}"
+                waiting += 1
             elif a is not None:
                 text = (f"Archived to {name}: {len(a.moved)} moved, {len(a.deduped)} duplicate(s) removed, "
                         f"{len(a.renamed)} renamed" if not a.nothing_to_archive else
-                        f"Nothing to archive (no folder for this peer)")
+                        "Nothing to archive (no folder for this peer)")
+                archived += 1
             else:
                 text = "Waiting"
+                waiting += 1
             self.archive_table.setItem(r, 0, item(peer, peer))
             self.archive_table.setItem(r, 1, item(text, text))
         self.archive_table.resizeColumnsToContents()
+        parts = []
+        if archived:
+            parts.append(f"{archived} archived")
+        if waiting:
+            parts.append(f"{waiting} waiting")
+        if problems:
+            parts.append(f"{problems} with a problem")
+        self.details_btn.setText(("Details: peer folders — " + ", ".join(parts)) if parts else "")
+        self.details_btn.setVisible(bool(parts))
+        self.details_btn.setToolTip(f"Finished peer folders are moved into “{name}” once everything from that "
+                                    "peer is in your folder.")
 
     # ------------------------------------------------------------ actions
+
+    def request_fix(self) -> None:
+        """One button for every problem track: declined-only uses the declined review, anything else the
+        general failed-download review (which also includes the declined ones)."""
+        (self.review_requested if self._fix_mode == "failed" else self.find_another_source).emit()
 
     def _selected(self) -> tuple[str, str] | None:
         """(approval id, apple id) of the selected row."""
         rows = self.table.selectionModel().selectedRows()
         if not rows:
             return None
-        it = self.table.item(rows[0].row(), 0)
+        it = self.table.item(rows[0].row(), COL_NUM)
         if it is None:
             return None
         return it.data(APPROVAL_ROLE), it.data(Qt.ItemDataRole.UserRole)
+
+    def _context_menu(self, pos: QPoint) -> None:
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        self.table.selectRow(row)
+        self._update_row_actions()
+        menu = QMenu(self)
+        for button in (self.retry_btn, self.cancel_btn, self.folder_btn, self.spectrogram_btn):
+            act = menu.addAction(button.text())
+            act.setEnabled(button.isEnabled())
+            act.triggered.connect(button.click)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def show_in_folder(self) -> None:
+        sel = self._selected()
+        path = self._final_paths.get(sel[1]) if sel else None
+        if path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent)))
+
+    def open_spectrogram(self) -> None:
+        sel = self._selected()
+        path = self._final_paths.get(sel[1]) if sel else None
+        if not path:
+            return
+        if not Path(path).is_file():
+            show_error(self, "Spectrogram", "That file is no longer in your folder.")
+            return
+        SpectrogramDialog(path, self.ctx.settings, self).exec()
+
+    def _import_name(self) -> str:
+        ctx = self.ctx
+        if ctx.playlist is not None and ctx.playlist.name:
+            return ctx.playlist.name
+        try:
+            record = ctx.store.get_import(ctx.import_id) if ctx.import_id else None
+        except Exception:  # noqa: BLE001
+            record = None
+        return (record.playlist_name if record else "") or "this playlist"
+
+    def ask_start_another(self, name: str, active: int) -> bool:
+        """Modal question when downloads are still running. True only for Start another. Replaceable in tests."""
+        box = QMessageBox(QMessageBox.Icon.Question, "Start another playlist?",
+                          f"Downloads for {name} are still running ({_plural(active, 'track', 'tracks')} not "
+                          "finished). Start another playlist?\n\nDownloads continue in Soulseek; S2S imports them "
+                          "when you reopen this import (Resume last import).", parent=self)
+        go = box.addButton("Start another", QMessageBox.ButtonRole.AcceptRole)
+        stay = box.addButton("Stay here", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is go
+
+    def request_new_import(self) -> None:
+        """'Start another playlist': asks first while anything is still running or queued."""
+        if self._active > 0 and not self.ask_start_another(self._import_name(), self._active):
+            return
+        self.new_import_requested.emit()
 
     def retry_selected(self) -> None:
         sel = self._selected()
@@ -545,7 +725,7 @@ class TransfersPage(QWidget):
         run_async(self, work, lambda _r: self.refresh(), lambda e: show_error(self, "Cancel", ctx.describe(e)))
 
     def process_now(self) -> None:
-        """Manual 'Process completed now': refresh, import finished files, archive what is safe."""
+        """Manual 'Copy finished downloads': refresh, import finished files, archive what is safe."""
         if not self.ctx.approval_id or self._inflight:
             return
         self._manual = True
