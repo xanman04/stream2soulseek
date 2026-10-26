@@ -91,7 +91,6 @@ class TrackStatusBar(QWidget):
         super().__init__(parent)
         self._states: list[str] = []
         self._kinds: list[str] = []
-        self._tips: list[str] = []
         self.setMinimumHeight(12)
         self.setMaximumHeight(16)
         self.setAccessibleName("Track search results")
@@ -99,41 +98,26 @@ class TrackStatusBar(QWidget):
     def set_track_count(self, count: int) -> None:
         self._states = ["pending"] * count
         self._kinds = ["pending"] * count
-        self._tips = ["Waiting to search"] * count
-        self._update_tooltip()
         self.update()
 
     def set_result(self, position: int, result: MatchResult) -> None:
         if not 0 <= position < len(self._states):
             return
         if result.status == MatchStatus.SKIPPED:
-            state, kind, tip = "skipped", "skipped", result.note or "Skipped"
+            state, kind = "skipped", "skipped"
         elif (result.status == MatchStatus.PROPOSED and result.best is not None
               and not result.best.flagged):
-            state, kind, tip = "found", "found", f"Found: {result.best.file.username}"
+            state, kind = "found", "found"
         else:
             state, kind = "problem", "problem"
-            tip = result.note or ("Flagged proposed match" if result.best is not None else "No valid match")
             if result.best is not None and result.best.flagged:
                 kind = "check"
-                tip = "Flagged: " + (result.note or ", ".join(result.best.reasons) or "review required")
         self._states[position] = state
         self._kinds[position] = kind
-        self._tips[position] = tip
-        self._update_tooltip()
         self.update()
 
     def set_cancelled_pending(self) -> None:
-        for i, state in enumerate(self._states):
-            if state == "pending":
-                self._tips[i] = "Not searched (cancelled)"
-        self._update_tooltip()
-
-    def _update_tooltip(self) -> None:
-        if self._tips:
-            self.setToolTip("\n".join(f"Track {i + 1}: {tip}" for i, tip in enumerate(self._tips)))
-        else:
-            self.setToolTip("")
+        """Tracks the cancelled search never reached keep their pending colour (kept for callers)."""
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
@@ -197,7 +181,6 @@ class SearchPage(QWidget):
         self.pace_label.setVisible(False)
         self.retry_btn = QPushButton("Retry failed searches")
         self.retry_btn.setVisible(False)
-        self.retry_btn.setToolTip("Search again only the tracks whose search could not run. Nothing is downloaded.")
         self._retry_old: dict[str, MatchResult] | None = None
         self._limiter_base = 0
         self._cache = search_mod.SHARED_CACHE  # earlier answers: "Search again" and "Retry" re-send nothing
@@ -228,7 +211,6 @@ class SearchPage(QWidget):
         self.stale_label = QLabel("")
         set_banner(self.stale_label, "", "warn")
         self.layout_combo = QComboBox()
-        self.layout_combo.setToolTip("Switch to a saved layout of matching rules")
         rules_row = QHBoxLayout()
         rules_row.addWidget(subtle(QLabel("Rules:")))
         rules_row.addWidget(self.layout_combo)
@@ -338,7 +320,6 @@ class SearchPage(QWidget):
         # are queued; "Start another playlist" on the Downloads page is the way to a fresh search.
         locked = self._downloads_queued() and not self._running
         self.start_btn.setEnabled(not self._running and not locked)
-        self.start_btn.setToolTip(LOCKED_INFO if locked else "")
 
     def prepare(self) -> None:
         """Show one 'waiting' row per requested track."""
@@ -360,7 +341,6 @@ class SearchPage(QWidget):
         if tracks and self.ctx.playlist:
             dest = self.ctx.destination or ""
             self.info.setText(f"{len(tracks)} tracks from {self.ctx.playlist.name} · into {Path(dest).name or dest}")
-            self.info.setToolTip(dest)
         self._refresh_start_text()
 
     def _set_row(self, res: MatchResult) -> None:

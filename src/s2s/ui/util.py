@@ -33,10 +33,8 @@ def fmt_mib(size: int | None) -> str:
 
 
 def item(text: str, tooltip: str | None = None) -> QTableWidgetItem:
-    it = QTableWidgetItem(text)
-    if tooltip:
-        it.setToolTip(tooltip)
-    return it
+    """A table cell. `tooltip` is accepted for existing callers but not shown: S2S shows no hover texts."""
+    return QTableWidgetItem(text)
 
 
 def make_table(headers: list[str], parent: QWidget | None = None) -> QTableWidget:

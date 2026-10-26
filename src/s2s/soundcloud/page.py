@@ -45,7 +45,6 @@ class SoundCloudServicePage(QWidget):
         self.access_value = QLabel("Read playlist and track details")
         self.enable_check = QCheckBox("Enable SoundCloud web sign-in")
         self.enable_check.setChecked(bool(ctx.settings.extra.get(ENABLED_SETTING, False)))
-        self.enable_check.setToolTip("Uses SoundCloud's website session instead of a registered developer app.")
         self.reconnect_btn = QPushButton()
         self.account_card = ServiceAccountCard("soundcloud", connection=self.connection_value,
             session=self.session_value, access=self.access_value, reconnect=self.reconnect_btn,

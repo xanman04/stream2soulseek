@@ -71,9 +71,7 @@ def test_segments_distinguish_found_flagged_unresolved_error_and_pending(qapp):
     for result in results:
         page._set_row(result)
     assert page.track_bar._states == ["found", "problem", "problem", "problem", "skipped", "pending"]
-    assert "Flagged" in page.track_bar.toolTip()
-    assert "search failed" in page.track_bar.toolTip()
-    assert page.track_bar.toolTip().endswith("Track 6: Waiting to search")
+    assert page.track_bar._kinds[1] == "check" and page.track_bar.toolTip() == ""  # no hover texts
     page._finished(("import", results, True, page.ctx.settings.match_policy.fingerprint()))
     assert [c.text() for c in page._chips if not c.isHidden()] == ["1 found", "1 to check", "1 not found", "1 failed", "1 skipped"]
     page.close()
@@ -97,7 +95,7 @@ def test_cancel_keeps_unsearched_tracks_pending_and_marks_tooltip(qapp):
     done = MatchResult(page.ctx.tracks[0], MatchStatus.PROPOSED, _candidate("good"))
     page._finished(("import", [done], True, page.ctx.settings.match_policy.fingerprint()))
     assert page.track_bar._states == ["found", "pending", "pending"]
-    assert "Not searched (cancelled)" in page.track_bar.toolTip()
+    assert page.track_bar.toolTip() == ""
     assert "Cancelled" in page.info.text()
     assert page.chip_found.text() == "1 found"
     assert "cancelled" in page.summary_label.text()

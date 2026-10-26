@@ -46,8 +46,6 @@ class TrackModel(QAbstractTableModel):
             if col == C_DUR:
                 return -1 if t.duration_ms is None else t.duration_ms
             return fold((t.name, t.artist, t.album or "")[col - 1])
-        if role == Qt.ItemDataRole.ToolTipRole and col in (C_TITLE, C_ARTIST, C_ALBUM):
-            return (t.name, t.artist, t.album or "")[col - 1]
         return None
 
 

@@ -56,5 +56,11 @@ if sys.platform == "darwin":
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "14.4",  # minimum supported by the pinned Qt 6.12 build
             "NSHumanReadableCopyright": "Copyright (C) 2026 xanman04. GNU GPL v3 or later.",
+            # Shown by macOS when S2S first uses these locations for your Soulseek downloads or tracklist folder.
+            "NSDesktopFolderUsageDescription": "S2S saves your downloads and tracklist folders where you choose.",
+            "NSDocumentsFolderUsageDescription": "S2S saves your downloads and tracklist folders where you choose.",
+            "NSDownloadsFolderUsageDescription": "S2S saves your downloads and tracklist folders where you choose.",
+            "NSRemovableVolumesUsageDescription": "S2S saves your downloads and tracklist folders where you choose.",
+            "NSNetworkVolumesUsageDescription": "S2S saves your downloads and tracklist folders where you choose.",
         },
     )

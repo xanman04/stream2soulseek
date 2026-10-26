@@ -50,7 +50,6 @@ class SettingsDialog(QDialog):
         self.timeout = QSpinBox()
         self.timeout.setRange(5, 300)
         self.timeout.setValue(int(s.search_timeout_s))
-        self.timeout.setToolTip("Initial searches use up to 8 seconds per query. This budget is used for a deeper search when too few uploaders are found.")
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         has_key = False
@@ -215,6 +214,11 @@ class SettingsDialog(QDialog):
                                      "Cancel to keep your saved settings.")
             if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):
                 raise ValueError("The archive subfolder must be a plain folder name such as OLD.")
+            from ..folder_access import folder_access_problem
+
+            problem = folder_access_problem(new.slskd_downloads_dir)  # macOS asks for access now, if needed
+            if problem:
+                raise ValueError(problem)
             config.save_settings(new)
             if self.clear_key.isChecked():
                 self.ctx.secrets.delete(SLSKD_API_KEY)

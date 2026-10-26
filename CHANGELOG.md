@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 — 2026-10-26
+
+- Fixed a crash on macOS when opening Apple Music sign-in: the app-wide Python event filter that hid hover texts
+  crashed inside PySide when Qt WebEngine's internal objects received hover events. The filter is gone and hover
+  texts are no longer set anywhere.
+- Check folder access when the Soulseek downloads folder and the tracklist folder are chosen (and at startup,
+  before slskd starts), so macOS asks in the foreground; added the macOS folder usage descriptions.
+
 ## 1.0.2 — 2026-10-26
 
 - Preserve Qt's required browser-helper entitlements when signing the Mac app.

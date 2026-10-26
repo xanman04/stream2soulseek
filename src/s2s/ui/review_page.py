@@ -35,12 +35,6 @@ COLUMNS = ["✓", "#", "Track", "Match", "Quality", "Length", "Source"]
 C_USE, C_POS, C_TRACK, C_MATCH, C_QUALITY, C_LENGTH, C_SOURCE = range(len(COLUMNS))
 C_TITLE = C_TRACK  # compatibility aliases
 C_PEER = C_SOURCE
-_HEADER_TIPS = {
-    C_USE: "Tick the tracks you want to download",
-    C_MATCH: "How well the proposed file matches the playlist track",
-    C_LENGTH: "Length of the file; the playlist's length is shown in brackets when it differs",
-    C_SOURCE: "Soulseek user sharing the file",
-}
 
 STALE_TEXT = ("Your matching rules changed since this search, so these results may be out of date. "
               "Run the search again and review the new results before downloading.")
@@ -323,8 +317,6 @@ class ReviewModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
                 return COLUMNS[section]
-            if role == Qt.ItemDataRole.ToolTipRole:
-                return _HEADER_TIPS.get(section)
         return None
 
     def flags(self, index):
@@ -424,46 +416,11 @@ class ReviewModel(QAbstractTableModel):
             if row.kind == "muted":
                 return QApplication.palette().brush(QPalette.ColorRole.PlaceholderText)
             return None
-        if role == Qt.ItemDataRole.ToolTipRole:
-            return self._tooltip(row, col)
         if role == SORT_ROLE:
             return self._sort_value(row, col)
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         return self._display(row, col)
-
-    def _tooltip(self, row: ReviewRow, col: int) -> str | None:
-        res, cand, t = row.result, row.chosen, row.result.track
-        if col == C_TRACK:
-            lines = [f"{t.name} - {t.artist}"]
-            if t.album:
-                lines.append(f"Album: {t.album}")
-            if row.existing:
-                lines.append("Already in the folder (similar name): " + ", ".join(row.existing))
-            return "\n".join(lines)
-        if col == C_MATCH:
-            if res.status == MatchStatus.SKIPPED:
-                if res.note == "already imported":
-                    return ("A previous import recorded this track for the selected folder and the file is still "
-                            "there. Use Import history to inspect older records.")
-                return res.note or None
-            if cand is None:
-                return not_found_detail(res.note)
-            reasons = [plain_reason(r) for r in cand.reasons]
-            return "\n".join(reasons) or None
-        if col == C_QUALITY and cand is not None:
-            f = cand.file
-            return f"{quality_text(f)}\n{fmt_mib(f.size)} MiB"
-        if col == C_LENGTH:
-            have, want, off = self.length_info(row)
-            return f"File: {fmt_seconds(have) or 'unknown'}\nPlaylist: {fmt_seconds(want) or 'unknown'}"
-        if col == C_SOURCE and cand is not None:
-            f = cand.file
-            slot = ("free slot" if f.has_free_slot else "no free slot" if f.has_free_slot is False else "slot unknown")
-            if f.queue_length is not None:
-                slot += f", queue {f.queue_length}"
-            return f"{f.filename}\n{slot}"
-        return None
 
     def _display(self, row: ReviewRow, col: int):
         cand, t = row.chosen, row.result.track
@@ -668,10 +625,8 @@ class ReviewPage(QWidget):
         self.filter_all, self.filter_check, self.filter_missing = (self.filter_buttons[m] for m in FILTERS)
         tools.addStretch(1)
         self.alternatives_btn = QPushButton("Next to check")
-        self.alternatives_btn.setToolTip("Jump to the next track that needs a look")
         self.alternatives_btn.clicked.connect(self.show_alternatives)
         self.select_ready_btn = QPushButton("Select all ready")
-        self.select_ready_btn.setToolTip("Tick every track that matched cleanly (ones to check stay as they are)")
         self.select_ready_btn.clicked.connect(self.model.select_ready)
         self.untick_check_btn = QPushButton("Untick all needing a look")
         self.untick_check_btn.clicked.connect(self.model.untick_needing_a_look)
@@ -880,7 +835,6 @@ class ReviewPage(QWidget):
         self.model.set_locked(locked)
         self.set_filter("all")
         self.dest_label.setText(f"Saving to: {destination}" if destination else "")
-        self.dest_label.setToolTip(destination)
         self._select_first_row()
         self._update_footer()
 
@@ -1211,8 +1165,6 @@ class ReviewPage(QWidget):
         self.confirm_btn.setText("Selection confirmed" if self._locked else f"Confirm selection ({n})")
         stale = self.rules_stale()
         self.confirm_btn.setEnabled(n > 0 and not self._locked and not self._busy and not stale)
-        self.confirm_btn.setToolTip("Run the search again first: your matching rules changed." if stale else
-                                    "Review the exact list of files before anything is queued.")
         free = not self._locked and not self._busy
         self.alternatives_btn.setEnabled(c["flagged"] > 0 and not self._busy)
         self.select_ready_btn.setEnabled(free and c["ready"] > 0)

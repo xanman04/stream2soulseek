@@ -80,7 +80,6 @@ class HistoryDialog(QDialog):
             values = (row.title, row.artist, row.status, row.detail, row.final_path or "")
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                cell.setToolTip(value)
                 if col == 2 and row.outstanding:
                     cell.setForeground(Qt.GlobalColor.darkRed)
                 self.table.setItem(row_i, col, cell)
