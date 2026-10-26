@@ -13,6 +13,7 @@ import hashlib
 import importlib.metadata as md
 import os
 import platform
+import plistlib
 import re
 import shutil
 import stat
@@ -52,7 +53,6 @@ FFMPEG = {
                    "2322438ed2f6319a691291b247d09c69dcaa3a982460d1f269a7e1af335cfdfd")],
 }
 TEXTS = {  # licence texts referenced by THIRD_PARTY_NOTICES.md
-    "LGPL-3.0.txt": "https://www.gnu.org/licenses/lgpl-3.0.txt",
     "slskd/LICENSE": "https://raw.githubusercontent.com/slskd/slskd/0.26.2/LICENSE",
 }
 NOT_BUNDLED = {"pip", "setuptools", "wheel", "pytest", "pluggy", "iniconfig", "pyinstaller", "pyinstaller-hooks-contrib",
@@ -140,6 +140,7 @@ def prepare_licenses() -> Path:
     lic.mkdir(parents=True)
     shutil.copy2(ROOT / "LICENSE", lic / "LICENSE")
     shutil.copy2(ROOT / "LICENSE", lic / "GPL-3.0.txt")
+    shutil.copy2(ROOT / "packaging" / "licenses" / "LGPL-3.0.txt", lic / "LGPL-3.0.txt")
     shutil.copy2(ROOT / "packaging" / "THIRD_PARTY_NOTICES.md", lic / "THIRD_PARTY_NOTICES.md")
     shutil.copy2(ROOT / "src" / "s2s" / "ui" / "assets" / "logos" / "NOTICE.md", lic / "logos-NOTICE.md")
     for rel, url in TEXTS.items():
@@ -175,9 +176,41 @@ def run_pyinstaller(ver: str) -> None:
                     str(ROOT / "packaging" / "s2s.spec")], check=True, env=env, cwd=ROOT)
 
 
-def codesign(path: Path, *, deep: bool = False) -> None:
-    args = ["codesign", "--force", "--sign", "-", "--timestamp=none"] + (["--deep"] if deep else []) + [str(path)]
+def codesign(path: Path, *, deep: bool = False, entitlements: Path | None = None) -> None:
+    args = ["codesign", "--force", "--sign", "-", "--timestamp=none"]
+    if deep:
+        args += ["--deep"]
+    if entitlements is not None:
+        args += ["--entitlements", str(entitlements)]
+    args += [str(path)]
     subprocess.run(args, check=True)
+
+
+def sign_webengine_helpers(app: Path) -> None:
+    """Restore Qt's required browser entitlements after the general deep-signing pass.
+
+    Re-seal containing frameworks and the main app without --deep afterwards, so
+    their signatures remain valid and the helper's entitlements are retained.
+    """
+    helpers = [p for p in app.rglob("QtWebEngineProcess.app") if not p.is_symlink()]
+    if not helpers:
+        raise RuntimeError("The packaged WebEngine helper is missing")
+    frameworks = set()
+    for helper in helpers:
+        entitlements = helper / "Contents" / "Resources" / "QtWebEngineProcess.entitlements"
+        required = plistlib.loads(entitlements.read_bytes())
+        if not required.get("com.apple.security.cs.allow-jit"):
+            raise RuntimeError("Qt's browser entitlement definition is incomplete")
+        codesign(helper, entitlements=entitlements)
+        signed = subprocess.run(["codesign", "-d", "--entitlements", ":-", str(helper)],
+                                capture_output=True, check=True)
+        actual = plistlib.loads(signed.stdout)
+        if any(actual.get(key) != value for key, value in required.items()):
+            raise RuntimeError("The signed browser helper lost required Qt entitlements")
+        frameworks.update(p for p in helper.parents if p.suffix == ".framework")
+    for framework in sorted(frameworks, key=lambda p: len(p.parts), reverse=True):
+        codesign(framework)
+    codesign(app)
 
 
 def assemble(kind: str, tools: Path, lic: Path) -> tuple[Path, Path]:
@@ -195,6 +228,7 @@ def assemble(kind: str, tools: Path, lic: Path) -> tuple[Path, Path]:
         make_executable(p)
         codesign(p)  # Apple silicon runs only signed code; ad hoc is enough without a Developer ID
     codesign(app, deep=True)
+    sign_webengine_helpers(app)
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
     return app, app / "Contents" / "MacOS" / "S2S"
 
@@ -208,6 +242,15 @@ def self_test(exe: Path) -> None:
     print(text, flush=True)
     if proc.returncode != 0:
         raise SystemExit(f"the packaged app's self-test failed (exit code {proc.returncode})")
+
+    report = WORK / "browser-smoke-test.txt"
+    report.unlink(missing_ok=True)
+    log("starting an actual packaged browser renderer (offline)")
+    proc = subprocess.run([str(exe), "--browser-smoke-test", str(report)], timeout=90)
+    text = report.read_text(encoding="utf-8") if report.exists() else "(no browser report)"
+    print(text, flush=True)
+    if proc.returncode != 0 or "PASS: Browser JavaScript execution" not in text:
+        raise SystemExit(f"the packaged browser test failed (exit code {proc.returncode})")
 
 
 def archive(kind: str, app: Path, ver: str) -> Path:

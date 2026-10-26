@@ -188,6 +188,10 @@ def self_test(report_path: str) -> int:
 
 
 def main() -> int:
+    if len(sys.argv) >= 3 and sys.argv[1] == "--browser-smoke-test":
+        from .browser_smoke import run
+
+        return run(sys.argv[2])
     if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
         return self_test(sys.argv[2])
     from PySide6.QtCore import QCoreApplication, Qt
