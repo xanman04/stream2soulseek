@@ -8,9 +8,8 @@ S2S is a Windows desktop application for building local music libraries from str
 It uses playlist metadata to find matching recordings on Soulseek, presents the results for review, and
 organizes approved downloads into a flat folder of verified audio files.
 
-The application supports Apple Music, Spotify and SoundCloud playlist sources, with live account testing
-still in progress. Streaming services provide playlist metadata. File
-searches and downloads run through [slskd](https://github.com/slskd/slskd), a Soulseek client with a local API.
+The application reads playlist metadata from Apple Music, Spotify and SoundCloud. Recording searches and
+downloads run through [slskd](https://github.com/slskd/slskd), a Soulseek client with a local API.
 
 ## Project status
 
@@ -20,12 +19,12 @@ a packaged release is not available.
 | Playlist source | Status |
 | --- | --- |
 | Apple Music | Implemented using an unofficial API; live integration under testing |
-| Spotify | Implemented: sign in inside the app (unofficial web API via SpotAPI), or paste a public playlist link without signing in; signed-in use not yet verified live |
-| SoundCloud | Opt-in website session integration; public metadata verified, account sign-in awaits testing ([details](docs/SOUNDCLOUD.md)) |
+| Spotify | Embedded sign-in through SpotAPI, or public playlist links without sign-in; public metadata verified, real account testing pending |
+| SoundCloud | Opt-in embedded sign-in for account-owned playlists; public metadata verified, real account testing pending ([details](docs/SOUNDCLOUD.md)) |
 
-The test suite (about 800 offline tests) covers matching, download approvals, file organization, state
-management, and the desktop interface, including a simulated end-to-end run. These tests use synthetic data and simulated
-services; they do not verify live authentication or end-to-end downloads.
+The offline test suite covers matching, download approvals, file organization, state management, and the
+desktop interface, including a simulated end-to-end run. These tests use synthetic data and simulated
+services; they do not establish that real account sign-in or live downloads work end to end.
 
 ## Features
 
@@ -39,6 +38,7 @@ services; they do not verify live authentication or end-to-end downloads.
 - Verify completed downloads and copy them into a flat tracklist folder.
 - Check the finished folder against the playlist in order, export an M3U8 playlist, or copy the tracks in
   playlist order (numbered) to a USB stick or another folder.
+- View a downloaded file's spectrogram with an estimated frequency cutoff to help assess its audio quality.
 - Track failed transfers, review replacement sources, and resume the most recent import.
 - Inspect every playlist track in import history, filter outstanding work, and export remaining tracks to CSV.
 - Start another import without reconnecting accounts or losing import history.
@@ -53,6 +53,7 @@ ineligible regardless of audio quality.
 - Windows and Python 3.11 or newer.
 - A local slskd installation and a Soulseek account.
 - FFmpeg's `ffprobe` utility for audio verification.
+- FFmpeg's `ffmpeg` utility for the optional spectrogram view.
 - An account with a supported playlist source.
 
 Each user connects their own accounts. Credentials, authenticated sessions, and music are not included in
@@ -84,6 +85,9 @@ The installation also provides an `s2s` GUI entry point.
 Connect a supported service from the sidebar (or paste a public Spotify playlist link on step 1), then follow
 the six steps. Ctrl+1 … Ctrl+6 jump between steps.
 
+For SoundCloud, first enable **web sign-in** on its account page. This initial integration lists your own
+playlists, including accessible private playlists; liked playlists and liked tracks are not included.
+
 1. **Choose playlist.** Select a connected source and playlist, or paste a Spotify playlist link. Preview,
    filter, or sort its tracks before continuing. Preview sorting does not change the source playlist order.
 2. **Choose tracklist folder.** Select the final destination for verified audio files. Each import can use a
@@ -101,7 +105,10 @@ the six steps. Ctrl+1 … Ctrl+6 jump between steps.
    your confirmation).
 6. **Check & export.** Compares the tracklist folder with the playlist in order, lists anything missing or
    unexpected, exports an M3U8 playlist, copies the tracks in order to a USB stick or folder, or exports the
-   missing list.
+   missing list. The checklist reflects saved import results and whether the recorded files still exist.
+
+**Spectrogram** is available for local files in Downloads and Check & export. The frequency cutoff is an
+estimate for manual inspection; it does not prove a file's encoding history or automatically reject a track.
 
 **Import history / outstanding tracks** is available from the File menu and step 5. It preserves the full
 playlist view, including tracks without an eligible match, files not selected for download, failures, and
@@ -141,14 +148,15 @@ are visible to other Soulseek users. See the [setup guide](docs/SETUP.md) for de
 
 - Stored API tokens and login credentials use Windows DPAPI protection under
   `%LOCALAPPDATA%\S2S\secrets`, outside the repository.
-- Apple sign-in takes place on Apple's page inside the application. The embedded browser uses an
-  off-the-record profile; signing out removes stored tokens and clears that profile.
+- Streaming-service sign-in takes place on the service's own pages inside the application. Browser profiles
+  are temporary; accepted sessions are stored separately with Windows protection. Sign-out removes the
+  selected service's local session without disconnecting the other services.
 - Download approvals bind the selected peer, remote file, size, and destination. Changing a selection
   requires a new approval; changing matching rules requires a new search.
 - Import verification checks file size, codec, and bitrate before copying audio into the final library.
 
-Use S2S only to obtain or share material you are authorized to access or distribute. The current Apple Music
-integration uses an unofficial API; S2S is not affiliated with the streaming services or Soulseek.
+Use S2S only to obtain or share material you are authorized to access or distribute. The playlist integrations
+use unofficial website APIs; S2S is not affiliated with the streaming services or Soulseek.
 
 ## Queued downloads
 
@@ -159,9 +167,9 @@ three attempts active per track. Once a source starts transferring, the other at
 without deleting partial files. If it fails, unused reviewed backups can still be tried. Only the finished,
 verified winning file is copied to the tracklist folder.
 
-Recovery checks run while Step 5 is open. Soulseek downloads continue independently when S2S is closed
-or another page is open; recovery resumes when Step 5 is opened again. This behavior has offline test
-coverage; live queue recovery remains under user testing.
+Keep Step 5 open for automatic verification, import, archiving, and backup-recovery checks. Soulseek downloads
+continue independently when S2S is closed or another page is open; automatic processing resumes when Step 5
+is opened again. This behavior has offline test coverage; live queue recovery remains under user testing.
 
 
 ## Known limitations
