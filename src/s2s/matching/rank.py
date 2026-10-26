@@ -49,7 +49,7 @@ def request_exclusion(track: AppleTrack, policy: MatchPolicy | None = None) -> s
     Only kinds the policy excludes count; with an exclusion switched off the request is searched and
     only files carrying the same label can match it (the version comparison still applies).
     """
-    on = (policy or MatchPolicy()).excluded_labels()
+    on = (policy or MatchPolicy()).excluded_labels() - {"clean"}  # a clean request is searched (clean files only)
     ex = parse_title(track.name).excluded
     if ex and ex in on:
         return ex
@@ -196,6 +196,8 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     skip = set(artists) | {full_artist, req.base}
     skip.discard("")
     ex = fp.excluded or scan_exclusion(strip_track_number(stem), skip) or scan_exclusion(stem, skip)
+    if ex == "clean" and req.excluded == "clean":
+        ex = None  # the playlist asked for the clean version
     if ex not in on:
         ex = None  # that label is allowed by the user's rules; version comparison below still applies
     if ex:

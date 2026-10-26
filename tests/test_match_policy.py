@@ -39,14 +39,14 @@ def test_defaults_are_the_owners_rules():
     p = MatchPolicy()
     assert [(r.kind, r.min_bitrate_kbps, r.allow_vbr) for r in p.formats] == [("mp3", 320, False), ("flac", None, False)]
     assert p.version_mode == "exact_then_extended" and p.tier_before_format
-    assert p.excluded_labels() == {"radio edit", "live", "mixed"}
+    assert p.excluded_labels() == {"radio edit", "live", "mixed", "clean"}
     assert p.duration_tolerance_s == 15 and p.skip_flagged_by_default
     assert not hasattr(p, "allow_different_remix")
 
 
 def test_default_summary_line():
     assert describe_policy(MatchPolicy()) == (
-        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 rejecting radio edits, live, mixed")
+        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 rejecting radio edits, live, mixed, clean")
 
 
 # ------------------------------------------------------------------ version mode
@@ -247,3 +247,22 @@ def test_import_accepts_extra_formats_and_checks_codec(tmp_path):
     assert do_import(tmp_path, "wav", p, codec="mp3", bitrate=320000).outcome == ImportOutcome.INVALID
     assert do_import(tmp_path, "ogg", p, codec="vorbis", bitrate=224000).outcome == ImportOutcome.COPIED
     assert do_import(tmp_path, "ogg", p, codec="vorbis", bitrate=128000).outcome == ImportOutcome.INVALID
+
+
+def test_clean_versions_are_rejected_unless_the_playlist_asks_for_clean():
+    from s2s.matching.rank import _evaluate
+    from s2s.models import AppleTrack, MatchPolicy, RemoteFile, Tier
+
+    track = AppleTrack("t", "Bad Habits", "Ed Sheeran", duration_ms=231000)
+    clean = RemoteFile("u", "Music\Ed Sheeran - Bad Habits (Clean).mp3", 9_000_000, "mp3", 320, False, length_s=231)
+    normal = RemoteFile("u", "Music\Ed Sheeran - Bad Habits.mp3", 9_000_000, "mp3", 320, False, length_s=231)
+    cand, _ = _evaluate(track, clean, MatchPolicy())
+    assert cand.tier == Tier.REJECTED and any("clean" in r for r in cand.reasons)
+    assert _evaluate(track, normal, MatchPolicy())[0].tier == Tier.EXACT
+    assert _evaluate(track, clean, MatchPolicy(exclude_clean=False))[0].tier == Tier.EXACT  # switch off
+    asked_clean = AppleTrack("t", "Bad Habits (Clean)", "Ed Sheeran", duration_ms=231000)
+    assert _evaluate(asked_clean, clean, MatchPolicy())[0].tier == Tier.EXACT
+    title = AppleTrack("t", "Clean", "Taylor Swift", duration_ms=271000)  # a song called Clean is not a label
+    song = RemoteFile("u", "Music\Taylor Swift - Clean.mp3", 9_000_000, "mp3", 320, False, length_s=271)
+    assert _evaluate(title, song, MatchPolicy())[0].tier == Tier.EXACT
+    assert MatchPolicy.from_dict(MatchPolicy(exclude_clean=False).to_dict()).exclude_clean is False

@@ -4,7 +4,9 @@
 
 Steps: download the pinned slskd and FFmpeg builds (each checked against its published SHA-256), run PyInstaller,
 copy the tools and licence notices into the app, sign the macOS app ad hoc, run the app's self-test, and write
-the release archive to dist/. Runs from a clean checkout; nothing from this computer's S2S data is included.
+to dist/ the ZIP (used by the in-app updater) and the installer people download: a setup program on Windows
+(Inno Setup 6, packaging/s2s.iss), a disk image with an Applications shortcut on macOS. Runs from a clean
+checkout; nothing from this computer's S2S data is included.
 """
 
 from __future__ import annotations
@@ -260,9 +262,53 @@ def archive(kind: str, app: Path, ver: str) -> Path:
         shutil.make_archive(str(out.with_suffix("")), "zip", root_dir=DIST, base_dir=app.name)
     else:  # ditto keeps the bundle's symlinks, permissions and signatures intact
         subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(out)], check=True)
+    write_checksum(out)
+    return out
+
+
+def write_checksum(out: Path) -> None:
     digest = hashlib.sha256(out.read_bytes()).hexdigest()
     (out.parent / (out.name + ".sha256")).write_text(f"{digest}  {out.name}\n", encoding="utf-8")
     log(f"wrote {out} ({out.stat().st_size // (1024 * 1024)} MiB, sha256 {digest})")
+
+
+def find_iscc() -> str:
+    candidates = [shutil.which("iscc"), r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+                  r"C:\Program Files\Inno Setup 6\ISCC.exe",
+                  str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe")]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    raise SystemExit("Inno Setup 6 is needed for the Windows installer: https://jrsoftware.org/isdl.php")
+
+
+def installer(kind: str, app: Path, ver: str) -> Path:
+    """What people download: S2S-<ver>-windows-x64-setup.exe, or S2S-<ver>-<mac target>.dmg."""
+    if kind.startswith("windows"):
+        from PIL import Image
+
+        icon = WORK / "s2s.ico"
+        icon.parent.mkdir(parents=True, exist_ok=True)
+        Image.open(ROOT / "src" / "s2s" / "ui" / "assets" / "s2s-icon.png").save(
+            icon, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        out = DIST / f"S2S-{ver}-{kind}-setup.exe"
+        subprocess.run([find_iscc(), "/Q", f"/DAppVersion={ver}", f"/DAppDir={app}", f"/DOutDir={DIST}",
+                        f"/DIconFile={icon}", str(ROOT / "packaging" / "s2s.iss")], check=True)
+    else:
+        # A disk image whose window shows S2S.app next to an Applications shortcut: drag one onto the other.
+        # Installing into Applications also keeps macOS from running S2S from a temporary read-only copy.
+        stage = WORK / "dmg"
+        shutil.rmtree(stage, ignore_errors=True)
+        stage.mkdir(parents=True)
+        subprocess.run(["ditto", str(app), str(stage / app.name)], check=True)
+        (stage / "Applications").symlink_to("/Applications")
+        out = DIST / f"S2S-{ver}-{kind}.dmg"
+        out.unlink(missing_ok=True)
+        subprocess.run(["hdiutil", "create", "-volname", "S2S", "-srcfolder", str(stage), "-ov", "-format", "UDZO",
+                        str(out)], check=True)
+    if not out.is_file():
+        raise SystemExit(f"the installer was not written: {out}")
+    write_checksum(out)
     return out
 
 
@@ -277,6 +323,7 @@ def main() -> None:
     self_test(exe)
     check_directory(app)
     archive(kind, app, ver)
+    installer(kind, app, ver)
 
 
 if __name__ == "__main__":

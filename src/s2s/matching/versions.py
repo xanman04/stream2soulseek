@@ -103,9 +103,10 @@ def tokenise(text: str) -> tuple[str, list[tuple[str, bool]]]:
 _FORMAT_WORDS = {"mp3", "flac", "320", "kbps", "320kbps", "320k", "256", "192", "128", "v0", "vbr", "cbr", "web", "cdq", "cd", "wav"}
 
 
-# DJ-pool / store naming noise. Conservative on purpose: "Clean", "Dirty" and "Explicit" only change
-# the lyrics, not the recording, so they are noise. "Intro", "Short", "Quick Hit", "Radio" etc. are
-# real edits and stay version labels (Radio/Short/Single Edit are still excluded by label_exclusion).
+# DJ-pool / store naming noise. "Clean", "Dirty" and "Explicit" only change the lyrics, not the
+# recording, so they are noise for version identity; a "Clean" label is still caught by label_exclusion
+# (censored audio is rejected by default). "Intro", "Short", "Quick Hit", "Radio" etc. are real edits and
+# stay version labels (Radio/Short/Single Edit are still excluded by label_exclusion).
 _LYRIC_NOISE = {"clean", "dirty", "explicit", "clean explicit"}
 _CAM = r"(?:1[0-2]|[1-9])[ab]"  # Camelot 1A-12B
 _OPEN = r"(?:1[0-2]|[1-9])[md]"  # Open Key 1m-12d
@@ -171,6 +172,10 @@ def label_exclusion(label: str) -> str | None:
         return "live"
     if re.search(r"\brecorded live\b", n) or n.endswith(" live"):
         return "live"
+    # clean (censored lyrics); "Radio Edit (Clean)" is still a radio edit first
+    if "radio" not in w and (n in {"clean", "clean version", "clean edit", "clean mix", "clean explicit"}
+                             or re.fullmatch(r"(super |extra )?clean( (version|edit|mix|lyrics|cut))?", n)):
+        return "clean"
     # radio edit
     if "radio" in w and (set(w) & {"edit", "mix", "version", "cut", "remix"} or len(w) == 1):
         return "radio edit"
@@ -239,7 +244,11 @@ def parse_title(text: str) -> ParsedTitle:
     for lab, _br in labels:
         lab, feat = _extract_feat(lab)
         featured += feat
-        if not lab or _is_noise(lab):
+        if not lab:
+            continue
+        if _is_noise(lab):
+            if label_exclusion(lab) == "clean" and not excluded:  # noise for identity, still an exclusion
+                excluded = "clean"
             continue
         if _br and not _has_version_word(lab) and not label_exclusion(lab):
             extra.append(lab)

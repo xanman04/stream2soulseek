@@ -14,7 +14,7 @@ texts are in this `licenses` folder.
 | Qt 6 and PySide6 (dynamically linked, replaceable) | LGPL-3.0 (`LGPL-3.0.txt`, `GPL-3.0.txt`) | https://download.qt.io/official_releases/QtForPython/ and https://code.qt.io |
 | Qt WebEngine (Chromium) | LGPL-3.0 with Chromium's third-party licences | https://code.qt.io/cgit/qt/qtwebengine.git |
 | Python | PSF License (`python/LICENSE`) | https://www.python.org |
-| Python packages (httpx, curl_cffi, spotapi, keyring and their dependencies) | see `python-packages/<name>/` | https://pypi.org |
+| Python packages (httpx, curl_cffi, spotapi and their dependencies) | see `python-packages/<name>/` | https://pypi.org |
 
 S2S is not affiliated with or endorsed by Soulseek, slskd, FFmpeg, Apple, Spotify or SoundCloud. Service logos are
 trademarks of their owners (see `logos-NOTICE.md`).

@@ -13,15 +13,19 @@ through the bundled [slskd client](https://github.com/slskd/slskd).
 
 ## Download and install
 
-Download an archive from [the latest release](https://github.com/xanman04/stream2soulseek/releases/latest).
+Download the installer from [the latest release](https://github.com/xanman04/stream2soulseek/releases/latest).
 Use the files attached under **Assets**, rather than GitHub's automatically generated source-code archives.
 Python, slskd and FFmpeg are included; packaged releases need no separate installation of those tools.
 
-| Computer | Archive |
+| Computer | Installer |
 | --- | --- |
-| Windows 10 (1809+) or Windows 11, x64 | `S2S-<version>-windows-x64.zip` |
-| Mac with Apple silicon (M1 or newer), macOS 14.4+ | `S2S-<version>-macos-arm64.zip` |
-| Intel Mac, macOS 14.4+ | `S2S-<version>-macos-x64.zip` |
+| Windows 10 (1809+) or Windows 11, x64 | `S2S-<version>-windows-x64-setup.exe` |
+| Mac with Apple silicon (M1 or newer), macOS 14.4+ | `S2S-<version>-macos-arm64.dmg` |
+| Intel Mac, macOS 14.4+ | `S2S-<version>-macos-x64.dmg` |
+
+The Windows setup installs S2S for your user account (no administrator rights) with a Start menu entry and an
+uninstaller. On a Mac, open the disk image and drag S2S into Applications. The ZIP files next to them are what
+the in-app updater downloads.
 
 On a Mac, **Apple menu → About This Mac** shows the chip or processor and macOS version.
 The macOS requirement follows the [Qt version bundled with S2S](https://doc.qt.io/qt-6/supported-platforms.html).

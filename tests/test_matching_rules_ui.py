@@ -109,7 +109,7 @@ def test_dialog_refuses_to_save_with_no_file_type(ctx, monkeypatch):
 def test_search_page_summary_and_stale_note(ctx):
     page = SearchPage(ctx)
     assert page.rules_label.text() == (
-        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 rejecting radio edits, live, mixed")
+        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 rejecting radio edits, live, mixed, clean")
     t = AppleTrack("i.1", "Song", "Artist")
     ctx.results = [MatchResult(t, MatchStatus.UNRESOLVED, None)]
     ctx.results_policy = ctx.settings.match_policy.fingerprint()

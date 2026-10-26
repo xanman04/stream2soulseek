@@ -18,8 +18,6 @@ for package in ("spotapi", "curl_cffi"):
     binaries += b
     hidden += h
 datas += collect_data_files("s2s", includes=["ui/assets/*.png", "ui/assets/logos/*"])
-if sys.platform == "darwin":
-    hidden += ["keyring.backends.macOS"]
 
 a = Analysis(  # noqa: F821
     [str(ROOT / "packaging" / "s2s_entry.py")],

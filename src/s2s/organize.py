@@ -159,6 +159,13 @@ def locate_download(
 
 
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # subprocess.CREATE_NO_WINDOW
+_CHECKER_FAILURES = ("ffprobe failed:", "S2S could not find ffprobe")
+
+
+def checker_failed(detail: str | None) -> bool:
+    """The file was not checked because ffprobe itself could not run: the file is probably fine, so another
+    copy must not be offered (that downloads the track twice); Check again is the fix."""
+    return bool(detail) and detail.startswith(_CHECKER_FAILURES)
 
 
 def probe_audio(path: Path, ffprobe_path: str, *, runner=subprocess.run) -> tuple[str, int | None, float | None]:

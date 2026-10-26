@@ -24,6 +24,11 @@ def assets(tmp_path):
         archive.write_bytes(b"synthetic archive bytes")
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         archive.with_name(archive.name + ".sha256").write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+    for name in release.installer_names("1.0.1"):
+        installer = folder / name
+        installer.write_bytes(b"synthetic installer bytes")
+        digest = hashlib.sha256(installer.read_bytes()).hexdigest()
+        installer.with_name(name + ".sha256").write_text(f"{digest}  {name}\n", encoding="utf-8")
     return root, folder
 
 
@@ -57,4 +62,11 @@ def test_wrong_tag_or_mismatched_package_version_fails(assets):
         release.verify_assets(folder, "v9.0.0", root=root)
     (root / "src" / "s2s" / "__init__.py").write_text('__version__ = "1.0.0"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="must agree"):
+        release.verify_assets(folder, "v1.0.1", root=root)
+
+
+def test_installers_are_part_of_every_release(assets):
+    root, folder = assets
+    (folder / "S2S-1.0.1-macos-arm64.dmg").unlink()
+    with pytest.raises(ValueError, match="missing"):
         release.verify_assets(folder, "v1.0.1", root=root)

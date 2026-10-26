@@ -38,7 +38,7 @@ def test_key_and_bpm_alone_do_not_flag():
 @pytest.mark.parametrize("name", [
     "Lash - One 4A 135", "Lash - One 135 4A", "Lash - One 4A - 135", "Lash - One [4A 135]", "Lash - One (4A, 135)",
     "Lash - One 4A", "4A - 135 - Lash - Title", "One - Lash 4A 135", "Lash - One 135bpm", "Lash - One 12m 135",
-    "Lash - One (Clean) 135", "Lash - One (Dirty)", "Lash - One [320]", "Lash - One 320kbps", "Lash - One FLAC 24bit",
+    "Lash - One (Dirty)", "Lash - One (Explicit) 135", "Lash - One [320]", "Lash - One 320kbps", "Lash - One FLAC 24bit",
     "Lash - One [ABC123]", "Lash - One 44.1kHz", "Lash_-_One-WEB-2026",
 ])
 def test_noise_variants_match_exactly(name):
@@ -63,7 +63,7 @@ def test_strip_keeps_numeric_titles_and_real_versions():
     ("Lash - One (feat. Bob) [MCS123].flac", "One", "Lash", Tier.EXACT),
     ("One (Lash Remix) - Foo.mp3", "One (Lash Remix)", "Foo", Tier.EXACT),
     ("lash - one 8A 124.mp3", "One", "Lash", Tier.EXACT),
-    ("Lash - One (Clean) 128.mp3", "One", "Lash", Tier.EXACT),
+    ("Lash - One (Clean) 128.mp3", "One", "Lash", Tier.REJECTED),  # censored version (owner, 1.0.8)
     ("One - Lash.mp3", "One", "Lash", Tier.EXACT),
     ("One 4A 135 - Lash [www.dj-promo.org].mp3", "One", "Lash", Tier.EXACT),
     ("Lash - One (Other Remix) 8A 124.mp3", "One", "Lash", Tier.REJECTED),

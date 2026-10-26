@@ -250,3 +250,23 @@ def test_a_long_wait_moves_into_needs_attention(env, monkeypatch):  # noqa: F811
     assert not page.queued_backups_btn.isHidden()  # the user chooses another uploader; nothing is automatic
     assert transfers_page.LONG_WAIT_S == 5 * 60
     page.stop()
+
+
+def test_a_file_the_checker_could_not_check_is_not_offered_another_copy():
+    """1.0.7 on a Mac: ffprobe could not run, every file 'failed', and choosing another source downloaded the
+    track twice (an MP3 and a FLAC). An unchecked file now only offers Check again."""
+    from types import SimpleNamespace
+
+    from s2s.models import ImportOutcome, TransferState
+    from s2s.ui.transfers_page import describe_track
+
+    rec_ = SimpleNamespace(status=SimpleNamespace(state=TransferState.SUCCEEDED, raw_state="Completed, Succeeded",
+                                                  error=None))
+    unchecked = SimpleNamespace(outcome=ImportOutcome.INVALID, detail="ffprobe failed: PermissionError")
+    st = describe_track(rec_, unchecked)
+    assert st.recheck and not st.fixable and "Check again" in st.help
+    missing = SimpleNamespace(outcome=ImportOutcome.INVALID,
+                              detail="S2S could not find ffprobe, the tool that checks files; restart S2S")
+    assert not describe_track(rec_, missing).fixable
+    bad = SimpleNamespace(outcome=ImportOutcome.INVALID, detail="mp3 bitrate 128 kbps is below 320")
+    assert describe_track(rec_, bad).fixable  # a genuinely wrong file can still get another source

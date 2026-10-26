@@ -112,6 +112,7 @@ class MatchPolicy:
     exclude_radio_edits: bool = True
     exclude_live: bool = True
     exclude_mixed: bool = True
+    exclude_clean: bool = True  # censored "Clean" versions (a clean request still gets clean files)
     duration_tolerance_s: int = 15
     skip_flagged_by_default: bool = True
 
@@ -123,6 +124,8 @@ class MatchPolicy:
             out.add("live")
         if self.exclude_mixed:
             out.add("mixed")
+        if self.exclude_clean:
+            out.add("clean")
         return frozenset(out)
 
     def to_dict(self) -> dict:
@@ -134,6 +137,7 @@ class MatchPolicy:
             "exclude_radio_edits": self.exclude_radio_edits,
             "exclude_live": self.exclude_live,
             "exclude_mixed": self.exclude_mixed,
+            "exclude_clean": self.exclude_clean,
             "duration_tolerance_s": self.duration_tolerance_s,
             "skip_flagged_by_default": self.skip_flagged_by_default,
         }
@@ -170,6 +174,7 @@ class MatchPolicy:
         base.exclude_radio_edits = flag("exclude_radio_edits", True)
         base.exclude_live = flag("exclude_live", True)
         base.exclude_mixed = flag("exclude_mixed", True)
+        base.exclude_clean = flag("exclude_clean", True)
         base.skip_flagged_by_default = flag("skip_flagged_by_default", True)
         try:
             base.duration_tolerance_s = max(0, int(data.get("duration_tolerance_s", 15)))

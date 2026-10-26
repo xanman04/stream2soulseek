@@ -91,7 +91,7 @@ def verified_plan(store, plan):
         raise ApprovalError("Reviewed backup files changed; review again")
     primary = next((i for i in approval.items if i.apple_id == plan["apple_id"]), None)
     backups = tuple(SelectionItem(**row) for row in json.loads(plan["items_json"]))
-    if primary is None or not 1 <= len(backups) <= 5 or not 5 <= plan["wait_seconds"] <= 300 or not 2 <= plan["max_parallel"] <= 3:
+    if primary is None or not 1 <= len(backups) <= 5 or not 5 <= plan["wait_seconds"] <= 300 or not 1 <= plan["max_parallel"] <= 3:
         raise ApprovalError("Invalid reviewed backup pool")
     peers = {primary.username.casefold()}
     for item in backups:
@@ -101,7 +101,7 @@ def verified_plan(store, plan):
     return approval, primary, backups
 
 
-def approve_backups(store, approval, backups, settings, *, wait_seconds=45, max_parallel=3):
+def approve_backups(store, approval, backups, settings, *, wait_seconds=45, max_parallel=1):
     """Persist only the exact backup files included in the confirmation dialog."""
     verify_approval(store, approval.id, approval.fingerprint)
     plans = []
@@ -281,10 +281,11 @@ def advance(store, service, approval_id, remote, policy_fingerprint, *, now=None
                 # Keep observing existing attempts, which may still start later.
                 continue
             active = [r for r in rows if TransferState(r["state"]) in _ACTIVE and r["raw_state"] != CANCELLED_BACKUP]
-            if len(active) >= plan["max_parallel"]:
-                # Preserve the original source; rotate the oldest waiting backup.
-                oldest = next((r for r in active if r["ordinal"] >= 0), active[0])
-                service.cancel_backup_attempt(plan["id"], oldest["ordinal"])
+            # One uploader at a time, whatever older plans stored: two attempts waiting side by side could both
+            # start and finish (a small file takes seconds) before the slower one is cancelled, downloading the
+            # track twice. The waiting attempt is cancelled (its partial file kept) before the next is queued.
+            for row in active:
+                service.cancel_backup_attempt(plan["id"], row["ordinal"])
             store.update_fallback_plan(plan["id"], status="active", error="")
             ordinal = plan["next_index"]
             if store.reserve_fallback_attempt(plan["id"], ordinal, now.isoformat()):
