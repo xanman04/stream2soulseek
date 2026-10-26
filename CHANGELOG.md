@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- In-app updates now work on a Mac that opened S2S straight from Downloads: macOS runs such an app from a
+  read-only copy, so the update is installed at the app's real location (or in Applications) instead of
+  being refused.
+- A shorter update popup in the app's style: the version, one line per change, Later and Update.
+
 ## 1.0.6 — 2026-10-26
 
 - macOS: keep all secrets in one Keychain item, read once per launch and held in memory. Signing in to

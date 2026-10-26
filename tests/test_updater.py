@@ -171,3 +171,54 @@ def test_release_signing_script_round_trip(tmp_path, monkeypatch):
     module.main()
     sig = (tmp_path / "S2S-1.0.4-windows-x64.zip.sig").read_text(encoding="utf-8")
     assert real("S2S-1.0.4-windows-x64.zip", hashlib.sha256(b"zip").hexdigest(), sig, pub)
+
+
+def test_a_translocated_mac_app_installs_to_its_real_location(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    running = Path("/private/var/folders/x/T/AppTranslocation/ABC/d/S2S.app")  # read-only copy macOS made
+    real = tmp_path / "Downloads" / "S2S.app"
+    monkeypatch.setattr(updater, "_original_path", lambda app: real)
+    real.parent.mkdir()
+    assert updater.install_target(running) == real
+    # the original location is unknown: fall back to the Applications folder
+    monkeypatch.setattr(updater, "_original_path", lambda app: None)
+    monkeypatch.setattr(updater, "_writable", lambda folder: folder == Path("/Applications"))
+    assert updater.install_target(running) == Path("/Applications/S2S.app")
+    monkeypatch.setattr(updater, "_writable", lambda folder: False)
+    assert updater.install_target(running) is None
+
+
+def test_an_app_that_is_not_translocated_updates_in_place(tmp_path):
+    app = tmp_path / ("S2S.app" if sys.platform == "darwin" else "S2S")
+    assert updater.install_target(app) == app
+    assert updater.can_install(app)
+    assert not list(tmp_path.iterdir())  # the write test leaves nothing behind
+
+
+def test_the_mac_installer_can_install_where_no_app_is_yet(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    app = tmp_path / "Applications" / "S2S.app"
+    script, cmd = updater.installer_script(app, tmp_path / "staging" / "S2S.app", 4242)
+    text = script.read_text(encoding="utf-8")
+    assert cmd[0] == "/bin/sh"
+    assert f"if [ -e '{app}' ]; then mv" in text  # only back up an app that is there
+
+
+def test_update_popup_lists_only_change_headlines():
+    from s2s.ui.update_dialog import UpdateDialog, change_headlines
+
+    notes = ("## What's changed\n\n- **Mac: no more repeated Keychain prompts.** S2S keeps all its saved logins\n"
+             "  in one Keychain entry.\n- Update from 1.0.5 inside S2S: Help > Check for updates. More text.\n\n"
+             "## Downloads\n\n| Platform | Download |\n")
+    assert change_headlines(notes) == ["Mac: no more repeated Keychain prompts",
+                                       "Update from 1.0.5 inside S2S: Help > Check for updates"]
+    info = updater.UpdateInfo("9.9.9", notes, "S2S-9.9.9-windows-x64.zip", "u", "s", "p")
+    dialog = UpdateDialog(info, target=Path("S2S"))
+    assert dialog.update_btn.text() == "Update" and "Downloads" not in dialog.changes.text()
+    dialog.deleteLater()
+    dialog = UpdateDialog(info, target=None)  # this copy cannot update itself: send to the download page
+    assert dialog.update_btn.text() == "Download"
+    dialog.deleteLater()
+    dialog = UpdateDialog(info, target=Path("S2S"), busy_reason="Finish or cancel the running downloads first.")
+    assert not dialog.update_btn.isEnabled()
+    dialog.deleteLater()

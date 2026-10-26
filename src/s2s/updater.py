@@ -2,7 +2,9 @@
 
 Flow: `check_for_update()` reads the latest release; `download_update()` fetches this platform's archive and its
 `.sig`, and refuses it unless the Ed25519 signature (made by the release build with the private key, see
-update_key.py) matches; `stage_update()` unpacks it next to the running app; `launch_installer()` starts a small
+update_key.py) matches; `stage_update()` unpacks it next to the app's real location (`install_target()`: on macOS
+an app opened from where it was downloaded runs from a read-only "translocated" copy, so the original location, or
+else the Applications folder, is used instead); `launch_installer()` starts a small
 helper that waits for S2S to quit, swaps the folders (keeping the old one until the new one is in place) and
 starts the new version. User data lives in the app data folder, so it is untouched.
 """
@@ -136,12 +138,80 @@ def installed_app() -> Path | None:
     return exe.parent
 
 
-def can_install(app: Path | None) -> bool:
-    return app is not None and os.access(app.parent, os.W_OK)
+def _translocated(app: Path) -> bool:
+    return "/AppTranslocation/" in app.as_posix()
+
+
+def _original_path(app: Path) -> Path | None:
+    """Where a translocated app really is (macOS Security framework), or None."""
+    import ctypes
+
+    try:
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        sec = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Security.framework/Security")
+        cf.CFURLCreateFromFileSystemRepresentation.restype = ctypes.c_void_p
+        cf.CFURLCreateFromFileSystemRepresentation.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long,
+                                                               ctypes.c_bool]
+        cf.CFURLGetFileSystemRepresentation.restype = ctypes.c_bool
+        cf.CFURLGetFileSystemRepresentation.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_char_p,
+                                                        ctypes.c_long]
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        sec.SecTranslocateCreateOriginalPathForURL.restype = ctypes.c_void_p
+        sec.SecTranslocateCreateOriginalPathForURL.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        raw = os.fsencode(str(app))
+        url = cf.CFURLCreateFromFileSystemRepresentation(None, raw, len(raw), True)
+        if not url:
+            return None
+        try:
+            original = sec.SecTranslocateCreateOriginalPathForURL(url, None)
+        finally:
+            cf.CFRelease(url)
+        if not original:
+            return None
+        try:
+            buf = ctypes.create_string_buffer(4096)
+            if not cf.CFURLGetFileSystemRepresentation(original, True, buf, len(buf)):
+                return None
+        finally:
+            cf.CFRelease(original)
+        return Path(os.fsdecode(buf.value))
+    except (OSError, AttributeError):
+        return None
+
+
+def _writable(folder: Path) -> bool:
+    """A real write test (os.access ignores Windows ACLs and read-only macOS volumes)."""
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        fd, probe = tempfile.mkstemp(prefix=".s2s-write-test-", dir=folder)
+        os.close(fd)
+        os.unlink(probe)
+        return True
+    except OSError:
+        return False
+
+
+def install_target(app: Path | None = None) -> Path | None:
+    """Where the updated app goes: normally where it runs. A translocated macOS app (opened from Downloads
+    without being moved) runs from a read-only copy, so its original location is used, else Applications."""
+    app = installed_app() if app is None else app
+    if app is None:
+        return None
+    if sys.platform != "darwin" or not _translocated(app):
+        return app
+    candidates = [_original_path(app), Path("/Applications") / app.name, Path.home() / "Applications" / app.name]
+    for target in candidates:
+        if target is not None and not _translocated(target) and _writable(target.parent):
+            return target
+    return None
+
+
+def can_install(target: Path | None) -> bool:
+    return target is not None and _writable(target.parent)
 
 
 def stage_update(archive: Path, app: Path) -> Path:
-    """Unpack the verified archive next to the installed app (same disk, so the swap is a rename)."""
+    """Unpack the verified archive next to the install target (same disk, so the swap is a rename)."""
     staging = Path(tempfile.mkdtemp(prefix=".s2s-update-", dir=app.parent))
     if sys.platform == "darwin":  # ditto keeps the bundle's symlinks, permissions and signatures
         subprocess.run(["ditto", "-x", "-k", str(archive), str(staging)], check=True)
@@ -160,7 +230,10 @@ def stage_update(archive: Path, app: Path) -> Path:
 
 
 def installer_script(app: Path, new_app: Path, pid: int) -> tuple[Path, list[str]]:
-    """Write the helper that swaps the apps after S2S quits; returns (script path, command to start it)."""
+    """Write the helper that swaps the apps after S2S quits; returns (script path, command to start it).
+
+    `app` is the install target; on macOS it may not exist yet (a translocated app installs into Applications).
+    """
     backup = app.with_name(f"{app.name}.old-{int(time.time())}")
     folder = Path(tempfile.mkdtemp(prefix="s2s-installer-"))
     if sys.platform == "win32":
@@ -185,8 +258,8 @@ Remove-Item -LiteralPath (Split-Path $new) -Recurse -Force -ErrorAction Silently
         q = lambda p: "'" + str(p).replace("'", "'\\''") + "'"  # noqa: E731
         script.write_text(f"""#!/bin/sh
 i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 240 ]; do sleep 0.5; i=$((i+1)); done
-mv {q(app)} {q(backup)} || {{ open {q(app)}; exit 1; }}
-if ! mv {q(new_app)} {q(app)}; then mv {q(backup)} {q(app)}; open {q(app)}; exit 1; fi
+if [ -e {q(app)} ]; then mv {q(app)} {q(backup)} || {{ open {q(app)}; exit 1; }}; fi
+if ! mv {q(new_app)} {q(app)}; then [ -e {q(backup)} ] && mv {q(backup)} {q(app)}; open {q(app)}; exit 1; fi
 xattr -dr com.apple.quarantine {q(app)} 2>/dev/null
 open {q(app)}
 rm -rf {q(backup)} {q(new_app.parent)}
