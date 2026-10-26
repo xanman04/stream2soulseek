@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.2 — 2026-10-26
 
+- Preserve Qt's required browser-helper entitlements when signing the Mac app.
+- Start an actual packaged browser renderer and execute offline JavaScript before a build can pass.
+- Bundle the LGPL text from the repository to avoid an extra licence-site network dependency.
 - Reject personal-state and media files during standalone builds.
 - Upload future releases as drafts, then publish the complete download set as Latest.
 - Add direct platform download links and dedicated installation/release guides.
