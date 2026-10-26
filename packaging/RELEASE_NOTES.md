@@ -1,17 +1,20 @@
 ## What's changed
 
-- Fixed the Mac app crashing as soon as **Sign in to Apple Music** was pressed. An app-wide hover-text filter
-  crashed when the sign-in browser appeared; S2S no longer uses one (it shows no hover texts).
-- macOS now asks for access to your folders when you choose them (Settings and Step 2), with a short reason,
-  instead of later from the background. If access is refused, S2S says where to allow it.
+- **Updates install from inside S2S.** When a new version is out, S2S offers it at start (or Help > Check for
+  updates): one click downloads it, checks that it is genuinely signed by the developer, installs it and
+  restarts. Settings, logins and history are kept. This is the last version you need to download by hand.
+- **Help > Report a problem** opens a prefilled email to the developer with your description, the S2S and system
+  versions and a recent log (logins and folder names removed). You see everything before you press Send.
+- Fixed the Mac app crashing when **Sign in to Apple Music** was pressed (from 1.0.3), and macOS now asks for
+  folder access when you choose your folders.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download ZIP](https://github.com/xanman04/stream2soulseek/releases/download/v1.0.3/S2S-1.0.3-macos-arm64.zip) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download ZIP](https://github.com/xanman04/stream2soulseek/releases/download/v1.0.3/S2S-1.0.3-macos-x64.zip) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download ZIP](https://github.com/xanman04/stream2soulseek/releases/download/v1.0.3/S2S-1.0.3-windows-x64.zip) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download ZIP](https://github.com/xanman04/stream2soulseek/releases/download/v1.0.4/S2S-1.0.4-macos-arm64.zip) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download ZIP](https://github.com/xanman04/stream2soulseek/releases/download/v1.0.4/S2S-1.0.4-macos-x64.zip) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download ZIP](https://github.com/xanman04/stream2soulseek/releases/download/v1.0.4/S2S-1.0.4-windows-x64.zip) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives below are for developers.
 Matching `.sha256` files are available under Assets.
@@ -29,5 +32,5 @@ Developer ID signing or notarization; Windows builds are not publisher-signed. O
 
 [Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) ·
 [Report a problem](https://github.com/xanman04/stream2soulseek/issues) ·
-[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.0.2...v1.0.3)
+[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.0.3...v1.0.4)
 

@@ -5,11 +5,12 @@ Stack layout: index 0 is the streaming-service page, indexes 1..5 are the five w
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from .. import workflow
 from ..models import Playlist, Settings, TransferState
@@ -106,6 +107,13 @@ class MainWindow(QMainWindow):
         history_act = QAction("Import history / outstanding tracks...", self)
         history_act.triggered.connect(self.open_history)
         file_menu.addAction(history_act)
+        help_menu = self.menuBar().addMenu("&Help")
+        report_act = QAction("Report a problem...", self)
+        report_act.triggered.connect(self.report_problem)
+        help_menu.addAction(report_act)
+        update_act = QAction("Check for updates...", self)
+        update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
+        help_menu.addAction(update_act)
 
         self.sidebar.step_selected.connect(self.go_step)
         self.sidebar.service_selected.connect(self._open_service)
@@ -298,6 +306,58 @@ class MainWindow(QMainWindow):
         self.playlists.startup()
         if self._downloads_running_in_last_import():
             self.resume_last_import()
+        if getattr(sys, "frozen", False):  # only the packaged app updates itself; source runs use git
+            QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
+
+    # ------------------------------------------------------------ problem reports and updates
+
+    def report_problem(self) -> None:
+        from .feedback_dialog import FeedbackDialog
+
+        dialog = FeedbackDialog(self)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def check_for_updates(self, *, manual: bool) -> None:
+        """Look for a newer signed release (in the background). Automatic checks stay silent when nothing is new."""
+        from .. import __version__, updater
+
+        def work():
+            return updater.check_for_update(__version__)
+
+        def done(info) -> None:
+            if info is None:
+                if manual:
+                    QMessageBox.information(self, "Check for updates", f"S2S {__version__} is the latest version.")
+                return
+            self._offer_update(info)
+
+        def failed(exc) -> None:
+            if manual:
+                show_error(self, "Check for updates", str(exc))
+
+        run_async(self, work, done, failed)
+
+    def _offer_update(self, info) -> None:
+        from .. import updater
+        from .update_dialog import UpdateDialog
+
+        busy = ""
+        if self._queueing or self._downloads_running_in_last_import():
+            busy = ("Downloads are still running. Update when they have finished (or after Cancel downloads), so "
+                    "nothing is interrupted.")
+        dialog = UpdateDialog(info, can_install=updater.can_install(updater.installed_app()), busy_reason=busy,
+                              parent=self)
+        dialog.quit_requested.connect(self._quit_for_update)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def _quit_for_update(self) -> None:
+        from ..applog import get
+
+        get().info("Quitting to install an update")
+        self.close()
+        QApplication.instance().quit()
 
     def _downloads_running_in_last_import(self) -> bool:
         store = self.ctx.store
