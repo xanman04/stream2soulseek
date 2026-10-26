@@ -207,7 +207,7 @@ def test_flagged_track_has_visible_alternatives_control(win, tmp_path):
     page.set_results([result], str(tmp_path))
     page.alternatives_btn.click()
     assert page.detail.rowCount() == 2
-    assert "1 alternative" in page.detail_title.text()
+    assert page.alt_title.text() == "Other files you can use instead (1)"
     page.detail.selectRow(1)
     page.use_btn.click()
     assert page.model.rows[0].chosen.file.username == result.alternatives[0].file.username

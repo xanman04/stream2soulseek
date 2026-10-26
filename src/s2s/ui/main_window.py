@@ -110,6 +110,9 @@ class MainWindow(QMainWindow):
         self.sidebar.service_selected.connect(self._open_service)
         self.sidebar.soulseek_login_requested.connect(lambda: self.soulseek.prompt())
         self.sidebar.settings_requested.connect(self.open_settings)
+        # Review's own "Download N tracks…" button leads on to Downloads; a second Next there would be redundant.
+        self.frames[STEP_REVIEW].next_btn.setVisible(False)
+        self.frames[STEP_REVIEW].hint_label.setVisible(False)
         for f in self.frames:
             if f.index == STEP_FINISH:  # the last step's button starts the next playlist
                 f.next_clicked.connect(self.transfers.request_new_import)
@@ -336,7 +339,7 @@ class MainWindow(QMainWindow):
         if self._queueing or not self.ctx.import_id:
             return
         if self.transfers._inflight:
-            self.statusBar().showMessage("Transfer status is refreshing; try Review queued backups again in a moment.")
+            self.statusBar().showMessage("Download status is refreshing; try again in a moment.")
             return
         self.transfers.stop()
         dialog = QueuedRecoveryDialog(self.ctx, self)
@@ -361,7 +364,7 @@ class MainWindow(QMainWindow):
             if error is not None:
                 show_error(self, "Queued recovery", ctx.describe(error))
             else:
-                self.statusBar().showMessage(f"Reviewed backup recovery enabled: wait {wait_seconds} seconds between attempts.")
+                self.statusBar().showMessage(f"Stuck downloads switch to another uploader after {wait_seconds} seconds.")
             if ctx.import_id == iid and self.stack.currentIndex() == STEP_TRANSFERS + 1:
                 self.transfers.start()
 

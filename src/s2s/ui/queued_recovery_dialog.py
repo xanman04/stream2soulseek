@@ -19,17 +19,17 @@ class QueuedRecoveryDialog(QDialog):
     def __init__(self, ctx: AppContext, parent=None) -> None:
         super().__init__(parent)
         self.ctx = ctx
-        self.setWindowTitle("Try backups for queued downloads")
+        self.setWindowTitle("Switch stuck downloads to another uploader")
         self.resize(1050, 620)
         self.approvals: dict[str, Approval] = {}
         self._results = {r.track.apple_id: r for r in ctx.store.load_match_results(ctx.import_id)} if ctx.import_id else {}
         self._items: dict[QTreeWidgetItem, tuple[str, str, SelectionItem | None]] = {}
 
         self.explanation = QLabel(
-            "These downloads are still waiting in an uploader's queue with nothing transferred. Tick the backup "
-            "files you are happy to try instead. If a download makes no progress for the time below, another "
-            "ticked backup is tried (up to three at once per track). The first file that starts moving wins and "
-            "the rest are cancelled; nothing outside this list is ever tried.", self,
+            "These downloads are still waiting in an uploader's queue with nothing transferred. Tick other "
+            "uploaders of the same file that S2S may switch to. If a download has not started after the time "
+            "below, S2S tries a ticked one. The first that starts sending is kept and the rest are cancelled; "
+            "nothing outside this list is ever tried.", self,
         )
         self.explanation.setWordWrap(True)
         self.wait_seconds = QSpinBox(self)
@@ -45,20 +45,20 @@ class QueuedRecoveryDialog(QDialog):
         self.tree.itemChanged.connect(self._item_changed)
 
         top = QHBoxLayout()
-        top.addWidget(QLabel("Try a backup after no progress for:", self))
+        top.addWidget(QLabel("Switch when nothing has started after:", self))
         top.addWidget(self.wait_seconds)
         top.addStretch(1)
         layout = QVBoxLayout(self)
         layout.addWidget(self.explanation)
         layout.addLayout(top)
         layout.addWidget(self.tree, 1)
-        self.empty_note = QLabel("Nothing to recover: no queued download has eligible backups.", self)
+        self.empty_note = QLabel("No waiting download has another uploader with the same file.", self)
         self.empty_note.setWordWrap(True)
         layout.addWidget(self.empty_note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.approve_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        self.approve_btn.setText("Approve ticked backups")
+        self.approve_btn.setText("Allow ticked uploaders")
         self.approve_btn.setEnabled(False)
         buttons.accepted.connect(self._accept_if_selected)
         buttons.rejected.connect(self.reject)
@@ -112,7 +112,7 @@ class QueuedRecoveryDialog(QDialog):
                 file = candidate.file if candidate else None
                 extension = file.extension.upper() if file and file.extension else ""
                 bitrate = f"{file.bitrate} kbps" if file and file.bitrate is not None else ""
-                child = QTreeWidgetItem([backup.username, backup.filename, extension, bitrate, "Backup"])
+                child = QTreeWidgetItem([backup.username, backup.filename, extension, bitrate, "Other uploader"])
                 child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 child.setCheckState(0, Qt.CheckState.Checked)
                 parent.addChild(child)

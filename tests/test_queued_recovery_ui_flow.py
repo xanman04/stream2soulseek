@@ -96,24 +96,15 @@ def prepared(window, tmp_path):
     return track, result, dest, import_id
 
 
-def test_review_backup_option_defaults_off_and_summary_lists_exact_files(window, tmp_path, monkeypatch):
+def test_review_always_lists_other_uploaders_of_the_same_file(window, tmp_path, monkeypatch):
     _track, result, dest, _iid = prepared(window, tmp_path)
     page = window.review
     page.set_results([result], dest)
-    assert not page.backups_check.isChecked()
-    assert page.backup_wait.value() == 45
-    assert not page.backup_wait.isEnabled()
-    primary_only = page.summary_entries()
-    assert len(primary_only) == 1 and not primary_only[0].get("backup")
-
-    page.backups_check.setChecked(True)
-    assert page.backup_wait.isEnabled()
-    page.backup_wait.setValue(37)
     entries = page.summary_entries()
     assert len(entries) == 2
-    backup = next(e for e in entries if e.get("backup"))
-    assert (backup["username"], backup["filename"], backup["wait_seconds"]) == (
-        result.alternatives[0].file.username, result.alternatives[0].file.filename, 37,
+    other = next(e for e in entries if e.get("backup"))
+    assert (other["username"], other["filename"], other["wait_seconds"]) == (
+        result.alternatives[0].file.username, result.alternatives[0].file.filename, review_page.SWITCH_AFTER_S,
     )
 
     called = []
@@ -128,8 +119,6 @@ def test_yes_persists_reviewed_pool_before_primary_enqueue(window, tmp_path, mon
     _track, result, dest, import_id = prepared(window, tmp_path)
     page = window.review
     page.set_results([result], dest)
-    page.backups_check.setChecked(True)
-    page.backup_wait.setValue(31)
     monkeypatch.setattr(page, "ask_confirmation", lambda _shown: True)
 
     events = []
@@ -140,7 +129,7 @@ def test_yes_persists_reviewed_pool_before_primary_enqueue(window, tmp_path, mon
             def enqueue_approved(self, approval_id, fingerprint):
                 plans = window.ctx.store.fallback_plans(import_id)
                 assert len(plans) == 1
-                assert plans[0]["wait_seconds"] == 31
+                assert plans[0]["wait_seconds"] == review_page.SWITCH_AFTER_S
                 events.append(("enqueue", approval_id, fingerprint, plans[0]["items_json"]))
         yield Service()
 

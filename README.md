@@ -30,10 +30,10 @@ services; they do not establish that real account sign-in or live downloads work
 
 - Browse playlists and preview their tracks in a native desktop interface.
 - Search Soulseek for matching recordings, with progress and individual track results.
-- Search multiple tracks concurrently, using short initial passes and a longer search when more backup
-  sources are needed. Aim for a primary match and 3–5 independent backup uploaders; availability varies.
+- Search multiple tracks concurrently, using short initial passes and a longer search when too few uploaders
+  are found. Aim for a match plus two other uploaders of the same file; availability varies.
 - Review proposed files, alternatives, audio quality, and unresolved matches before downloading.
-- Optionally approve exact backup files for queued downloads: wait 45 seconds, try another source, and cancel redundant attempts when one starts.
+- Automatically switch a download that is stuck in an uploader's queue to another uploader of the same file.
 - Configure matching rules and save reusable rule sets.
 - Verify completed downloads and copy them into a flat tracklist folder.
 - Check the finished folder against the playlist in order.
@@ -100,8 +100,8 @@ playlists, including accessible private playlists; liked playlists and liked tra
 4. **Review & confirm.** A summary shows how many tracks are ready, need a look, or were not found; filters
    and **Next to check** take you straight to the ones that need attention. Confident matches are ticked,
    flagged ones are not. The details panel explains why a file was chosen or flagged and lists alternatives.
-   Downloads begin only after you confirm the exact files. Optional queued recovery (remembered once you turn
-   it on) lists the exact backup files in the same confirmation.
+   Downloads begin only after you confirm the exact files with **Download N tracks…**; the confirmation also
+   lists, in grey, the other uploaders of the same files that S2S may switch to.
 5. **Downloads & import.** The queue lists every track with a plain status ("In folder ✓", "Downloading 42%",
    "Waiting on uploader"). Verified files are copied into the tracklist folder automatically. Any track that
    fails, is declined, waits on its uploader for more than 10 minutes, or does not pass its check also appears
@@ -165,21 +165,23 @@ use unofficial website APIs; S2S is not affiliated with the streaming services o
 
 ## Queued downloads
 
-Enable the backup option during Review, or use **Review queued backups** in Step 5. Inspect the listed
-files and approve them before recovery starts. The default wait is 45 seconds with no progress; the
-interval can be adjusted before approval. S2S tries another reviewed source each interval, with at most
-three attempts active per track. Once a source starts transferring, the other attempts are cancelled
-without deleting partial files. If it fails, unused reviewed backups can still be tried. Only the finished,
-verified winning file is copied to the tracklist folder.
+Switching is automatic. When an uploader has sent nothing for 3 minutes, S2S tries another uploader of the
+same file, with at most three attempts active per track. It only switches to a copy of the very recording you
+approved: the same match (an exact match is never swapped for an extended mix), the same version, the same
+format and quality, and the same length within 3 seconds or the same byte size. These other uploaders are listed
+in the confirmation, and nothing outside that list is ever requested. Once a source starts sending, the other
+attempts are cancelled without deleting partial files. Only the finished, verified file is copied to the
+tracklist folder. For downloads confirmed before this version, **Switch to another uploader…** in Step 5 offers
+the same.
 
-Keep Step 5 open for automatic verification, import, archiving, and backup-recovery checks. Soulseek downloads
+Keep Step 5 open for automatic verification, import, archiving, and switching checks. Soulseek downloads
 continue independently when S2S is closed or another page is open; automatic processing resumes when Step 5
 is opened again. This behavior has offline test coverage; live queue recovery remains under user testing.
 
 
 ## Known limitations
 
-- Peer availability and upload queues can delay or prevent downloads. Backup-source targets are not
+- Peer availability and upload queues can delay or prevent downloads. Other uploaders are not
   guaranteed, and unresolved results may require a later search or manual investigation.
 - Archive handling needs additional protection against pre-existing nested symbolic links and Windows
   junctions. Use ordinary folders for downloads and archives in the current prototype.
