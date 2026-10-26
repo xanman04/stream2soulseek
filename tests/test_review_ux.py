@@ -91,7 +91,7 @@ def test_summary_chips_and_row_text(page):
     assert match[4] == "Extended mix (fallback)"
     assert px.index(0, review_page.C_QUALITY).data() == "MP3 320"
     assert px.index(4, review_page.C_QUALITY).data() == "FLAC"
-    assert px.index(0, review_page.C_SOURCE).data() == "u1  +1 backup"
+    assert px.index(0, review_page.C_SOURCE).data() == "u1  (+1 other)"
     assert px.index(1, review_page.C_LENGTH).data() == "5:40 (5:00)"  # differs beyond the tolerance
     assert px.index(0, review_page.C_LENGTH).data() == "5:00"
 
@@ -123,10 +123,10 @@ def test_bulk_actions(page):
 
 def test_details_panel_shows_both_sides_and_reasons(page):
     page.view.setCurrentIndex(page.proxy.index(1, 0))  # the flagged row
-    assert "Song 1" in page.detail_title.text()
+    assert page.detail_title.text().startswith("Song 1")
     assert "length differs by 40 s" in page.why.text().lower() and "Check" in page.why.text()
-    assert page.path_edit.text().endswith("c.mp3")
-    assert "5:40" in page._cells[("Length", 2)].text() and page._cells[("Length", 1)].text() == "5:00"
+    assert page.file_label.text().endswith("c.mp3")
+    assert "5:40 (playlist 5:00, 40 s off)" in page.facts_label.text()
     assert not page.use_btn.isEnabled()  # only the proposed file exists
     page.view.setCurrentIndex(page.proxy.index(2, 0))
     assert "none passed your rules" in page.why.text()
@@ -135,8 +135,12 @@ def test_details_panel_shows_both_sides_and_reasons(page):
 def test_alternative_use_button_and_reticks(page):
     page.view.setCurrentIndex(page.proxy.index(0, 0))
     assert not page.use_btn.isEnabled()  # the in-use file is selected
-    states = [page.detail.item(r, 0).text() for r in range(page.detail.rowCount())]
-    assert states == ["In use", "Option", "Rejected"]
+    states = [page.detail.item(r, 0).data(review_page.ROLE_STATE) for r in range(page.detail.rowCount())]
+    assert states == ["in use", "option", "rejected"]
+    assert page.detail.item(0, 0).text() == "✓ Using"
+    assert page.detail.isRowHidden(2) and not page.show_rejected.isHidden()  # non-matching files tucked away
+    page.show_rejected.setChecked(True)
+    assert not page.detail.isRowHidden(2)
     page.detail.selectRow(2)  # rejected rows cannot be selected
     assert not page.use_btn.isEnabled()
     page.detail.selectRow(1)
@@ -144,7 +148,7 @@ def test_alternative_use_button_and_reticks(page):
     page.model.rows[0].checked = False
     page.use_btn.click()
     assert page.model.rows[0].chosen.file.username == "u9" and page.model.rows[0].checked
-    assert page.detail.item(1, 0).text() == "In use"
+    assert page.detail.item(1, 0).data(review_page.ROLE_STATE) == "in use"
 
 
 def test_enter_on_alternative_uses_it(page):
@@ -178,11 +182,13 @@ def test_next_to_check_jumps_to_flagged_row(page):
 def test_locked_banner_and_downloads_signal(ctx):
     p = ReviewPage(ctx)
     p.set_results(results(), "D:\\lib", locked=True)
-    assert "Go to Downloads" in p.banner.text() and not p.banner_btn.isHidden()
+    assert "Go to Downloads" in p.banner.text() and p.banner_btn.isHidden()  # no second button
     got = []
     p.downloads_requested.connect(lambda: got.append(1))
-    p.banner_btn.click()
-    assert got == [1] and not p.confirm_btn.isEnabled() and not p.select_ready_btn.isEnabled()
+    assert not p.select_ready_btn.isEnabled()
+    assert p.confirm_btn.text() == "Go to Downloads"  # one button: once confirmed it leads on
+    p.confirm_btn.click()
+    assert got == [1]
 
 
 def test_stale_rules_banner_and_rerun_signal(ctx):
@@ -201,7 +207,6 @@ def test_stale_rules_banner_and_rerun_signal(ctx):
 
 
 def test_confirm_dialog_is_a_compact_summary(page):
-    page.backups_check.setChecked(True)
     entries = page.summary_entries()
     assert all("quality" in e for e in entries)
     dlg = ConfirmDialog(entries, "D:\\lib")
@@ -213,26 +218,7 @@ def test_confirm_dialog_is_a_compact_summary(page):
     assert not dlg.table.isColumnHidden(4)
 
 
-def test_backup_opt_in_choice_is_remembered(tmp_path):
-    from PySide6.QtWidgets import QApplication
-
-    QApplication.instance() or QApplication([])
-    from s2s import config
-    from s2s.models import Settings
-    from s2s.secretstore import SecretStore
-    from s2s.store import Store
-    from s2s.ui.context import AppContext
-    from s2s.ui.review_page import ReviewPage
-
-    store = Store(config.db_path())
-    ctx = AppContext(store, SecretStore(tmp_path / "s", protect=lambda b: b, unprotect=lambda b: b),
-                     Settings(slskd_downloads_dir=str(tmp_path / "dl")))
-    page = ReviewPage(ctx)
-    assert not page.backups_check.isChecked()  # opt-in: off by default
-    page.backups_check.setChecked(True)
-    page.backup_wait.setValue(60)
-    saved = config.load_settings().extra
-    assert saved["backup_recovery_opt_in"] is True and saved["backup_recovery_wait"] == 60
-    again = ReviewPage(AppContext(store, ctx.secrets, config.load_settings()))
-    assert again.backups_check.isChecked() and again.backup_wait.value() == 60
-    store.close()
+def test_switching_uploaders_is_automatic_with_no_option(page):
+    assert not hasattr(page, "backups_check") and not hasattr(page, "backup_wait")
+    others = [e for e in page.summary_entries() if e.get("backup")]
+    assert others and all(e["wait_seconds"] == review_page.SWITCH_AFTER_S >= 120 for e in others)

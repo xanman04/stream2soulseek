@@ -496,10 +496,10 @@ def test_rejected_candidates_not_selectable_alternatives_are(env):
     roles = {}
     for r in range(rp.detail.rowCount()):
         it = rp.detail.item(r, 0)
-        roles[it.text()] = it
-    assert set(roles) >= {"In use", "Option", "Rejected"}
-    assert not (roles["Rejected"].flags() & Qt.ItemFlag.ItemIsSelectable)
-    assert roles["Option"].flags() & Qt.ItemFlag.ItemIsSelectable
+        roles[it.data(review_page.ROLE_STATE)] = it
+    assert set(roles) >= {"in use", "option", "rejected"}
+    assert not (roles["rejected"].flags() & Qt.ItemFlag.ItemIsSelectable)
+    assert roles["option"].flags() & Qt.ItemFlag.ItemIsSelectable
     assert rp.model.choose_candidate(0, c["rej"]) is False
     assert rp.model.rows[0].chosen == c["good"]
     # a candidate not offered for this track at all is refused too
@@ -555,9 +555,9 @@ def test_confirm_yes_creates_one_approval_and_enqueues_once(env, monkeypatch):
     # locked: no further edits, no second submission
     assert win.review.model.setData(win.review.model.index(1, 0), Qt.CheckState.Checked,
                                     Qt.ItemDataRole.CheckStateRole) is False
-    win.review.confirm_download()
+    win.review.confirm_download()  # the same button now leads on to Downloads
     assert len(created) == 1 and len(svc.calls) == 1
-    assert not win.review.confirm_btn.isEnabled()
+    assert win.review.confirm_btn.text() == "Go to Downloads" and win.review.confirm_btn.isEnabled()
 
 
 def test_confirm_no_does_nothing(env, monkeypatch):
@@ -800,10 +800,10 @@ def test_review_header_sort_keeps_checkbox_and_candidate_mapping(env, monkeypatc
     # choosing the detail view of a clicked sorted row shows THAT track's candidates
     rp.view.setCurrentIndex(px.index(4, 0))  # Song 0 (has alternatives)
     assert "Song 0" in rp.detail_title.text()
-    roles = {rp.detail.item(r, 0).text() for r in range(rp.detail.rowCount())}
-    assert {"In use", "Option", "Rejected"} <= roles
+    roles = {rp.detail.item(r, 0).data(review_page.ROLE_STATE) for r in range(rp.detail.rowCount())}
+    assert {"in use", "option", "rejected"} <= roles
     for r in range(rp.detail.rowCount()):
-        if rp.detail.item(r, 0).text() == "Option":
+        if rp.detail.item(r, 0).data(review_page.ROLE_STATE) == "option":
             rp.detail.selectRow(r)
     assert rp.use_btn.isEnabled()
     rp.use_btn.click()

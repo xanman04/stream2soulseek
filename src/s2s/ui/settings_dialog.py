@@ -50,7 +50,7 @@ class SettingsDialog(QDialog):
         self.timeout = QSpinBox()
         self.timeout.setRange(5, 300)
         self.timeout.setValue(int(s.search_timeout_s))
-        self.timeout.setToolTip("Initial searches use up to 8 seconds per query. This budget is used for a deeper search when too few backup sources are found.")
+        self.timeout.setToolTip("Initial searches use up to 8 seconds per query. This budget is used for a deeper search when too few uploaders are found.")
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         has_key = False

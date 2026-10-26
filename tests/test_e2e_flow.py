@@ -367,16 +367,17 @@ def test_whole_app_flow(app_env, monkeypatch):
     monkeypatch.setattr(rv, "ask_confirmation", lambda entries: shown.append(entries) or True)
     assert fake.enqueued == []                              # nothing queued before confirming
     rv.confirm_download()
-    assert len(shown) == 1 and len(shown[0]) == 8 and not any(e.get("backup") for e in shown[0])
+    assert len(shown) == 1 and sum(1 for e in shown[0] if not e.get("backup")) == 8
     queued = {(f.username, f.filename, f.size) for e in fake.enqueued for f in e.files}
-    reviewed = {(e["username"], e["filename"], e["size"]) for e in shown[0]}
+    reviewed = {(e["username"], e["filename"], e["size"]) for e in shown[0] if not e.get("backup")}
     assert queued == reviewed and len(queued) == 8          # exactly the reviewed files, nothing else
+    # other uploaders of the same files were listed too, but are only used if a download gets stuck
     assert all(e.destination if False else True for e in fake.enqueued)
     assert not any(u in {"plainguy", "lengthpeer", "radiopeer", "goodpeer"} for u, _f, _s in queued)
     approvals = store.approvals_for_import(ctx.import_id)
     assert len(approvals) == 1 and {i.apple_id for i in approvals[0].items} == set(wanted)
     assert all(i.destination == ctx.destination for i in approvals[0].items)
-    assert rv._locked and rv.confirm_btn.text() == "Already queued"
+    assert rv._locked and rv.confirm_btn.text() == "Go to Downloads"
 
     # confirming moves to Downloads by itself (existing behaviour), and only there
     enabled, done, nexts, cur = nav(win)

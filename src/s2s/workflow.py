@@ -229,9 +229,9 @@ def search_and_match(
             result = ranked(files)
             if result.best is not None:
                 backups = backup_source_count(result)
-                summary = f"{backups} backup uploaders available"
+                summary = f"{backups} other uploaders have it"
                 if backups < MIN_SOURCES - 1:
-                    summary += "; no backup uploader was found"
+                    summary += "; no other uploader was found"
                 result = replace(result, note="; ".join(x for x in (result.note, summary) if x))
             if result.best is None and interrupted:
                 return _unresolved(track, DISCONNECTED_NOTE)

@@ -508,7 +508,7 @@ def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, en
     monkeypatch.setattr(workflow, "run_search", search)
     res, _ = run(env, FakeSlskd(), [AppleTrack("one", "Song", "Artist")])
     assert workflow.backup_source_count(res[0]) == backups
-    assert f"{backups} backup uploaders" in res[0].note
+    assert f"{backups} other uploaders have it" in res[0].note
     stored = env.store.load_match_results(env.iid)[0]
     assert len(stored.alternatives) == len(files) - 1
     assert workflow.backup_source_count(stored) == backups

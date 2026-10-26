@@ -119,7 +119,7 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
 def stuck_waiting(minutes: int) -> TrackStatus:
     return TrackStatus(f"Waiting on uploader for {minutes} min", "warn", ATTENTION,
                        help="The uploader has not started sending this file. Their queue may be long or they may be "
-                            "away. Keep waiting, cancel it, or try your approved backups.")
+                            "away. Keep waiting, cancel it, or switch to another uploader.")
 
 
 def set_label(index: int) -> str:
@@ -203,7 +203,7 @@ class TransfersPage(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.cancel_btn = QPushButton("Cancel download")
         self.folder_btn = QPushButton("Show in folder")
-        self.queued_backups_btn = QPushButton("Try my approved backups…")
+        self.queued_backups_btn = QPushButton("Switch to another uploader…")
         self.queued_backups_btn.setVisible(False)
         self.import_btn = QPushButton("Copy finished downloads")  # only when automatic copying is off
         self.import_btn.setVisible(False)

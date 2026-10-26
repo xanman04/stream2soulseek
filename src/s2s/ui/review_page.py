@@ -16,14 +16,13 @@ from dataclasses import dataclass, field
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtGui import QBrush, QFont, QPalette
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from .. import config, organize, workflow
 from ..approval import create_approval
 from ..matching.formats import ext_of
-from ..matching.versions import parse_title
 from ..models import Candidate, MatchResult, MatchStatus, RemoteFile, SelectionItem, Tier
 from ..queue_recovery import approve_backups, proposed_backups
 from ..slskd.search import build_queries
@@ -40,7 +39,7 @@ _HEADER_TIPS = {
     C_USE: "Tick the tracks you want to download",
     C_MATCH: "How well the proposed file matches the playlist track",
     C_LENGTH: "Length of the file; the playlist's length is shown in brackets when it differs",
-    C_SOURCE: "Soulseek user sharing the file, and how many reviewed backup sources exist",
+    C_SOURCE: "Soulseek user sharing the file",
 }
 
 STALE_TEXT = ("Your matching rules changed since this search, so these results may be out of date. "
@@ -379,7 +378,7 @@ class ReviewModel(QAbstractTableModel):
         if row.chosen is None:
             return ""
         n = self.backup_count(row)
-        return row.chosen.file.username + (f"  +{n} backup{'s' if n != 1 else ''}" if n else "")
+        return row.chosen.file.username + (f"  (+{n} other{'s' if n != 1 else ''})" if n else "")
 
     def _sort_value(self, row: ReviewRow, col: int):
         """Header-sorting key: numbers stay numbers, text is case/accent-insensitive."""
@@ -537,10 +536,9 @@ class ConfirmDialog(QDialog):
                 "start a new review to pick different ones.")
         if backups:
             wait = next((e.get("wait_seconds", 45) for e in backups), 45)
-            note += (f"\n{len(backups)} backup file{'s' if len(backups) != 1 else ''} (up to {mib(backups):.1f} MiB "
-                     f"more) are approved too: if a download makes no progress for {wait} seconds, another listed "
-                     "backup is tried (up to three at once per track). Only the listed files can be tried; "
-                     "redundant attempts are cancelled without deleting anything.")
+            note += (f"\nIf an uploader has not started sending after {wait} seconds, S2S switches to another "
+                     f"uploader of the same file. Those {len(backups)} other uploaders are listed in grey; S2S only "
+                     "ever uses the files listed here, and the slower copy is cancelled without deleting anything.")
         self.note = theme.subtle(QLabel(note))
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
@@ -675,7 +673,7 @@ class ReviewPage(QWidget):
         for b in (self.alternatives_btn, self.select_ready_btn, self.untick_check_btn):
             tools.addWidget(b)
 
-        # ---- details panel
+        # ---- details panel: what will be downloaded (left), the other files for the track (right)
         self.detail_title = QLabel("Select a track to see its details.")
         self.detail_title.setWordWrap(True)
         tf = self.detail_title.font()
@@ -683,63 +681,44 @@ class ReviewPage(QWidget):
         self.detail_title.setFont(tf)
         self.why = theme.banner("", "info")
         self.why.setVisible(False)
-        self._cells: dict[tuple[str, int], QLabel] = {}
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(3)
-        for col, text in ((1, "Requested"), (2, "Proposed file")):
-            h = QLabel(text)
-            h.setFont(tf)
-            grid.addWidget(h, 0, col)
-        self.field_names = ["Track", "Length", "Version", "Quality", "Uploader", "Full path"]
-        for r, name in enumerate(self.field_names, start=1):
-            grid.addWidget(theme.subtle(QLabel(name)), r, 0, Qt.AlignmentFlag.AlignTop)
-            for col in (1, 2):
-                if name == "Full path" and col == 1:
-                    continue
-                if name == "Full path":
-                    edit = QLineEdit()
-                    edit.setReadOnly(True)
-                    edit.setFrame(False)
-                    self.path_edit = edit
-                    grid.addWidget(edit, r, col)
-                    continue
-                lab = QLabel("")
-                lab.setWordWrap(True)
-                lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                self._cells[(name, col)] = lab
-                grid.addWidget(lab, r, col, Qt.AlignmentFlag.AlignTop)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(2, 2)
-        grid.setRowStretch(len(self.field_names) + 1, 1)
+        self.file_heading = theme.subtle(QLabel("Will download"))
+        self.file_label = QLabel("")  # the proposed file's name
+        self.file_label.setWordWrap(True)
+        self.file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.facts_label = QLabel("")  # uploader · quality · size · length (vs the playlist)
+        self.facts_label.setWordWrap(True)
+        self.facts_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.tried_label = theme.subtle(QLabel(""))
         self.tried_label.setWordWrap(True)
         self.tried_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.tried_label.setVisible(False)
         self.custom_btn = QPushButton("Search again with my own words…")
-        self.custom_btn.setToolTip("Soulseek only matches the words you type. Try the track the way you would "
-                                   "by hand: results are added to this track's files, nothing is downloaded.")
         self.custom_btn.setEnabled(False)
         self.custom_btn.clicked.connect(self.search_custom)
         left = QVBoxLayout()
         left.addWidget(self.detail_title)
         left.addWidget(self.why)
+        left.addSpacing(4)
+        left.addWidget(self.file_heading)
+        left.addWidget(self.file_label)
+        left.addWidget(self.facts_label)
         left.addWidget(self.tried_label)
+        left.addStretch(1)
         left.addWidget(self.custom_btn, 0, Qt.AlignmentFlag.AlignLeft)
-        left.addLayout(grid, 1)
 
-        self.alt_title = theme.subtle(QLabel("Other files for this track"))
-        self.detail = make_table(["", "Source", "Quality", "Length", "Match"])
+        self.alt_title = theme.subtle(QLabel(""))
+        self.detail = make_table(["", "Uploader", "Quality", "Length", "Match"])
         self.detail.setWordWrap(False)
         self.detail.verticalHeader().setDefaultSectionSize(24)
         self.detail.horizontalHeader().setStretchLastSection(True)
         self.detail.installEventFilter(self)
+        self.show_rejected = QCheckBox("")
+        self.show_rejected.setVisible(False)
+        self.show_rejected.toggled.connect(lambda _on: self._apply_rejected_visibility())
         self.use_btn = QPushButton("Use this file")
         self.use_btn.setEnabled(False)
-        self.use_btn.setToolTip("Switch this track to the selected file (double-click or press Enter on it)")
         alt_foot = QHBoxLayout()
-        self.alt_hint = theme.subtle(QLabel(""))
-        alt_foot.addWidget(self.alt_hint, 1)
+        alt_foot.addWidget(self.show_rejected, 1)
         alt_foot.addWidget(self.use_btn)
         right = QVBoxLayout()
         right.addWidget(self.alt_title)
@@ -770,27 +749,7 @@ class ReviewPage(QWidget):
         split.setSizes([420, 280])
         split.setChildrenCollapsible(False)
 
-        # ---- footer: backups opt-in on one line, destination and the one primary button
-        self.backups_check = QCheckBox("If a download stays stuck in the queue, try the backup files listed at confirmation after")
-        self.backups_check.setToolTip(
-            "Optional. The backup files are listed in the confirmation step and only those exact files may be "
-            "tried. Redundant attempts are cancelled without deleting anything.")
-        self.backup_wait = QSpinBox()
-        self.backup_wait.setRange(5, 300)
-        self.backup_wait.setValue(45)
-        self.backup_wait.setSuffix(" seconds")
-        self.backup_wait.setEnabled(False)
-        self.backups_check.toggled.connect(self.backup_wait.setEnabled)
-        # Remember the user's own opt-in choice and wait between imports (still opt-in: default off).
-        extra = self.ctx.settings.extra
-        self.backup_wait.setValue(int(extra.get("backup_recovery_wait", 45) or 45))
-        self.backups_check.setChecked(bool(extra.get("backup_recovery_opt_in", False)))
-        self.backups_check.toggled.connect(lambda on: self._remember_backup_choice())
-        self.backup_wait.valueChanged.connect(lambda _v: self._remember_backup_choice())
-        backup_row = QHBoxLayout()
-        backup_row.addWidget(self.backups_check)
-        backup_row.addWidget(self.backup_wait)
-        backup_row.addStretch(1)
+        # ---- footer: destination and the one primary button
         self.dest_label = theme.subtle(QLabel(""))
         self.dest_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.queue_progress = QProgressBar()
@@ -807,7 +766,6 @@ class ReviewPage(QWidget):
         lay.addLayout(chips)
         lay.addLayout(tools)
         lay.addWidget(split, 1)
-        lay.addLayout(backup_row)
         lay.addWidget(self.queue_progress)
         lay.addLayout(foot)
 
@@ -965,11 +923,6 @@ class ReviewPage(QWidget):
         out += [("rejected", c) for c in res.rejected]
         return out
 
-    def _set_cell(self, name: str, col: int, text: str, warn: bool = False) -> None:
-        lab = self._cells[(name, col)]
-        lab.setText(text)
-        lab.setStyleSheet(theme.chip_style("warn") if warn and text else "")
-
     def _explain(self, r: ReviewRow) -> tuple[str, str]:
         res, c = r.result, r.chosen
         if res.status == MatchStatus.SKIPPED:
@@ -990,21 +943,19 @@ class ReviewPage(QWidget):
         if row < 0 or row >= len(self.model.rows):
             self.detail_title.setText("Select a track to see its details.")
             theme.set_banner(self.why, "", "info")
-            for lab in self._cells.values():
-                lab.setText("")
-                lab.setStyleSheet("")
-            self.path_edit.setText("")
-            self.alt_hint.setText("")
+            self.file_heading.setVisible(False)
+            self.file_label.setText("")
+            self.facts_label.setText("")
+            self.facts_label.setStyleSheet("")
+            self.alt_title.setText("")
+            self.show_rejected.setVisible(False)
             self.tried_label.setVisible(False)
             self.custom_btn.setEnabled(False)
             self._update_use_button()
             return
         r = self.model.rows[row]
         res, t, ch = r.result, r.result.track, r.chosen
-        n_alt = len(res.alternatives)
-        n_rej = len(res.rejected)
-        counts = f"{n_alt} alternative file{'s' if n_alt != 1 else ''}" + (f", {n_rej} rejected" if n_rej else "")
-        self.detail_title.setText(f"{t.name} — {t.artist}: {counts}")
+        self.detail_title.setText(f"{t.name} — {t.artist}")
         kind, text = self._explain(r)
         if t.apple_id in self.model.searching:
             kind, text = "info", "Searching…"
@@ -1015,39 +966,34 @@ class ReviewPage(QWidget):
         self.tried_label.setVisible(show_tried)
         self.custom_btn.setEnabled(t.apple_id not in self.model.searching)
 
-        # requested vs proposed
         want = None if t.duration_ms is None else round(t.duration_ms / 1000)
-        version = parse_title(t.name).version
-        self._set_cell("Track", 1, f"{t.name} — {t.artist}")
-        self._set_cell("Length", 1, fmt_seconds(want) or "unknown")
-        self._set_cell("Version", 1, version or "Original / none")
-        for name in ("Quality", "Uploader"):
-            self._set_cell(name, 1, "—")
         if ch is None:
-            self._set_cell("Track", 2, "Nothing proposed")
-            for name in ("Length", "Version", "Quality", "Uploader"):
-                self._set_cell(name, 2, "—")
-            self.path_edit.setText("")
+            self.file_heading.setVisible(False)
+            self.file_label.setText("")
+            self.facts_label.setText("")
+            self.facts_label.setStyleSheet("")
         else:
             f = ch.file
             have, _want, off = self.model.length_info(r)
-            self._set_cell("Track", 2, _basename(f.filename))
-            length = fmt_seconds(have) or "unknown"
-            if off is not None:
-                length += f"  (differs by {abs(off)} s)"
-            self._set_cell("Length", 2, length, warn=off is not None)
-            self._set_cell("Version", 2, ch.detected_version or "Original / none")
-            self._set_cell("Quality", 2, f"{quality_text(f)} · {fmt_mib(f.size)} MiB")
-            slot = ("free slot" if f.has_free_slot else "no free slot" if f.has_free_slot is False else "")
-            if f.queue_length:
-                slot = (slot + ", " if slot else "") + f"queue {f.queue_length}"
-            self._set_cell("Uploader", 2, f.username + (f" ({slot})" if slot else ""))
-            self.path_edit.setText(f.filename)
-            self.path_edit.setCursorPosition(0)
+            self.file_heading.setVisible(True)
+            self.file_label.setText(_basename(f.filename))
+            length = fmt_seconds(have) or "length unknown"
+            if want is not None and have is not None:
+                length += (f" (playlist {fmt_seconds(want)}, {abs(off)} s off)" if off is not None
+                           else f" (playlist {fmt_seconds(want)})")
+            facts = [f"from {f.username}", quality_text(f), f"{fmt_mib(f.size)} MiB", length]
+            self.facts_label.setText(" · ".join(x for x in facts if x))
+            self.facts_label.setStyleSheet(theme.chip_style("warn") if off is not None else "")
 
         # alternatives
         cands = self.detail_candidates(row)
-        self.alt_title.setText("Other files for this track" if cands else "No other files were found for this track")
+        n_ok = sum(1 for role, c in cands if role != "rejected" and is_eligible(c))
+        n_rej = len(cands) - n_ok
+        others = n_ok - (1 if ch is not None else 0)
+        self.alt_title.setText(f"Other files you can use instead ({others})" if others > 0
+                               else "No other file passed your rules")
+        self.show_rejected.setText(f"Also show {n_rej} file{'s' if n_rej != 1 else ''} that did not pass your rules")
+        self.show_rejected.setVisible(n_rej > 0)
         self.detail.setRowCount(len(cands))
         in_use_row = -1
         for i, (role, c) in enumerate(cands):
@@ -1060,7 +1006,7 @@ class ReviewPage(QWidget):
             length = fmt_seconds(have)
             if diff is not None and abs(diff) > self.model.duration_tolerance_s:
                 length += f" ({diff:+d} s)"
-            vals = [{"in use": "In use", "option": "Option", "rejected": "Rejected"}[state],
+            vals = [{"in use": "✓ Using", "option": "", "rejected": "No match"}[state],
                     f.username, quality_text(f), length, match_label(c)]
             for col, text in enumerate(vals):
                 it = item(text, f"{f.filename}\n" + "\n".join(plain_reason(x) for x in c.reasons))
@@ -1085,9 +1031,17 @@ class ReviewPage(QWidget):
         self.detail.setColumnWidth(1, 150)
         self.detail.setColumnWidth(2, 90)
         self.detail.setColumnWidth(3, 90)
+        self._apply_rejected_visibility()
         if in_use_row >= 0:
             self.detail.selectRow(in_use_row)
         self._update_use_button()
+
+    def _apply_rejected_visibility(self) -> None:
+        """Files that did not pass the rules stay out of the way unless asked for."""
+        show = self.show_rejected.isChecked()
+        for r in range(self.detail.rowCount()):
+            it = self.detail.item(r, 0)
+            self.detail.setRowHidden(r, it is not None and it.data(ROLE_STATE) == "rejected" and not show)
 
     def show_alternatives(self) -> None:
         """Jump to the next track that needs a look (after the current one, wrapping), and show its files."""
@@ -1120,7 +1074,6 @@ class ReviewPage(QWidget):
             cur = self.model.rows[row].chosen
             ok = self.model.is_selectable_candidate(row, cand) and (cur is None or file_key(cur) != file_key(cand))
         self.use_btn.setEnabled(ok)
-        self.alt_hint.setText("Select a different file, then press Enter or Use this file." if ok else "")
 
     def _use_selected(self) -> None:
         sel = self._selected_detail_candidate()
@@ -1219,7 +1172,7 @@ class ReviewPage(QWidget):
         if self._notice:
             text, kind = self._notice
         elif self._locked:
-            text, kind, action, btn = LOCKED_TEXT, "ok", "downloads", "Go to Downloads"
+            text, kind, action, btn = LOCKED_TEXT, "ok", "downloads", ""  # the page's own button leads on
         elif self.rules_stale():
             text, kind, action, btn = STALE_TEXT, "warn", "rerun", "Search again"
         elif self.replacement:
@@ -1249,17 +1202,15 @@ class ReviewPage(QWidget):
         theme.set_chip(self.chip_missing, f"{c['unresolved']} not found", zero(c["unresolved"], "error"))
         theme.set_chip(self.chip_skipped, f"{c['skipped']} skipped", "muted")
         theme.set_chip(self.chip_selected, f"{n} selected", zero(n, "info"))
-        self.confirm_btn.setText("Already queued" if self._locked else f"Download {n} track{'s' if n != 1 else ''}…")
+        self.confirm_btn.setText("Go to Downloads" if self._locked else f"Download {n} track{'s' if n != 1 else ''}…")
         stale = self.rules_stale()
-        self.confirm_btn.setEnabled(n > 0 and not self._locked and not self._busy and not stale)
+        self.confirm_btn.setEnabled(self._locked or (n > 0 and not self._busy and not stale))
         self.confirm_btn.setToolTip("Run the search again first: your matching rules changed." if stale else
                                     "Review the exact list of files before anything is queued.")
         free = not self._locked and not self._busy
         self.alternatives_btn.setEnabled(c["flagged"] > 0 and not self._busy)
         self.select_ready_btn.setEnabled(free and c["ready"] > 0)
         self.untick_check_btn.setEnabled(free and c["flagged"] > 0)
-        self.backups_check.setEnabled(free)
-        self.backup_wait.setEnabled(self.backups_check.isChecked() and free)
         for b in self.filter_buttons.values():
             b.setEnabled(not self._busy)
         self.filter_check.setText(f"Needs a look ({c['flagged']})" if c["flagged"] else "Needs a look")
@@ -1276,19 +1227,6 @@ class ReviewPage(QWidget):
         super().showEvent(event)
         self._update_footer()
 
-    def _remember_backup_choice(self) -> None:
-        extra = self.ctx.settings.extra
-        on, wait = self.backups_check.isChecked(), self.backup_wait.value()
-        if extra.get("backup_recovery_opt_in") == on and extra.get("backup_recovery_wait") == wait:
-            return
-        extra["backup_recovery_opt_in"], extra["backup_recovery_wait"] = on, wait
-        try:
-            from .. import config
-
-            config.save_settings(self.ctx.settings)
-        except OSError:
-            pass  # a preference only; the current review still uses the on-screen choice
-
     def summary_entries(self) -> list[dict]:
         entries = [
             {"title": f"{r.result.track.name} - {r.result.track.artist}", "username": r.chosen.file.username,
@@ -1301,15 +1239,14 @@ class ReviewPage(QWidget):
             known = {file_key(c): c for c in ([row.result.best] if row.result.best else []) + list(row.result.alternatives)}
             for n, file in enumerate(backups.get(row.result.track.apple_id, ()), 1):
                 cand = known.get((file.username, file.filename, file.size))
-                entries.append(dict(title=f"BACKUP {n}: {row.result.track.name} - {row.result.track.artist}",
+                entries.append(dict(title=f"Other uploader {n}: {row.result.track.name} - {row.result.track.artist}",
                     username=file.username, filename=file.filename, size=file.size,
-                    destination=file.destination, backup=True, wait_seconds=self.backup_wait.value(),
+                    destination=file.destination, backup=True, wait_seconds=SWITCH_AFTER_S,
                     quality=quality_text(cand.file) if cand else ""))
         return entries
 
     def _backup_items(self) -> dict:
-        if not self.backups_check.isChecked():
-            return {}
+        """For every ticked track, the other uploaders of the same file S2S may switch to (always on)."""
         selected = {item.apple_id: item for item in self.model.selection_items()}
         return {row.result.track.apple_id: proposed_backups(row.result, selected[row.result.track.apple_id])
                 for row in self.model.checked_rows()}
@@ -1321,7 +1258,10 @@ class ReviewPage(QWidget):
 
     def confirm_download(self) -> None:
         """The single path from review to download: modal confirmation -> approval -> enqueue."""
-        if self._locked or self._busy:
+        if self._locked:
+            self.downloads_requested.emit()  # already confirmed: the same button leads on to Downloads
+            return
+        if self._busy:
             return
         if self.rules_stale():
             self._refresh_banner()
@@ -1337,7 +1277,7 @@ class ReviewPage(QWidget):
             show_error(self, "Confirm", "No import is active; run a search first.")
             return
         downloads_dir, archive_name = ctx.settings.slskd_downloads_dir, ctx.settings.archive_dir_name
-        backups, wait_seconds = self._backup_items(), self.backup_wait.value()
+        backups, wait_seconds = self._backup_items(), SWITCH_AFTER_S
         settings = ctx.settings
         self._busy = True
         self._load_generation += 1
@@ -1388,4 +1328,7 @@ class ReviewPage(QWidget):
         show_error(self, "Could not queue downloads", self.ctx.describe(exc))
 
 
+# A download whose uploader has sent nothing for this long switches to another uploader of the same file (the
+# other uploaders are listed in the confirmation). Long enough for an ordinary queue to start moving.
+SWITCH_AFTER_S = 3 * 60
 ROLE_STATE = Qt.ItemDataRole.UserRole + 2  # per-row state in the alternatives list: in use / option / rejected
