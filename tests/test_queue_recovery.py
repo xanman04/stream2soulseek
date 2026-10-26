@@ -452,3 +452,55 @@ def test_policy_cancel_failure_is_retryable_without_aborting_poll(pool):
     client.fail_cancel = False
     service.recover_queued(approval.id, "changed-policy", now=start + timedelta(seconds=2))
     assert _plan(pool)["status"] == "paused"
+
+
+# ------------------------------------------------------------------ switching only to the same recording
+
+def _cands(track, *files):
+    result = match(track, list(files))
+    return result, {c.file.username: c for c in ([result.best] if result.best else []) + list(result.alternatives)}
+
+
+def test_switching_only_offers_copies_of_the_approved_recording():
+    from s2s.queue_recovery import same_recording
+
+    track = AppleTrack("apple-1", "Song", "Artist", duration_ms=200_000)
+    approved = _remote("chosen", "Artist - Song.mp3", size=8_000_000, length_s=200)
+    same_size = _remote("twin", "Artist - Song.mp3", size=8_000_000)  # length unknown, identical bytes
+    close = _remote("close", "Artist - Song.mp3", size=8_100_000, length_s=202)
+    far = _remote("far", "Artist - Song.mp3", size=9_000_000, length_s=208)  # same name, 8 s longer
+    unknown = _remote("unknown", "Artist - Song.mp3", size=7_000_000)  # cannot show it is the same
+    flac = RemoteFile("flac", "Artist - Song.flac", 30_000_000, "flac", None, False, length_s=200)
+    extended = _remote("ext", "Artist - Song (Extended Mix).mp3", size=12_000_000, length_s=200)
+    result, by_user = _cands(track, approved, same_size, close, far, unknown, flac, extended)
+    chosen = by_user["chosen"]
+    assert same_recording(chosen, by_user["twin"]) and same_recording(chosen, by_user["close"])
+    for other in ("far", "unknown", "flac"):
+        assert not same_recording(chosen, by_user[other]), other
+    if "ext" in by_user:  # an extended mix is never a stand-in for the exact version
+        assert not same_recording(chosen, by_user["ext"])
+    selected = SelectionItem(track.apple_id, "chosen", approved.filename, approved.size, "C:/Music")
+    assert {i.username for i in proposed_backups(result, selected)} == {"twin", "close"}
+
+
+def test_backend_refuses_a_switch_target_that_is_not_the_same_recording(tmp_path):
+    from s2s.approval import ApprovalError
+
+    dest, downloads = tmp_path / "library", tmp_path / "downloads"
+    dest.mkdir()
+    downloads.mkdir()
+    store = Store(tmp_path / "s.sqlite3")
+    try:
+        track = AppleTrack("apple-1", "Song", "Artist", duration_ms=200_000, position=0)
+        iid = store.create_import(Playlist("p", "P"), str(dest))
+        approved = _remote("chosen", "Artist - Song.mp3", size=8_000_000, length_s=200)
+        far = _remote("far", "Artist - Song.mp3", size=9_000_000, length_s=208)
+        result = match(track, [approved, far])
+        store.save_match_results(iid, [result])
+        primary = SelectionItem(track.apple_id, "chosen", approved.filename, approved.size, str(dest))
+        approval = create_approval(store, iid, [primary], downloads_dir=str(downloads))
+        bad = SelectionItem(track.apple_id, "far", far.filename, far.size, str(dest))
+        with pytest.raises(ApprovalError):
+            approve_backups(store, approval, {track.apple_id: [bad]}, Settings(slskd_downloads_dir=str(downloads)))
+    finally:
+        store.close()

@@ -25,15 +25,48 @@ def _key(item):
     return item.username, item.filename, item.size
 
 
+SAME_LENGTH_S = 3  # another uploader's copy must be this close in length to the approved file
+
+
+def _version_key(candidate) -> str:
+    return " ".join((candidate.detected_version or "").casefold().split())
+
+
+def same_recording(approved, other) -> bool:
+    """True only when `other` is a copy of the very file the user approved, from another uploader.
+
+    Automatic switching never changes what the user confirmed: same match tier (an exact match is never swapped
+    for an extended mix), same detected version, same audio format and quality class, unflagged, and the same
+    length within SAME_LENGTH_S seconds or byte-for-byte the same size (when neither can be shown, the copy is
+    not used).
+    """
+    if other.flagged or other.tier == Tier.REJECTED or other.format_rank == 9:
+        return False
+    if other.tier != approved.tier or other.format_rank != approved.format_rank:
+        return False
+    if _version_key(other) != _version_key(approved):
+        return False
+    if (other.file.extension or "").casefold() != (approved.file.extension or "").casefold():
+        return False
+    if other.file.size == approved.file.size:
+        return True
+    a, b = approved.file.length_s, other.file.length_s
+    return a is not None and b is not None and abs(a - b) <= SAME_LENGTH_S
+
+
 def proposed_backups(result, selected: SelectionItem, limit: int = 5) -> tuple[SelectionItem, ...]:
+    """Other uploaders of the same recording as the approved file (see same_recording), at most `limit`."""
     limit = min(5, max(0, int(limit)))
     if not limit:
         return ()
+    pool = ([result.best] if result.best else []) + list(result.alternatives)
+    approved = next((c for c in pool if _key(c.file) == _key(selected)), None)
+    if approved is None:
+        return ()
     out, peers = [], {selected.username.casefold()}
-    for candidate in ([result.best] if result.best else []) + list(result.alternatives):
+    for candidate in pool:
         file = candidate.file
-        if (candidate.flagged or candidate.tier == Tier.REJECTED or candidate.format_rank == 9
-                or file.username.casefold() in peers):
+        if file.username.casefold() in peers or not same_recording(approved, candidate):
             continue
         peers.add(file.username.casefold())
         out.append(SelectionItem(selected.apple_id, file.username, file.filename, file.size, selected.destination))
@@ -80,6 +113,10 @@ def approve_backups(store, approval, backups, settings, *, wait_seconds=45, max_
             raise ApprovalError("Queued recovery was already reviewed for this track")
         resolved = []
         peers = {primary.username.casefold()}
+        approved = store.find_candidate(approval.import_id, primary.apple_id, primary.username, primary.filename,
+                                        primary.size)
+        if approved is None:
+            raise ApprovalError("The approved file is missing; search again")
         for item in proposed:
             if item.apple_id != primary.apple_id:
                 raise ApprovalError("Backup belongs to a different track")
@@ -94,6 +131,8 @@ def approve_backups(store, approval, backups, settings, *, wait_seconds=45, max_
                 raise ApprovalError("Backups must be distinct, unflagged reviewed sources")
             if current is None or current.flagged:
                 raise ApprovalError("Backup does not satisfy the current matching rules")
+            if not same_recording(approved, candidate):
+                raise ApprovalError("Another uploader's file must be the same recording as the approved one")
             peers.add(checked.username.casefold())
             resolved.append(checked)
         plan = dict(id=str(uuid.uuid4()), import_id=approval.import_id, apple_id=primary.apple_id,
