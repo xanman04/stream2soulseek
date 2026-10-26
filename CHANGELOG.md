@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.6 — 2026-10-26
 
 - macOS: keep all secrets in one Keychain item, read once per launch and held in memory. Signing in to
   Soulseek no longer asks for the Keychain password over and over, and a refused request is not asked again
