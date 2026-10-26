@@ -102,7 +102,6 @@ class QueuedRecoveryDialog(QDialog):
             parent = QTreeWidgetItem([title, selected.filename, primary_format, primary_bitrate, "Already approved"])
             parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
             parent.setCheckState(0, Qt.CheckState.Checked)
-            parent.setToolTip(0, "Already approved primary file")
             self.tree.addTopLevelItem(parent)
             self._items[parent] = (approval.id, apple_id, None)
             for backup in backups:

@@ -53,12 +53,10 @@ class PlaylistPage(QWidget):
 
         # --- top row
         self.source_combo = QComboBox()
-        self.source_combo.setToolTip("Connected streaming services")
         self.source_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.source_combo.setMinimumWidth(170)
         self.status = subtle(QLabel(""))
         self.reload_btn = QPushButton("Reload")
-        self.reload_btn.setToolTip("Reload the playlists from the selected service")
         top = QHBoxLayout()
         top.addWidget(QLabel("Source:"))
         top.addWidget(self.source_combo)
@@ -71,7 +69,6 @@ class PlaylistPage(QWidget):
         self.link_edit.setClearButtonEnabled(True)
         self.link_edit.setAccessibleName("Spotify playlist link")
         self.link_btn = QPushButton("Open")
-        self.link_btn.setToolTip("Open a public Spotify playlist from its link")
         self.link_status = QLabel()
         set_banner(self.link_status, "", "info")
         link_row = QHBoxLayout()
@@ -388,7 +385,6 @@ class PlaylistPage(QWidget):
         self._update_track_count()
         self.track_title.setText(pl.name)
         self.track_info.setText("Loading tracks...")
-        self.track_info.setToolTip("")
         self.tracks_changed.emit()
 
         generation = self._source_generation
@@ -417,10 +413,6 @@ class PlaylistPage(QWidget):
         meta = summarize_tracks(tracks)
         if skipped:
             meta += f" · {len(skipped)} item{'s' if len(skipped) != 1 else ''} skipped"
-            self.track_info.setToolTip("Skipped (unavailable, podcast or missing details):\n" + "\n".join(skipped[:50])
-                                       + ("\n…" if len(skipped) > 50 else ""))
-        else:
-            self.track_info.setToolTip("")
         self.track_info.setText(meta)
         self.tracks_changed.emit()
 

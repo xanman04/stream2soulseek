@@ -51,6 +51,7 @@ class DestinationPage(QWidget):
         self._resumed_dest: str | None = None  # destination of a resumed import, shown as-is
         self._count_request = 0
         self._suggestion: str | None = None
+        self._access_checked: dict[str, str] = {}  # folder -> "" (ok) or the problem found
         self._autofilled: str | None = None  # the suggestion currently filled in (replaced if the playlist changes)
 
         heading = QLabel("Tracklist folder")
@@ -67,7 +68,6 @@ class DestinationPage(QWidget):
         self.dest_edit.setPlaceholderText("Choose a folder for this playlist's tracks")
         self.browse_btn = QPushButton("Browse...")
         self.recent_combo = QComboBox()
-        self.recent_combo.setToolTip("Recently used tracklist folders")
         self.existing_label = subtle(QLabel(""))
         self.existing_label.setWordWrap(True)
         self.dest_error = QLabel("")
@@ -204,9 +204,6 @@ class DestinationPage(QWidget):
         path = os.path.normpath(path)
         self._autofilled = path if suggested else None
         self.dest_edit.setText(path)
-        self.dest_edit.setToolTip("Suggested: beside your last tracklist folder, named after the playlist. Use "
-                                  "Browse to change it. Nothing is created until tracks are copied."
-                                  if suggested else "")
         self._dest_changed()
 
     def chosen_destination(self) -> tuple[str | None, str | None]:
@@ -218,9 +215,19 @@ class DestinationPage(QWidget):
         if not path:
             return None, "Choose a tracklist folder for the track files alone."
         try:
-            return check_destination(path, s.slskd_downloads_dir, s.archive_dir_name), None
+            checked = check_destination(path, s.slskd_downloads_dir, s.archive_dir_name)
         except ApprovalError as exc:
             return None, str(exc)
+        problem = self._access_problem(checked)
+        return (None, problem) if problem else (checked, None)
+
+    def _access_problem(self, path: str) -> str | None:
+        """Check each folder once (macOS asks for access at that moment); remembered until the folder changes."""
+        if self._access_checked.get(path) is None:
+            from ..folder_access import folder_access_problem
+
+            self._access_checked[path] = folder_access_problem(path) or ""
+        return self._access_checked[path] or None
 
     def _dest_changed(self, *_: object) -> None:
         settings = self.ctx.settings

@@ -484,7 +484,14 @@ class MainWindow(QMainWindow):
     def startup_checks(self) -> None:
         """Downloads folder first (slskd needs it), then the stored Soulseek login or a login popup."""
         self.prompt_if_unconfigured()
-        if self.ctx.settings.slskd_downloads_dir.strip():
+        downloads = self.ctx.settings.slskd_downloads_dir.strip()
+        if downloads:
+            from ..folder_access import folder_access_problem
+
+            problem = folder_access_problem(downloads)  # macOS asks for access here, in the foreground
+            if problem:
+                show_error(self, "Soulseek downloads folder", problem)
+                return
             self.soulseek.connect_on_startup()
 
     def prompt_if_unconfigured(self) -> None:

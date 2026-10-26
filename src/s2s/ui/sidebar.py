@@ -138,10 +138,8 @@ class Sidebar(QWidget):
             it.setText(("✓ " if is_done else "") + f"{i + 1}. {name}")
             if i < len(available) and available[i]:
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                it.setToolTip("")
             else:
                 it.setFlags(Qt.ItemFlag.NoItemFlags)  # greyed out and not clickable
-                it.setToolTip("Finish the earlier steps first.")
         self.steps.blockSignals(was_blocked)
         self._bold_current()
 

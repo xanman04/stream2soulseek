@@ -362,20 +362,17 @@ def test_a_second_s2s_is_refused():
     assert single_instance_lock(name) is None
 
 
-def test_hover_tooltips_are_switched_off():
-    from PySide6.QtCore import QEvent, QPoint
-    from PySide6.QtGui import QHelpEvent
-    from PySide6.QtWidgets import QApplication, QPushButton
+def test_no_app_wide_python_event_filter():
+    """An application-level Python event filter crashed S2S on macOS as soon as the Apple sign-in browser appeared
+    (PySide wraps every Qt Quick object the filter sees). Hover texts are not set at all instead."""
+    import re
+    from pathlib import Path
 
-    from s2s.ui.theme import apply_app_style
-
-    apply_app_style(QApplication.instance())
-    b = QPushButton("x")
-    b.setToolTip("a long explanation")
-    ev = QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), QPoint(1, 1))
-    from s2s.ui import theme
-    assert theme._TOOLTIP_FILTER.eventFilter(b, ev) is True  # swallowed: no tooltip is shown
-    b.deleteLater()
+    src = Path(__file__).resolve().parents[1] / "src" / "s2s"
+    for f in src.rglob("*.py"):
+        text = f.read_text(encoding="utf-8")
+        assert not re.search(r"\b(app|QApplication\.instance\(\)|qApp)\.installEventFilter\(", text), f.name
+        assert ".setToolTip(" not in text and "ToolTipRole" not in text, f.name
 
 
 def _cancel_setup(win, monkeypatch):

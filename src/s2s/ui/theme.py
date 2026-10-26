@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
@@ -132,23 +132,6 @@ def polish_table(table) -> None:
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
 
-class _NoToolTips(QObject):
-    """Hover tooltips are switched off app-wide: everything a user needs is shown on the page itself."""
-
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        return event.type() == QEvent.Type.ToolTip
-
-
-_TOOLTIP_FILTER: _NoToolTips | None = None
-
-
-def _suppress_tooltips(app: QApplication) -> None:
-    global _TOOLTIP_FILTER
-    if _TOOLTIP_FILTER is None:
-        _TOOLTIP_FILTER = _NoToolTips(app)
-        app.installEventFilter(_TOOLTIP_FILTER)
-
-
 def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None) -> None:
     """A quiet, consistent native-widget theme, following the current system's light/dark palette."""
     app = app or QApplication.instance()
@@ -164,7 +147,6 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
                "border": "#d2d9e1", "text": "#28333f", "muted": "#64717f", "disabled": "#84909c",
                "selection": "#dce8f2", "selected": "#203e58", "primary": "#416f94", "focus": "#416f94"})
     app.setStyle("Fusion")
-    _suppress_tooltips(app)
     palette = QPalette()
     for role, key in (("Window", "window"), ("WindowText", "text"), ("Base", "panel"),
                       ("AlternateBase", "window"), ("Text", "text"), ("Button", "panel"),
