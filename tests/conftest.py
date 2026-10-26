@@ -17,9 +17,28 @@ def _qt_application_lifetime():
         QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication([])
     yield app
-    from PySide6.QtCore import QEvent
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    from collections import Counter
+    import warnings
+    from PySide6.QtCore import QEvent, QThreadPool
+
+    # Some fixtures close windows without deleting them. Dispose them while Python
+    # and QApplication are both alive, rather than during interpreter shutdown.
+    workers_finished = QThreadPool.globalInstance().waitForDone(5000)
     app.processEvents()
+    remaining = app.topLevelWidgets()
+    if remaining:
+        counts = Counter(type(widget).__name__ for widget in remaining)
+        warnings.warn(f"Qt test windows left for session cleanup: {dict(counts)}", RuntimeWarning)
+    del remaining
+    for _ in range(4):
+        for widget in app.topLevelWidgets():
+            widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+        if not app.topLevelWidgets():
+            break
+    assert not app.topLevelWidgets(), "Qt test windows survived session cleanup"
+    assert workers_finished, "Qt test workers did not finish"
 
 
 @pytest.fixture(autouse=True)
