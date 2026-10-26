@@ -16,7 +16,7 @@ downloads run through [slskd](https://github.com/slskd/slskd), a Soulseek client
 Version 1.0 is available as a standalone app for macOS and Windows on the
 [Releases page](https://github.com/xanman04/stream2soulseek/releases): download, unzip and open it. slskd and
 FFmpeg are included. The release notes explain the first start on a Mac (S2S is not signed with a paid Apple
-developer certificate). To run from source instead, see [Installation](#installation).
+developer certificate). To run from source instead, see [Development](#development).
 
 | Playlist source | Status |
 | --- | --- |
@@ -49,61 +49,26 @@ It excludes radio edits, live recordings, and `[Mixed]` tracks, and prefers MP3 
 These preferences are configurable. Different remixes, remixers, and incompatible VIP versions remain
 ineligible regardless of audio quality.
 
-## Requirements
+## Download
 
-- Windows or macOS, and Python 3.11 or newer. (macOS support is built and unit-tested but not yet verified on
-  a Mac; see [macOS notes](#macos-notes).)
-- A local slskd installation and a Soulseek account.
-- FFmpeg's `ffprobe` utility for audio verification.
-- FFmpeg's `ffmpeg` utility for the optional spectrogram view.
-- An account with a supported playlist source.
+Get the latest version from the [Releases page](https://github.com/xanman04/stream2soulseek/releases):
 
-Each user connects their own accounts. Credentials, authenticated sessions, and music are not included in
-this repository.
+| Computer | File |
+| --- | --- |
+| Mac with Apple silicon (M1 or newer) | `S2S-<version>-macos-arm64.zip` |
+| Mac with an Intel processor | `S2S-<version>-macos-x64.zip` |
+| Windows 10 or 11 (64-bit) | `S2S-<version>-windows-x64.zip` |
 
-## Installation
+Everything S2S needs is included (slskd for Soulseek, FFmpeg for checking audio). You need a Soulseek account
+and an account with at least one supported streaming service; each user connects their own accounts.
 
-```powershell
-git clone https://github.com/xanman04/stream2soulseek.git
-cd stream2soulseek
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-```
+- **Mac:** unzip, drag S2S into Applications, then run `xattr -dr com.apple.quarantine /Applications/S2S.app`
+  once in Terminal (S2S is not signed with a paid Apple developer certificate, so macOS blocks it otherwise).
+  Allow Keychain access when asked: that is where S2S keeps your logins.
+- **Windows:** unzip and open `S2S\S2S.exe`. If SmartScreen appears, choose More info > Run anyway.
 
-Follow the [slskd setup guide](docs/SETUP.md) to install slskd and configure its download location. S2S manages
-the local slskd process and retains a successful Soulseek login for subsequent sessions. The application
-finds `ffprobe` on `PATH`, or you can select its location in Settings.
-
-Launch S2S:
-
-```powershell
-.\.venv\Scripts\python.exe -m s2s.app
-```
-
-Or double-click `run-s2s.cmd` in Explorer. Start S2S from Explorer or a normal PowerShell / Windows Terminal
-window, not from the built-in terminal of another desktop app: some packaged apps make Windows redirect S2S's
-data folder (settings, saved logins, history) to their own private copy. S2S warns when this happens.
-
-The installation also provides an `s2s` GUI entry point.
-
-### macOS notes
-
-```sh
-git clone https://github.com/xanman04/stream2soulseek.git
-cd stream2soulseek
-python3 -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/python -m s2s.app
-```
-
-Or double-click `run-s2s.command` in Finder. On a Mac, S2S keeps its data in
-`~/Library/Application Support/S2S`, saves logins in the login Keychain (item names start with `S2S`), and looks
-for slskd in `~/Library/Application Support/slskd/<version>/slskd`, then on `PATH`. Install FFmpeg with Homebrew
-(`brew install ffmpeg`); S2S also looks in Homebrew's folders, because apps opened from Finder do not see them on
-`PATH`. Keyboard shortcuts use ⌘ instead of Ctrl.
-
-Not yet verified on a real Mac: the Keychain prompts, slskd's first launch (macOS may block a downloaded binary
-until it is allowed in System Settings > Privacy & Security), and the embedded sign-in pages.
+S2S keeps its settings and history in `~/Library/Application Support/S2S` (Mac) or `%LOCALAPPDATA%\S2S`
+(Windows), and saved logins in the Mac Keychain or Windows' protected storage.
 
 ## Import workflow
 
@@ -215,6 +180,21 @@ is opened again. This behavior has offline test coverage; live queue recovery re
 
 S2S uses Python, PySide6/Qt widgets, and a local slskd API connection. Playlist integrations implement
 [`PlaylistSource`](src/s2s/sources/base.py) and are registered through `AppContext.playlist_sources()`.
+
+To run from source (Python 3.11 or newer; slskd and FFmpeg installed separately, see the
+[slskd setup guide](docs/SETUP.md)):
+
+```sh
+git clone https://github.com/xanman04/stream2soulseek.git
+cd stream2soulseek
+python -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"      # Windows: .venv\Scripts\python.exe
+.venv/bin/python -m s2s.app
+```
+
+On Windows, `run-s2s.cmd` starts it from Explorer (`run-s2s.command` on a Mac). Start it from Explorer or a
+normal terminal, not from another desktop app's built-in terminal: some packaged apps make Windows redirect
+S2S's data folder to their own private copy (S2S warns when this happens).
 
 Run the offline test suite from the repository root:
 
