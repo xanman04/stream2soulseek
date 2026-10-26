@@ -66,13 +66,11 @@ def load_credentials(store: SecretStore) -> SoulseekCredentials | None:
 
 
 def save_credentials(store: SecretStore, creds: SoulseekCredentials) -> None:
-    store.set(SOULSEEK_USERNAME, creds.username)
-    store.set(SOULSEEK_PASSWORD, creds.password)
+    store.update({SOULSEEK_USERNAME: creds.username, SOULSEEK_PASSWORD: creds.password})
 
 
 def clear_credentials(store: SecretStore) -> None:
-    store.delete(SOULSEEK_USERNAME)
-    store.delete(SOULSEEK_PASSWORD)
+    store.update({SOULSEEK_USERNAME: None, SOULSEEK_PASSWORD: None})
 
 
 def validate_credentials(username: str, password: str) -> str | None:
