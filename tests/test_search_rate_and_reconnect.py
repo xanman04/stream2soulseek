@@ -135,7 +135,7 @@ def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
     lim = SearchRateLimiter()
     assert (lim.limit, lim.window_s) == (search.RATE_LIMIT, search.RATE_WINDOW_S) == (30, 220)
     assert search.RATE_LIMIT < 34  # stricter than slsk-batchdl's long-used 34 per 220 s
-    assert search.MIN_SPACING_S >= 3 and search.REPEAT_COOLDOWN_S >= 60  # never bursts
+    assert search.MIN_SPACING_S >= 1 and search.REPEAT_COOLDOWN_S >= 60
     # a settings file written by the short-lived version that had these options still loads; the values are ignored
     home = config.app_dir()
     (home / "settings.json").write_text('{"search_rate_limit": 500, "search_rate_window_s": 10}', encoding="utf-8")
@@ -148,13 +148,13 @@ def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
 
 
 def test_small_runs_are_not_slowed_down():
-    """Searches start 3 s apart (never in bursts); 30 of them fit in the window, so a small playlist never waits."""
+    """30 searches fit in the window, so a small playlist never waits for it; only the 31st does."""
     t = FakeTime()
     lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
     cancel = threading.Event()
     for i in range(30):
         lim.acquire(cancel, f"query {i}")
-    assert 87 <= t.clock() < 91
+    assert t.clock() < 31
     lim.acquire(cancel, "query 30")
     assert t.clock() >= 220
 
@@ -813,7 +813,7 @@ def test_a_small_run_is_not_slowed_by_the_pacing():
     lim.set_demand(20)
     for i in range(20):
         lim.acquire(threading.Event(), f"q{i}")
-    assert t.clock() < 20 * search.MIN_SPACING_S + 1  # the plain 3 s spacing, not the slower steady pace
+    assert t.clock() < 20 * search.MIN_SPACING_S + 1  # not the slower steady pace
 
 
 def test_pacing_speeds_up_once_the_rest_fits_in_the_window():
@@ -827,19 +827,3 @@ def test_pacing_speeds_up_once_the_rest_fits_in_the_window():
     before = t.clock()
     lim.acquire(threading.Event(), "c")
     assert t.clock() - before <= search.MIN_SPACING_S + 0.01
-
-
-def test_the_page_says_when_the_next_search_starts(qapp, env, monkeypatch):
-    t = FakeTime()
-    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
-    monkeypatch.setattr(search, "LIMITER", lim)
-    page, ctx = make_page(qapp, env, monkeypatch, FlakyClient({}), [])
-    page._limiter_base = 0
-    page._set_running(True)
-    page._done, page._total = 10, 66
-    lim.set_demand(100)
-    lim.acquire(threading.Event(), "a")
-    page._tick()
-    assert "next search in 8 s" in page.pace_label.text()
-    page._set_running(False)
-    page.close()

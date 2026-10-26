@@ -440,9 +440,9 @@ def test_all_rejected_queries_remain_unresolved(env):
 
 @pytest.mark.parametrize("users,enough,needs_deep,backups", [
     (["u1", "u2", "u3", "u4", "u5", "u6"], True, False, 5),
-    (["u1", "u2", "u3", "u4"], False, False, 3),
+    (["u1", "u2", "u3"], True, False, 2),  # a match plus two backups: no more searches needed
     (["u1", "u1", "u1", "u1", "u1", "u1"], False, True, 0),
-    (["u1", "u2"], False, True, 1),
+    (["u1", "u2"], False, False, 1),
 ])
 def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, enough, needs_deep, backups):
     # A folder difference creates distinct remote files without changing recording identity.

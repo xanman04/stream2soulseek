@@ -38,8 +38,10 @@ from .queue_recovery import effective_item, pool_for_track
 ALREADY_IMPORTED = "already imported"
 NOT_SEARCHED = "not searched (search was cancelled before this track)"
 QUICK_SEARCH_S = 8
-TARGET_SOURCES = 6  # primary plus five independent backup uploaders
-MIN_SOURCES = 4  # primary plus three backups before avoiding a deeper search
+# Searches are the scarce resource (Soulseek allows about 8 a minute), so a track stops searching once it has a
+# good match plus a couple of backups instead of chasing five; "Find another source" covers the rare rest.
+TARGET_SOURCES = 3  # primary plus two independent backup uploaders in the preferred format
+MIN_SOURCES = 2  # primary plus one backup before avoiding a deeper search
 
 _SECRETISH = re.compile(r"(?i)\bbearer\s+\S+|[A-Za-z0-9_\-]{32,}(?:\.[A-Za-z0-9_\-]{8,}){0,2}")
 
@@ -228,7 +230,7 @@ def search_and_match(
                 backups = backup_source_count(result)
                 summary = f"{backups} backup uploaders available"
                 if backups < MIN_SOURCES - 1:
-                    summary += "; fewer than the target of 3-5 backups were found"
+                    summary += "; no backup uploader was found"
                 result = replace(result, note="; ".join(x for x in (result.note, summary) if x))
             if result.best is None and interrupted:
                 return _unresolved(track, DISCONNECTED_NOTE)
