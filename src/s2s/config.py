@@ -92,7 +92,9 @@ def load_settings() -> Settings:
     kwargs["rule_layouts"] = ({str(n): MatchPolicy.from_dict(p) for n, p in layouts.items() if str(n).strip()}
                               if isinstance(layouts, dict) else {})
     s = Settings(**kwargs)
-    if not s.ffprobe_path:
+    if not s.ffprobe_path or not Path(s.ffprobe_path).is_file():
+        # Also replaces a saved path that no longer exists: the copy bundled with an older or moved S2S (a Mac
+        # app opened from Downloads runs from a different temporary folder on every launch).
         s.ffprobe_path = default_ffprobe_path()
     s.recent_destinations = [str(d) for d in s.recent_destinations][:MAX_RECENT]
     return s

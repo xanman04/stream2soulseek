@@ -23,6 +23,7 @@ from ..rejections import RejectionKind, classify, pending_declined
 from .context import AppContext
 from .theme import accent, chip, set_banner, set_chip, subtle, tint
 from .util import fmt_mib, item, make_table, show_error
+from .other_sources import OtherSourcesPanel
 from .workers import run_async
 
 REFRESH_MS = 3000
@@ -79,7 +80,7 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
                                f"{why}\nNothing was copied into your folder.", fixable=True, recheck=True,
                                help=f"The downloaded file did not pass the check ({_lower_first(why)[:120]}), so "
                                     "it was not copied into your folder (it is still in the Soulseek downloads "
-                                    "folder). Find another source to download a different copy, or press Check "
+                                    "folder). Pick another file on the right to download a different copy, or press Check "
                                     "again to re-check this one.")
         if auto_import:
             return TrackStatus("Copying…", "info", DOWNLOADING, raw_line)
@@ -241,17 +242,26 @@ class TransfersPage(QWidget):
         self.stop_wait_btn = QPushButton("Cancel download")
         self.queued_backups_btn = QPushButton("Choose another uploader…")  # opens a chooser; nothing is automatic
         self.queued_backups_btn.setVisible(False)
+        self.fix_btn.setVisible(False)  # replacements are chosen in place, in the "Other files" list beside
+        self.sources = OtherSourcesPanel(ctx)  # the problem (no trip back to Review)
+        self.sources.setVisible(False)
+        self.sources.queued.connect(lambda _track: self.refresh())
         self.attention = QWidget()
-        al = QVBoxLayout(self.attention)
-        al.setContentsMargins(0, 8, 0, 0)
+        outer = QHBoxLayout(self.attention)
+        outer.setContentsMargins(0, 8, 0, 0)
+        problems_box = QWidget()
+        al = QVBoxLayout(problems_box)
+        al.setContentsMargins(0, 0, 0, 0)
         al.addWidget(self.attention_title)
         al.addWidget(self.problems, 1)
         al.addWidget(self.problem_help)
         fix_row = QHBoxLayout()
-        for b in (self.fix_btn, self.queued_backups_btn, self.retry_btn, self.recheck_btn, self.stop_wait_btn):
+        for b in (self.queued_backups_btn, self.retry_btn, self.recheck_btn, self.stop_wait_btn):
             fix_row.addWidget(b)
         fix_row.addStretch(1)
         al.addLayout(fix_row)
+        outer.addWidget(problems_box, 5)
+        outer.addWidget(self.sources, 4)
         self.attention.setVisible(False)
 
         self.split = QSplitter(Qt.Orientation.Vertical)
@@ -345,10 +355,12 @@ class TransfersPage(QWidget):
         self.queued_backups_btn.setVisible(stuck)
         self.recheck_btn.setVisible(bool(status and status.recheck))
         self.folder_btn.setEnabled(bool(selected and self._final_paths.get(selected[1])))
+        shown = None  # (approval id, apple id, status) the panel explains
         if not self.attention.isHidden():
             if status is not None and status.group == ATTENTION:
                 name = self._names.get(selected[1], selected[1])
                 set_banner(self.problem_help, f"{name}: {status.help or status.text}", status.kind)
+                shown = (selected[0], selected[1], status)
             else:  # nothing picked in the panel: explain the first problem straight away
                 first = self.problems.item(0, P_NUM)
                 track = first.data(Qt.ItemDataRole.UserRole) if first is not None else None
@@ -358,6 +370,13 @@ class TransfersPage(QWidget):
                     tail = f" ({more} more: select one to see it.)" if more else ""
                     set_banner(self.problem_help, f"{self._names.get(track, track)}: {st.help or st.text}{tail}",
                                st.kind)
+                    shown = (first.data(APPROVAL_ROLE), track, st)
+        if shown is not None and shown[2].fixable:
+            self.sources.setVisible(True)
+            self.sources.show_track(shown[0], shown[1], self._names.get(shown[1], shown[1]))
+        else:
+            self.sources.setVisible(False)
+            self.sources.clear()
 
     def _reset_header(self) -> None:
         self.banner.setVisible(False)
@@ -527,9 +546,6 @@ class TransfersPage(QWidget):
             and statuses[t].group == ATTENTION)
         self._show_banner(err=err, proc_err=proc_err, total=total, counts=counts)
         self._fix_mode = "failed" if any(not st.declined for st in fixable) else "declined"
-        self.fix_btn.setVisible(bool(fixable))
-        if fixable:
-            self.fix_btn.setText(f"Find another source for {_plural(len(fixable), 'track', 'tracks')}…")
 
         self.history_btn.setEnabled(bool(self.ctx.import_id))
         self._show_archives(records, archives, relevant)

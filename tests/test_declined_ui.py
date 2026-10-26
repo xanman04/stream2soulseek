@@ -68,14 +68,15 @@ def test_declined_row_shows_problem_and_banner_with_button(declined):
     assert not t.attention.isHidden() and t.problems.rowCount() == 1
     t.problems.selectRow(0)
     assert "share" in t.problem_help.text().lower() and "Completed, Rejected" not in t.problem_help.text()
-    assert t.fix_btn.text() == "Find another source for 1 track…"
+    assert t.fix_btn.isHidden()  # no trip back to Review: other files are listed beside the problem
+    assert not t.sources.isHidden()
     t.stop()
 
 
 def test_find_another_source_shows_only_declined_tracks_and_queues_nothing(declined):
     win, _store, ctx, svc, ap, c, dest = declined
     win.transfers.refresh()
-    win.transfers.fix_btn.click()
+    win.start_replacement()  # Step 6's "find missing" still uses Review
     rp = win.review
     assert rp.replacement
     assert [r.result.track.apple_id for r in rp.model.rows] == ["i.0"]  # only the declined track
@@ -93,7 +94,7 @@ def test_find_another_source_shows_only_declined_tracks_and_queues_nothing(decli
 def test_confirm_replacement_makes_second_approval_and_transfers_show_both(declined, monkeypatch):
     win, store, ctx, svc, ap, c, dest = declined
     win.transfers.refresh()
-    win.transfers.fix_btn.click()
+    win.start_replacement()  # Step 6's "find missing" still uses Review
     asked, created = [], []
     real = review_page.create_approval
 
@@ -122,14 +123,14 @@ def test_confirm_replacement_makes_second_approval_and_transfers_show_both(decli
     assert t.table.rowCount() == 1  # the replacement is the same track, not a second row
     assert t.table.item(0, COL_SOURCE).text() == "u3 (replacement)"
     assert t.table.item(0, COL_STATUS).text() == "Waiting on uploader"
-    assert t.fix_btn.isHidden()  # the declined track now has a replacement
+    assert t.sources.isHidden()  # the declined track now has a replacement
     t.stop()
 
 
 def test_declining_replacement_is_not_confirmed_without_yes(declined, monkeypatch):
     win, store, ctx, svc, ap, c, dest = declined
     win.transfers.refresh()
-    win.transfers.fix_btn.click()
+    win.start_replacement()  # Step 6's "find missing" still uses Review
     monkeypatch.setattr(type(win.review), "ask_confirmation", lambda self, e: False)
     win.review.confirm_download()
     assert svc.enqueued == [] and len(store.approvals_for_import(ctx.import_id)) == 1
@@ -159,4 +160,38 @@ def test_ui_has_no_extra_enqueue_paths():
 
     ui = Path(s2s.__file__).parent / "ui"
     assert [p.name for p in ui.glob("*.py")
-            if "enqueue_approved" in p.read_text(encoding="utf-8") and p.name != "review_page.py"] == []
+            if "enqueue_approved" in p.read_text(encoding="utf-8")
+            and p.name not in ("review_page.py", "other_sources.py")] == []  # both behind an explicit yes
+
+
+def test_downloads_page_offers_other_files_in_place_and_queues_only_after_yes(declined, monkeypatch):
+    from PySide6.QtCore import QThreadPool
+    from PySide6.QtWidgets import QApplication
+
+    from s2s.ui import other_sources
+
+    win, store, ctx, svc, ap, c, dest = declined
+    t = win.transfers
+    t.refresh()
+    t.problems.selectRow(0)
+    QThreadPool.globalInstance().waitForDone(5000)
+    QApplication.processEvents()
+    panel = t.sources
+    assert not panel.isHidden()
+    assert [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())] == ["u3"]  # not the decliner
+    assert win.stack.currentWidget() is not win.frames[3]  # still on Downloads
+    monkeypatch.setattr(type(panel), "ask_download", lambda self, name, cand: False)
+    panel.download_selected()
+    assert svc.enqueued == [] and len(store.approvals_for_import(ctx.import_id)) == 1
+    asked = []
+    monkeypatch.setattr(type(panel), "ask_download", lambda self, name, cand: asked.append(cand) or True)
+    panel.download_selected()
+    QThreadPool.globalInstance().waitForDone(5000)
+    QApplication.processEvents()
+    approvals = store.approvals_for_import(ctx.import_id)
+    assert len(asked) == 1 and len(approvals) == 2
+    new = next(a for a in approvals if a.id != ap.id)
+    assert [i.username for i in new.items] == ["u3"] and svc.enqueued == [(new.id, new.fingerprint)]
+    assert store.get_approval(ap.id) == ap  # the original approval is untouched
+    assert other_sources.create_approval is not None
+    t.stop()

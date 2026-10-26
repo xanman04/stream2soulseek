@@ -17,7 +17,7 @@ from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSortFilter
 from PySide6.QtGui import QBrush, QFont, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QTableView, QVBoxLayout, QWidget,
 )
 
 from .. import config, organize, workflow
@@ -534,6 +534,47 @@ class ConfirmDialog(QDialog):
             self.table.setColumnWidth(4, 420)
 
 
+class QueuingDialog(QDialog):
+    """Modal "Queuing N downloads…" while the confirmed files are handed to Soulseek. It cannot be closed by the
+    user (stopping half way would leave some files queued and others not); it closes itself when queuing ends."""
+
+    def __init__(self, count: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._done = False
+        self.setWindowTitle("Queuing downloads")
+        self.setModal(True)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        head = QLabel(f"Queuing {count} download{'s' if count != 1 else ''}…")
+        f = head.font()
+        f.setPointSizeF(f.pointSizeF() * 1.3)
+        f.setBold(True)
+        head.setFont(f)
+        head.setMinimumWidth(360)
+        bar = QProgressBar()
+        bar.setRange(0, 0)
+        bar.setTextVisible(False)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+        lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
+        lay.addWidget(head)
+        lay.addWidget(theme.subtle(QLabel("Sending the requests to the uploaders. This takes a few seconds.")))
+        lay.addWidget(bar)
+
+    def finish(self) -> None:
+        self._done = True
+        self.close()
+
+    def reject(self) -> None:  # Esc does nothing until queuing has finished
+        if self._done:
+            super().reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._done:
+            super().closeEvent(event)
+        else:
+            event.ignore()
+
+
 class ReviewPage(QWidget):
     approved = Signal()  # downloads were queued under a new approval
     queueing_changed = Signal(bool)
@@ -550,6 +591,7 @@ class ReviewPage(QWidget):
         self._without_source = 0
         self._banner_action = ""
         self.replacement = False  # True while showing only declined tracks ("find another source")
+        self._custom_for: str | None = None  # the track whose suggestion the search bar shows
         self.model = ReviewModel(self)
         # The view shows the model through a sort/filter proxy. All row logic below works on SOURCE rows
         # (model.rows); never use a view index's row() directly.
@@ -652,9 +694,17 @@ class ReviewPage(QWidget):
         self.tried_label.setWordWrap(True)
         self.tried_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.tried_label.setVisible(False)
-        self.custom_btn = QPushButton("Search again with my own words…")
+        # search this track again with your own words: a search bar in the panel, not a popup
+        self.custom_query = QLineEdit()
+        self.custom_query.setClearButtonEnabled(True)
+        self.custom_query.setEnabled(False)
+        self.custom_query.returnPressed.connect(self.search_custom)
+        self.custom_btn = QPushButton("Search")
         self.custom_btn.setEnabled(False)
         self.custom_btn.clicked.connect(self.search_custom)
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.custom_query, 1)
+        search_row.addWidget(self.custom_btn)
         left = QVBoxLayout()
         left.addWidget(self.detail_title)
         left.addWidget(self.why)
@@ -664,7 +714,8 @@ class ReviewPage(QWidget):
         left.addWidget(self.facts_label)
         left.addWidget(self.tried_label)
         left.addStretch(1)
-        left.addWidget(self.custom_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        left.addWidget(theme.subtle(QLabel("Search Soulseek for this track with your own words:")))
+        left.addLayout(search_row)
 
         self.alt_title = theme.subtle(QLabel(""))
         self.detail = make_table(["", "Uploader", "Quality", "Length", "Match"])
@@ -685,7 +736,9 @@ class ReviewPage(QWidget):
         right.addWidget(self.detail, 1)
         right.addLayout(alt_foot)
 
-        dw = QWidget()
+        # The details panel always fits the window: it never scrolls as a whole and cannot be dragged; only the
+        # track list above and the file list inside it scroll.
+        dw = self.details = QWidget()
         dl = QHBoxLayout(dw)
         dl.setContentsMargins(0, 4, 0, 0)
         lw, rw = QWidget(), QWidget()
@@ -693,28 +746,12 @@ class ReviewPage(QWidget):
         rw.setLayout(right)
         dl.addWidget(lw, 5)
         dl.addWidget(rw, 6)
-        # Keep the track list useful on smaller displays. Full file details remain reachable by scrolling
-        # this pane instead of forcing the entire window taller or squeezing the list down to a few rows.
-        detail_scroll = QScrollArea()
-        detail_scroll.setWidgetResizable(True)
-        detail_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        detail_scroll.setWidget(dw)
-        detail_scroll.setMinimumHeight(180)
-
-        split = self.split = QSplitter(Qt.Orientation.Vertical)
-        split.addWidget(self.view)
-        split.addWidget(detail_scroll)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 2)
-        split.setSizes([420, 280])
-        split.setChildrenCollapsible(False)
+        dw.setMinimumHeight(230)
 
         # ---- footer: destination and the one primary button
         self.dest_label = theme.subtle(QLabel(""))
         self.dest_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.queue_progress = QProgressBar()
-        self.queue_progress.setRange(0, 0)
-        self.queue_progress.setVisible(False)
+        self.queuing_popup: QueuingDialog | None = None  # shown while the confirmed files are being queued
         self.confirm_btn = theme.primary(QPushButton("Confirm selection (0)"))
         self.confirm_btn.setEnabled(False)
         foot = QHBoxLayout()
@@ -725,8 +762,8 @@ class ReviewPage(QWidget):
         lay.addLayout(banner_row)
         lay.addLayout(chips)
         lay.addLayout(tools)
-        lay.addWidget(split, 1)
-        lay.addWidget(self.queue_progress)
+        lay.addWidget(self.view, 3)
+        lay.addWidget(dw, 2)
         lay.addLayout(foot)
 
         self.model.checks_changed.connect(self._update_footer)
@@ -910,6 +947,9 @@ class ReviewPage(QWidget):
             self.show_rejected.setVisible(False)
             self.tried_label.setVisible(False)
             self.custom_btn.setEnabled(False)
+            self.custom_query.setEnabled(False)
+            self.custom_query.clear()
+            self.custom_query.setPlaceholderText("")
             self._update_use_button()
             return
         r = self.model.rows[row]
@@ -923,7 +963,13 @@ class ReviewPage(QWidget):
         show_tried = bool(tried) and ch is None and res.status == MatchStatus.UNRESOLVED
         self.tried_label.setText("Searched for: " + "; ".join(f"“{q}”" for q in tried) if show_tried else "")
         self.tried_label.setVisible(show_tried)
-        self.custom_btn.setEnabled(t.apple_id not in self.model.searching)
+        can_search = t.apple_id not in self.model.searching and not self._locked and not self.replacement
+        self.custom_btn.setEnabled(can_search)
+        self.custom_query.setEnabled(can_search)
+        if self._custom_for != t.apple_id:
+            self._custom_for = t.apple_id
+            self.custom_query.clear()
+            self.custom_query.setPlaceholderText(self._default_custom_query(res))
 
         want = None if t.duration_ms is None else round(t.duration_ms / 1000)
         if ch is None:
@@ -1045,10 +1091,8 @@ class ReviewPage(QWidget):
     # ------------------------------------------------------------ custom search
 
     def ask_custom_query(self, default: str) -> str | None:
-        """Ask for the words to search. Separate method so tests can replace the dialog."""
-        text, ok = QInputDialog.getText(self, "Search again", "Search Soulseek for:", QLineEdit.EchoMode.Normal,
-                                        default)
-        return text if ok else None
+        """The words in the search bar (its suggestion when empty). Separate method so tests can replace it."""
+        return self.custom_query.text().strip() or default
 
     def _default_custom_query(self, res: MatchResult) -> str:
         ladder = build_queries(res.track)
@@ -1222,12 +1266,12 @@ class ReviewPage(QWidget):
         downloads_dir, archive_name = ctx.settings.slskd_downloads_dir, ctx.settings.archive_dir_name
         self._busy = True
         self._load_generation += 1
-        self.queue_progress.setVisible(True)
+        self.queuing_popup = QueuingDialog(len(items), self)
+        self.queuing_popup.show()
         self.queueing_changed.emit(True)
         self.view.setEnabled(False)
         self.use_btn.setEnabled(False)
         self.confirm_btn.setEnabled(False)
-        self._notice = ("Queuing the approved files…", "info")
         self._update_footer()
 
         def work():
@@ -1239,9 +1283,15 @@ class ReviewPage(QWidget):
 
         run_async(self, work, self._queued, self._queue_failed)
 
+    def _close_queuing_popup(self) -> None:
+        if self.queuing_popup is not None:
+            self.queuing_popup.finish()
+            self.queuing_popup.deleteLater()
+            self.queuing_popup = None
+
     def _queued(self, approval) -> None:
         self._busy = False
-        self.queue_progress.setVisible(False)
+        self._close_queuing_popup()
         self.view.setEnabled(True)
         self._locked = True
         self._notice = None
@@ -1258,7 +1308,7 @@ class ReviewPage(QWidget):
 
     def _queue_failed(self, exc: object) -> None:
         self._busy = False
-        self.queue_progress.setVisible(False)
+        self._close_queuing_popup()
         self.view.setEnabled(True)
         self.queueing_changed.emit(False)
         self._notice = ("Queuing did not finish. Check Downloads and Import history before retrying: some files "

@@ -593,11 +593,16 @@ def test_confirm_with_nothing_checked_does_not_even_ask(env, monkeypatch):
 def test_enqueue_approved_only_called_from_review_page():
     ui_dir = Path(s2s.__file__).parent / "ui"
     offenders = [p.name for p in ui_dir.glob("*.py")
-                 if "enqueue_approved" in p.read_text(encoding="utf-8") and p.name != "review_page.py"]
+                 if "enqueue_approved" in p.read_text(encoding="utf-8")
+                 and p.name not in ("review_page.py", "other_sources.py")]
     assert offenders == []
     src = (ui_dir / "review_page.py").read_text(encoding="utf-8")
     assert src.count("enqueue_approved(") == 1
     assert src.index("ask_confirmation(self.summary_entries())") < src.index("enqueue_approved(")
+    # Downloads page: one replacement file, queued only after its own yes
+    src = (ui_dir / "other_sources.py").read_text(encoding="utf-8")
+    assert src.count("enqueue_approved(") == 1
+    assert src.index("if not self.ask_download(") < src.index("enqueue_approved(")
 
 
 def test_sign_out_clears_stored_session(env):
