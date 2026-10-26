@@ -29,7 +29,8 @@ from .models import (
     TransferState,
 )
 from .rejections import DeclinedTransfer, RejectionKind, classify, declined_transfers, pending_declined, peer_reason
-from .slskd.search import SearchCancelled, run_search
+from .slskd import search as _search
+from .slskd.search import SearchCancelled, SearchInterrupted, run_search
 from .store import Store
 from .queue_recovery import effective_item, pool_for_track
 
@@ -60,6 +61,25 @@ def _unresolved(track: AppleTrack, note: str) -> MatchResult:
 
 
 NOT_FOUND_PREFIX = "Not found after"
+SEARCH_FAILED_PREFIX = "search failed"
+DISCONNECTED_NOTE = ("search failed: Soulseek disconnected (probably a temporary search limit); this track was "
+                     "not searched. Use \"Retry failed searches\".")
+
+
+def is_search_failed(res: MatchResult) -> bool:
+    """True for a track whose search could not run (never for one that was searched and had no match)."""
+    return (res.status == MatchStatus.UNRESOLVED and res.best is None
+            and res.note.lower().startswith(SEARCH_FAILED_PREFIX))
+
+
+def failed_search_tracks(results: Iterable[MatchResult]) -> list[AppleTrack]:
+    return [r.track for r in results if is_search_failed(r)]
+
+
+def configure_search_limits(settings: Settings) -> None:
+    """Apply the user's rate limit and reconnect wait to the process-wide limiter and connection gate."""
+    _search.LIMITER.configure(settings.search_rate_limit, settings.search_rate_window_s)
+    _search.GATE.configure(max(0, int(settings.search_reconnect_wait_min)) * 60)
 
 
 def searched_note(tried: list[str]) -> str:
@@ -108,6 +128,7 @@ def search_and_match(
     *,
     cancel: threading.Event,
     progress: Callable[[int, int, MatchResult | None], None],
+    cache: _search.SearchCache | None = None,
 ) -> list[MatchResult]:
     """Search slskd for every track (bounded concurrency), rank, and persist the results.
 
@@ -117,6 +138,10 @@ def search_and_match(
     imp = store.get_import(import_id)
     if imp is None:
         raise ValueError("unknown import")
+    configure_search_limits(settings)
+    _search.GATE.begin_run()
+    if cache is None:
+        cache = _search.SearchCache()  # no query is sent twice within this run
     done_ids = store.completed_apple_ids(imp.destination)
     declined_peers = declined_peer_reasons(store)
     total = len(tracks)
@@ -147,6 +172,14 @@ def search_and_match(
         try:
             warnings: list[str] = []
             tried: list[str] = []
+            interrupted: list[SearchInterrupted] = []
+
+            def on_warning(exc):
+                if isinstance(exc, SearchInterrupted):
+                    interrupted.append(exc)
+                warnings.append(
+                    "Additional source search failed; earlier results retained "
+                    f"({type(exc).__name__})")
 
             def ranked(found):
                 return match(track, found, settings.match_policy, declined_peers)
@@ -162,13 +195,13 @@ def search_and_match(
                     _source_count(ranked(found)) < MIN_SOURCES
                     or _source_count(ranked(found), preferred=True) == 0
                 ),
-                on_warning=lambda exc: warnings.append(
-                    "Additional source search failed; earlier results retained "
-                    f"({type(exc).__name__})"
-                ),
+                on_warning=on_warning,
+                check_empty=True, cache=cache,
             )
         except SearchCancelled:
             return None
+        except SearchInterrupted:
+            return _unresolved(track, DISCONNECTED_NOTE)
         except Exception as exc:  # network/API errors must not abort the whole run
             return _unresolved(track, f"search failed: {type(exc).__name__}: {scrub(exc)}")
         try:
@@ -179,6 +212,8 @@ def search_and_match(
                 if backups < MIN_SOURCES - 1:
                     summary += "; fewer than the target of 3-5 backups were found"
                 result = replace(result, note="; ".join(x for x in (result.note, summary) if x))
+            if result.best is None and interrupted:
+                return _unresolved(track, DISCONNECTED_NOTE)
             if result.best is None and result.status == MatchStatus.UNRESOLVED and tried:
                 result = replace(result, note="; ".join(x for x in (result.note, searched_note(tried)) if x))
             if warnings:
@@ -229,10 +264,11 @@ def search_track_custom(
     if store.get_import(import_id) is None:
         raise ValueError("unknown import")
     cancel = cancel or threading.Event()
+    configure_search_limits(settings)
     found = run_search(
         client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
         response_limit=settings.response_limit, file_limit=settings.file_limit,
-        queries=[query],
+        queries=[query], check_empty=True,
     )
     old = next((r for r in store.load_match_results(import_id) if r.track.apple_id == track.apple_id), None)
     files = list(found)

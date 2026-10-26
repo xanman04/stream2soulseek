@@ -40,3 +40,14 @@ def _flush_qt_deferred_deletes(_qt_application_lifetime):
 def _isolated_app_home(tmp_path_factory, monkeypatch):
     """Never touch the real per-user app data folder during tests."""
     monkeypatch.setenv("S2S_HOME", str(tmp_path_factory.mktemp("s2s_home")))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_search_limits(monkeypatch):
+    """Searching is rate limited process-wide; tests get an unlimited limiter and a healthy connection gate."""
+    from s2s.slskd import search
+
+    limiter = search.SearchRateLimiter()
+    limiter.unlimited = True
+    monkeypatch.setattr(search, "LIMITER", limiter)
+    monkeypatch.setattr(search, "GATE", search.ConnectionGate())

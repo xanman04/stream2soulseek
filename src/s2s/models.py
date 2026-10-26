@@ -301,6 +301,9 @@ class Settings:
     search_concurrency: int = 3  # active searches; search creation is serialized separately
     response_limit: int = 100
     file_limit: int = 10000
+    search_rate_limit: int = 34  # searches per window, all workers together (the server bans for 30 min above its limit)
+    search_rate_window_s: int = 220
+    search_reconnect_wait_min: int = 40  # how long to wait for Soulseek to come back before giving up on a track
     recent_destinations: list[str] = field(default_factory=list)  # most recent first, max 10
     archive_dir_name: str = "OLD"  # subfolder of the downloads dir that receives finished peer folders
     auto_import: bool = True
