@@ -4,8 +4,7 @@
 
 # S2S — Stream to Soulseek
 
-S2S is a desktop application for Windows and macOS that builds local music libraries from streaming-service
-playlists.
+S2S is a desktop application for building local music libraries from streaming-service playlists.
 It uses playlist metadata to find matching recordings on Soulseek, presents the results for review, and
 organizes approved downloads into a flat folder of verified audio files.
 
