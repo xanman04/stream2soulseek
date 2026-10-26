@@ -137,7 +137,10 @@ def test_no_source_connected_step1_message_opens_service_page(env, monkeypatch):
     shown = []
     monkeypatch.setattr(win.service, "show_login", lambda msg: shown.append(msg))
     page.connect_btn.click()
-    assert win.stack.currentIndex() == 0 and shown  # opened the Apple Music page
+    assert win.stack.currentIndex() == 0 and not shown  # landing page; sign-in is an explicit action
+    assert win.service.stack.currentWidget() is win.service.account_page
+    win.service.reconnect_btn.click()
+    assert shown
 
 
 def test_first_start_without_session_opens_step_one(env, monkeypatch):

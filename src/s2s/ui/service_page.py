@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
 from ..sources import AppleSource
 from .context import AppContext
 from .util import show_error
+from .service_identity import ServiceAccountCard, ServiceHero, ServiceStatus, account_layout
 
 
 class ServicePage(QWidget):
@@ -24,44 +25,31 @@ class ServicePage(QWidget):
 
         self.title_label = QLabel("Apple Music")
         self.title_label.setObjectName("pageTitle")
-        self.status = QLabel("Apple Music: not signed in")
-        self.status.setWordWrap(True)
+        self.hero = ServiceHero("apple", self.title_label, self)
+        self.status = ServiceStatus("Apple Music", self)
         self.sign_out_btn = QPushButton("Sign out")
-        top = QHBoxLayout()
-        top.addWidget(self.status, 1)
-        top.addWidget(self.sign_out_btn)
-
-        self.account_card = QFrame()
-        self.account_card.setObjectName("accountCard")
-        self.account_card.setFrameShape(QFrame.Shape.StyledPanel)
-        self.account_card.setMaximumWidth(650)
         self.connection_value = QLabel("Signed in")
         self.session_value = QLabel("Saved on this PC, protected by Windows")
         self.session_value.setWordWrap(True)
         self.access_value = QLabel("Read playlists and track details")
-        form = QFormLayout(self.account_card)
-        form.addRow("Connection", self.connection_value)
-        form.addRow("Session", self.session_value)
-        form.addRow("Access", self.access_value)
         self.reconnect_btn = QPushButton("Reconnect Apple Music...")
-        form.addRow(self.reconnect_btn)
-        self.account_page = QWidget()
-        dl = QVBoxLayout(self.account_page)
-        dl.setContentsMargins(0, 12, 0, 0)
-        dl.addWidget(self.account_card)
-        dl.addStretch(1)
+        self.account_card = ServiceAccountCard("apple", connection=self.connection_value,
+            session=self.session_value, access=self.access_value, reconnect=self.reconnect_btn,
+            sign_out=self.sign_out_btn, parent=self)
+        self.account_page = account_layout(self.account_card, self)
         self.login_holder = QWidget()
         self.login_layout = QVBoxLayout(self.login_holder)
         self.login_layout.setContentsMargins(0, 0, 0, 0)
         self.stack = QStackedWidget()
         self.stack.addWidget(self.account_page)  # 0 native account/status page
         self.stack.addWidget(self.login_holder)  # 1 sign-in page
+        self.stack.currentChanged.connect(self.hero.set_page_index)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(22, 20, 22, 16)
         lay.setSpacing(12)
-        lay.addWidget(self.title_label)
-        lay.addLayout(top)
+        lay.addWidget(self.hero)
+        lay.addWidget(self.status)
         lay.addWidget(self.stack, 1)
 
         self.sign_out_btn.clicked.connect(self.sign_out)
@@ -80,16 +68,18 @@ class ServicePage(QWidget):
         connected = self.is_connected()
         self.status.setText(self.state_text())
         self.sign_out_btn.setEnabled(connected)
+        self.connection_value.setText("Signed in" if connected else "Not signed in")
+        self.session_value.setText("Saved on this PC, protected by Windows" if connected else "No session saved")
+        self.reconnect_btn.setText("Reconnect Apple Music…" if connected else "Sign in to Apple Music…")
+        self.account_card.update_state(connected)
         if connected:
             self.stack.setCurrentIndex(0)
         self.state_changed.emit()
 
     def enter(self) -> None:
-        """The page was opened: show the sign-in page when there is no session yet."""
-        if self.is_connected():
-            self.refresh_state()
-        else:
-            self.show_login("Sign in to Apple Music in the page below.")
+        """Show the service landing page; embedded sign-in starts only when requested."""
+        self.refresh_state()
+        self.stack.setCurrentIndex(0)
 
     # ------------------------------------------------------------ sign-in
 
