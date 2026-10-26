@@ -22,6 +22,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from check_bundle import check_directory
+
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "build" / "package"
 DIST = ROOT / "dist"
@@ -230,6 +232,7 @@ def main() -> None:
     run_pyinstaller(ver)
     app, exe = assemble(kind, tools, lic)
     self_test(exe)
+    check_directory(app)
     archive(kind, app, ver)
 
 
