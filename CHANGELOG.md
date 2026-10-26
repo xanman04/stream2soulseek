@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.7 — 2026-10-26
 
 - In-app updates now work on a Mac that opened S2S straight from Downloads: macOS runs such an app from a
   read-only copy, so the update is installed at the app's real location (or in Applications) instead of
