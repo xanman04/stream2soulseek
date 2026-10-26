@@ -158,11 +158,16 @@ def locate_download(
 # ---------------------------------------------------------------- probing
 
 
+NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # subprocess.CREATE_NO_WINDOW
+
+
 def probe_audio(path: Path, ffprobe_path: str, *, runner=subprocess.run) -> tuple[str, int | None, float | None]:
     """Return (codec, bitrate_kbps, duration_s) via ffprobe. No shell; args are a list."""
     args = [ffprobe_path, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)]
     try:
-        proc = runner(args, capture_output=True, text=True, timeout=60, shell=False)
+        # CREATE_NO_WINDOW: S2S runs without a console, so each ffprobe would otherwise flash its own console
+        # window and steal the keyboard focus.
+        proc = runner(args, capture_output=True, text=True, timeout=60, shell=False, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError) as exc:
         raise ProbeError(f"ffprobe failed: {type(exc).__name__}") from exc
     if proc.returncode != 0:
