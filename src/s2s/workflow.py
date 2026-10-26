@@ -7,6 +7,7 @@ approval.create_approval -> download.DownloadService.enqueue_approved, driven by
 from __future__ import annotations
 
 import math
+import os
 import re
 import subprocess
 import threading
@@ -434,6 +435,30 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
     return ReplacementPlan(results, dest, pending, missing)
 
 
+# Files that failed the import check (INVALID/CONFLICT), with what they looked like then. The Downloads page calls
+# import_completed every few seconds; without this the same failing files were re-probed on every refresh.
+_FAILED_CHECKS: dict[tuple[str, str], tuple] = {}
+
+
+def _check_signature(item, res_source: str | None) -> tuple:
+    """What a re-check depends on: the approved file, the downloaded file on disk and the destination folder."""
+    def stat(path: str | None):
+        if not path:
+            return None
+        try:
+            st = os.stat(path)
+            return (st.st_size, st.st_mtime_ns)
+        except OSError:
+            return None
+    return (item.username, item.filename, item.size, res_source, stat(res_source), stat(item.destination))
+
+
+def forget_failed_checks(approval_id: str | None = None) -> None:
+    """Check failed files again on the next import pass (the user's "Check again")."""
+    for key in [k for k in _FAILED_CHECKS if approval_id is None or k[0] == approval_id]:
+        del _FAILED_CHECKS[key]
+
+
 def import_completed(
     store: Store, approval_id: str, settings: Settings, *, runner=subprocess.run
 ) -> list[ImportResult]:
@@ -462,6 +487,9 @@ def import_completed(
         rec = store.get_transfer(approval_id, item.apple_id)
         if rec is None or rec.status.state != TransferState.SUCCEEDED:
             continue
+        failed = _FAILED_CHECKS.get((approval_id, item.apple_id))
+        if failed is not None and failed == _check_signature(item, failed[3]):
+            continue  # failed before and nothing has changed since: do not probe it again
         track = tracks.get(item.apple_id)
         cand = store.find_candidate(approval.import_id, item.apple_id, item.username, item.filename, item.size)
         if track is None or cand is None:
@@ -480,6 +508,12 @@ def import_completed(
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,
                                    f"import failed: {type(exc).__name__}: {scrub(exc)}")
         store.record_import_result(approval.import_id, res)
+        key = (approval_id, item.apple_id)
+        if res.outcome in (ImportOutcome.INVALID, ImportOutcome.CONFLICT) and res.source_path:
+            # (a file not found yet is not remembered: it is looked for again on the next pass)
+            _FAILED_CHECKS[key] = _check_signature(item, res.source_path)
+        else:
+            _FAILED_CHECKS.pop(key, None)
         out.append(res)
     return out
 

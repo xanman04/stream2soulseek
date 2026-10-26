@@ -53,3 +53,13 @@ def _fresh_search_limits(monkeypatch):
     monkeypatch.setattr(search, "LIMITER", limiter)
     monkeypatch.setattr(search, "GATE", search.ConnectionGate())
     monkeypatch.setattr(search, "SHARED_CACHE", search.SearchCache(ttl_s=search.SHARED_CACHE_TTL_S))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_failed_checks():
+    """The import pass remembers failed checks process-wide; every test starts without any."""
+    from s2s import workflow
+
+    workflow.forget_failed_checks()
+    yield
+    workflow.forget_failed_checks()

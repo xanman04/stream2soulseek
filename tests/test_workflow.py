@@ -246,6 +246,59 @@ def test_import_invalid_when_download_missing(env):
     assert out[0].outcome == ImportOutcome.INVALID
 
 
+def _counting(runner):
+    calls = []
+
+    def run(args, **kw):
+        calls.append(kw)
+        return runner(args, **kw)
+    return run, calls
+
+
+def test_a_failed_check_is_not_repeated_until_something_changes(env):
+    """The Downloads page imports every few seconds: a failing file must not be probed on every pass."""
+    ap, _ = approved(env)
+    src = put_download(env)
+    succeed(env, ap)
+    run, calls = _counting(fake_runner(bitrate=128000))  # not the accepted MP3 320
+    assert workflow.import_completed(env.store, ap.id, env.settings, runner=run)[0].outcome == ImportOutcome.INVALID
+    for _ in range(5):
+        assert workflow.import_completed(env.store, ap.id, env.settings, runner=run) == []
+    assert len(calls) == 1
+    import os as _os
+    st = src.stat()
+    _os.utime(src, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))  # the download was rewritten: check again
+    workflow.import_completed(env.store, ap.id, env.settings, runner=run)
+    assert len(calls) == 2
+    workflow.forget_failed_checks(ap.id)  # "Check again"
+    workflow.import_completed(env.store, ap.id, env.settings, runner=run)
+    assert len(calls) == 3
+
+
+def test_a_missing_download_is_looked_for_again(env):
+    ap, _ = approved(env)
+    succeed(env, ap)
+    assert workflow.import_completed(env.store, ap.id, env.settings, runner=fake_runner())[0].outcome == ImportOutcome.INVALID
+    put_download(env)  # it shows up a moment later
+    out = workflow.import_completed(env.store, ap.id, env.settings, runner=fake_runner())
+    assert [r.outcome for r in out] == [ImportOutcome.COPIED]
+
+
+def test_ffprobe_never_opens_a_console_window(tmp_path):
+    from s2s import organize
+
+    seen = {}
+
+    def run(args, **kw):
+        seen.update(kw)
+        return fake_runner()(args, **kw)
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    organize.probe_audio(f, "ffprobe.exe", runner=run)
+    import os as _os
+    assert seen["creationflags"] == (0x08000000 if _os.name == "nt" else 0)
+
+
 # ---------------------------------------------------------------- helpers
 
 
