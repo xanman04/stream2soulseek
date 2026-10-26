@@ -297,7 +297,8 @@ def env(tmp_path, monkeypatch):
     t = FakeTime()
     gate = ConnectionGate(clock=t.clock, sleep=t.sleep, poll_s=10, max_wait_s=search.RECONNECT_WAIT_S)
     monkeypatch.setattr(search, "GATE", gate)
-    settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"), search_concurrency=1, search_timeout_s=1)
+    monkeypatch.setattr(workflow, "PARALLEL_SEARCHES", 1)
+    settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"), search_timeout_s=1)
     yield SimpleNamespace(store=store, iid=iid, t=t, gate=gate, settings=settings, tmp=tmp_path)
     store.close()
 

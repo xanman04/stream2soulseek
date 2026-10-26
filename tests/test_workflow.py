@@ -63,13 +63,14 @@ def good_file(user="u", path=REMOTE):
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PARALLEL_SEARCHES", 2)
     root = tmp_path / "Tracks"
     (root / "House").mkdir(parents=True)
     store = Store(tmp_path / "s.db")
     iid = store.create_import(Playlist("p.1", "Pl"), str(root / "House"))
     settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"),
-                        search_concurrency=2, search_timeout_s=1)
+                        search_timeout_s=1)
     yield SimpleNamespace(store=store, iid=iid, settings=settings, root=root, tmp=tmp_path)
     store.close()
 
@@ -150,9 +151,9 @@ def test_cancel_before_start_returns_nothing_and_stores_nothing(env):
     assert env.store.load_match_results(env.iid) == []
 
 
-def test_cancel_midway_stops_remaining(env):
+def test_cancel_midway_stops_remaining(env, monkeypatch):
     cancel = threading.Event()
-    env.settings.search_concurrency = 1
+    monkeypatch.setattr(workflow, "PARALLEL_SEARCHES", 1)
     trs = [AppleTrack(f"i.{n}", f"Song {n}", "Artist", position=n) for n in range(6)]
     client = FakeSlskd({"song": [good_file()]})
     orig = client.start_search

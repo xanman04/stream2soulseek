@@ -298,7 +298,6 @@ class Settings:
     slskd_downloads_dir: str = ""  # must be set by the user (Settings); the folder slskd downloads into
     ffprobe_path: str = field(default_factory=default_ffprobe_path)
     search_timeout_s: int = 30
-    search_concurrency: int = 3  # active searches; search creation is serialized separately
     response_limit: int = 100
     file_limit: int = 10000
     recent_destinations: list[str] = field(default_factory=list)  # most recent first, max 10

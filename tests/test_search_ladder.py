@@ -176,12 +176,13 @@ def good(user="u", path=r"Artist - Song.mp3"):
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PARALLEL_SEARCHES", 2)
     root = tmp_path / "Tracks"
     (root / "House").mkdir(parents=True)
     store = Store(tmp_path / "s.db")
     iid = store.create_import(Playlist("p.1", "Pl"), str(root / "House"))
-    settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"), search_concurrency=2, search_timeout_s=1)
+    settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"), search_timeout_s=1)
     yield SimpleNamespace(store=store, iid=iid, settings=settings, tmp=tmp_path)
     store.close()
 

@@ -39,11 +39,11 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 
 ## Search performance and backup requirements (2026-10-25)
 
-- A 64-track playlist exposed roughly 40 seconds between serial search completions. slskd 0.26.2 limits concurrent search-start POST requests, not active searches: serialize only creation and allow bounded active searches (default 3, maximum 8).
+- A 64-track playlist exposed roughly 40 seconds between serial search completions. slskd 0.26.2 limits concurrent search-start POST requests, not active searches: serialize only creation and allow bounded active searches (up to 8, automatic; 2026-10-26).
 - Start with queries bounded to 8 seconds each. Aim for a primary candidate plus five unflagged, exact, preferred-format uploaders; if fewer than three independent backups are available, or no exact preferred-format source exists, use the configured extended timeout for one broader artist/title search. Keep version/format eligibility unchanged and retain candidates for review.
 - Count backup uploaders independently; several files from the same peer are not independent backups. Show the available count and report shortfalls rather than guaranteeing unavailable files. Backup search results alone never authorize extra downloads. Users may explicitly approve an exact-file backup pool in Review or Step 5; any file outside that pool still needs fresh confirmation.
 - slskd persists response files when the search finalizes. After stopping a bounded search, wait for finalization before fetching responses. Do not implement early matching against partial file responses without verifying upstream support.
-- Upgrade the old concurrency default of 1 to 3 once using `extra.search_scheduler_version`; preserve subsequent explicit settings. Verify speed with simulated services and then a live playlist before claiming a real-world improvement.
+- Search speed (2026-10-26, owner decision): one fixed global ceiling of 34 search starts per 220 s (the Soulseek server bans for 30 minutes above its limit), persisted across restarts; no per-track pace and no user settings for speed or parallelism. Small playlists burst at up to 8 parallel searches; large ones are paced by the ceiling alone. A disconnect gets 60 s to recover, then searching stops with a clear message. Verify on a live playlist before claiming real-world speed.
 
 ## Reviewed queued-download recovery (2026-10-25)
 

@@ -60,6 +60,11 @@ def _unresolved(track: AppleTrack, note: str) -> MatchResult:
     return MatchResult(track, MatchStatus.UNRESOLVED, None, note=note)
 
 
+# Tracks searched at once. Not a setting and not a speed cap: the fixed search limit (slskd/search.py) is the only
+# ceiling on how fast searches start. A playlist that fits in that limit's burst therefore runs as parallel as
+# possible, and a big one is paced by the limit alone; no track is held to a fixed per-track pace.
+PARALLEL_SEARCHES = 8
+
 NOT_FOUND_PREFIX = "Not found after"
 SEARCH_FAILED_PREFIX = "search failed"
 DISCONNECTED_NOTE = ("search failed: Soulseek disconnected during the search and searching stopped; this track "
@@ -225,7 +230,7 @@ def search_and_match(
             return _unresolved(track, f"matching failed: {type(exc).__name__}")
 
     if todo and not cancel.is_set():
-        workers = min(8, max(1, int(settings.search_concurrency)))
+        workers = max(1, min(PARALLEL_SEARCHES, len(todo)))
         ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="search")
         try:
             futures = [ex.submit(work, t) for t in todo]

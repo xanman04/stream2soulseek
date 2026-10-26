@@ -610,13 +610,11 @@ def test_settings_save_keeps_api_key_out_of_settings_json(env, monkeypatch):
 
     dlg = SettingsDialog(win.ctx, win)
     dlg.key.setText("synthetic-api-key-abcdef")
-    dlg.concurrency.setValue(3)
     dlg.save()
     assert secrets.get(SLSKD_API_KEY) == "synthetic-api-key-abcdef"
     text = config.settings_path().read_text(encoding="utf-8")
     assert "synthetic-api-key" not in text
-    assert config.load_settings().search_concurrency == 3
-    assert win.ctx.settings.search_concurrency == 3
+    assert "search_concurrency" not in text
 
 
 class FakeSearchClient:
