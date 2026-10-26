@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
 
 from .steps import STEPS
 
@@ -22,15 +22,8 @@ SERVICES = [
 
 def _header(text: str) -> QLabel:
     lab = QLabel(text)
-    lab.setStyleSheet("font-weight: bold; color: palette(placeholder-text); margin-top: 6px;")
+    lab.setStyleSheet("font-weight: 600; color: palette(placeholder-text); margin-top: 12px; margin-bottom: 4px;")
     return lab
-
-
-def _rule() -> QFrame:
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    return line
 
 
 class Sidebar(QWidget):
@@ -41,17 +34,22 @@ class Sidebar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(230)
+        self.setObjectName("sidebar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(244)
 
         self.services_header = _header("Streaming services")
         self.services = QListWidget()
+        self.services.setObjectName("navigation")
+        self.services.setSpacing(2)
         for key, label, available in SERVICES:
             it = QListWidgetItem(label)
+            it.setSizeHint(QSize(0, 34))
             it.setData(Qt.ItemDataRole.UserRole, key)
             if not available:
                 it.setFlags(Qt.ItemFlag.NoItemFlags)  # visible, greyed, not clickable
             self.services.addItem(it)
-        self.services.setFixedHeight(self.services.sizeHintForRow(0) * len(SERVICES) + 8)
+        self.services.setFixedHeight(38 * len(SERVICES) + 4)
 
         self.soulseek_label = QLabel("Soulseek: not logged in")
         self.soulseek_label.setWordWrap(True)
@@ -59,18 +57,22 @@ class Sidebar(QWidget):
 
         self.steps_header = _header("Workflow")
         self.steps = QListWidget()
+        self.steps.setObjectName("navigation")
+        self.steps.setSpacing(2)
         for i, (name, _t, _e) in enumerate(STEPS):
-            self.steps.addItem(QListWidgetItem(f"{i + 1}. {name}"))
-        self.steps.setFixedHeight(self.steps.sizeHintForRow(0) * len(STEPS) + 8)
+            it = QListWidgetItem(f"{i + 1}. {name}")
+            it.setSizeHint(QSize(0, 34))
+            self.steps.addItem(it)
+        self.steps.setFixedHeight(38 * len(STEPS) + 4)
         self.settings_btn = QPushButton("Settings...")
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(14, 8, 14, 14)
+        lay.setSpacing(8)
         lay.addWidget(self.services_header)
         lay.addWidget(self.services)
         lay.addWidget(self.soulseek_label)
         lay.addWidget(self.soulseek_btn)
-        lay.addWidget(_rule())
         lay.addWidget(self.steps_header)
         lay.addWidget(self.steps)
         lay.addStretch(1)

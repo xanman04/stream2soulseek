@@ -181,7 +181,9 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--width", type=int, default=1500)
     ap.add_argument("--height", type=int, default=920)
+    ap.add_argument("--theme", choices=("auto", "light", "dark"), default="auto")
     args = ap.parse_args()
+    apply_app_style(app, dark=None if args.theme == "auto" else args.theme == "dark")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -217,6 +219,12 @@ def main():
     if win.review.view.model().rowCount():
         win.review.view.selectRow(0)
     shot("04b_review_selected")
+    for key, page in (("spotify", win.spotify_service), ("soundcloud", win.soundcloud_service)):
+        page.refresh_state()  # native status cards only; never start the embedded sign-in browser
+        page.stack.setCurrentIndex(0)
+        win.stack.setCurrentWidget(page)
+        win.sidebar.show_service(key)
+        shot(f"07_account_{key}")
     win.close()
     store.close()
 

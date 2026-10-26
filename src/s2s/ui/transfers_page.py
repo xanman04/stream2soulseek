@@ -16,7 +16,7 @@ from ..models import ImportOutcome, TransferState
 from ..rejections import RejectionKind, classify, pending_declined
 from .context import AppContext
 from .spectrogram_dialog import SpectrogramDialog
-from .theme import button_text, chip, primary, set_banner, set_chip, subtle, tint
+from .theme import accent, button_text, chip, primary, set_banner, set_chip, subtle, tint
 from .util import fmt_mib, item, make_table, show_error
 from .workers import run_async
 
@@ -500,6 +500,8 @@ class TransfersPage(QWidget):
             for c, (text, tip) in enumerate(cells):
                 it = item(text, tip)
                 it.setBackground(tint(st.kind))
+                if c == COL_STATUS:
+                    it.setForeground(accent(st.kind))
                 if c == COL_NUM:
                     it.setData(Qt.ItemDataRole.UserRole, track_id)
                     it.setData(APPROVAL_ROLE, aid)

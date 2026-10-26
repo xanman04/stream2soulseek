@@ -23,7 +23,7 @@ class ServicePage(QWidget):
         self._login = None  # AppleLoginWidget, created lazily (WebEngine)
 
         self.title_label = QLabel("Apple Music")
-        self.title_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        self.title_label.setObjectName("pageTitle")
         self.status = QLabel("Apple Music: not signed in")
         self.status.setWordWrap(True)
         self.sign_out_btn = QPushButton("Sign out")
@@ -32,6 +32,7 @@ class ServicePage(QWidget):
         top.addWidget(self.sign_out_btn)
 
         self.account_card = QFrame()
+        self.account_card.setObjectName("accountCard")
         self.account_card.setFrameShape(QFrame.Shape.StyledPanel)
         self.account_card.setMaximumWidth(650)
         self.connection_value = QLabel("Signed in")
@@ -57,6 +58,8 @@ class ServicePage(QWidget):
         self.stack.addWidget(self.login_holder)  # 1 sign-in page
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(22, 20, 22, 16)
+        lay.setSpacing(12)
         lay.addWidget(self.title_label)
         lay.addLayout(top)
         lay.addWidget(self.stack, 1)

@@ -13,7 +13,7 @@ from ..sources import PlaylistSource, SourceAuthError
 from ..sources.base import TrackList
 from ..spotify.public import PublicPlaylistError, fetch_public_playlist, parse_playlist_link
 from .context import AppContext
-from .theme import set_banner, subtle
+from .theme import polish_table, set_banner, subtle
 from .tracks_model import C_ALBUM, C_ARTIST, C_DUR, C_POS, C_TITLE, TrackFilterProxy, TrackModel
 from .util import fold, show_error
 from .workers import run_async
@@ -115,6 +115,7 @@ class PlaylistPage(QWidget):
         self.track_proxy = TrackFilterProxy(self)
         self.track_proxy.setSourceModel(self.track_model)
         self.track_table = QTableView()
+        polish_table(self.track_table)
         self.track_table.setModel(self.track_proxy)
         self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.track_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)

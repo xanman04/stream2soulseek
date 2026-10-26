@@ -17,7 +17,7 @@ from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSortFilter
 from PySide6.QtGui import QBrush, QFont, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from .. import config, organize
@@ -395,6 +395,8 @@ class ReviewModel(QAbstractTableModel):
                 return QBrush(theme.tint("ok", 20))
             return None
         if role == Qt.ItemDataRole.ForegroundRole:
+            if col == C_MATCH:
+                return QBrush(theme.accent(row.kind))
             if row.kind == "muted":
                 return QApplication.palette().brush(QPalette.ColorRole.PlaceholderText)
             return None
@@ -575,6 +577,7 @@ class ReviewPage(QWidget):
         self.proxy.setSourceModel(self.model)
         self.proxy.setSortRole(SORT_ROLE)
         self.view = QTableView()
+        theme.polish_table(self.view)
         self.view.setModel(self.proxy)
         self.view.setSortingEnabled(True)
         hh = self.view.horizontalHeader()
@@ -587,12 +590,12 @@ class ReviewPage(QWidget):
         self.view.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         hh.setStretchLastSection(False)
-        for col, mode, width in ((C_USE, QHeaderView.ResizeMode.Fixed, 34), (C_POS, QHeaderView.ResizeMode.Fixed, 44),
+        for col, mode, width in ((C_USE, QHeaderView.ResizeMode.Fixed, 30), (C_POS, QHeaderView.ResizeMode.Fixed, 36),
                                  (C_TRACK, QHeaderView.ResizeMode.Stretch, 0),
-                                 (C_MATCH, QHeaderView.ResizeMode.Interactive, 300),
-                                 (C_QUALITY, QHeaderView.ResizeMode.Interactive, 110),
-                                 (C_LENGTH, QHeaderView.ResizeMode.Interactive, 100),
-                                 (C_SOURCE, QHeaderView.ResizeMode.Interactive, 200)):
+                                 (C_MATCH, QHeaderView.ResizeMode.Interactive, 250),
+                                 (C_QUALITY, QHeaderView.ResizeMode.Interactive, 95),
+                                 (C_LENGTH, QHeaderView.ResizeMode.Interactive, 90),
+                                 (C_SOURCE, QHeaderView.ResizeMode.Interactive, 140)):
             hh.setSectionResizeMode(col, mode)
             if width:
                 self.view.setColumnWidth(col, width)
@@ -714,14 +717,20 @@ class ReviewPage(QWidget):
         rw.setLayout(right)
         dl.addWidget(lw, 5)
         dl.addWidget(rw, 6)
-        dw.setMinimumHeight(230)
+        # Keep the track list useful on smaller displays. Full file details remain reachable by scrolling
+        # this pane instead of forcing the entire window taller or squeezing the list down to a few rows.
+        detail_scroll = QScrollArea()
+        detail_scroll.setWidgetResizable(True)
+        detail_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        detail_scroll.setWidget(dw)
+        detail_scroll.setMinimumHeight(180)
 
         split = self.split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(self.view)
-        split.addWidget(dw)
+        split.addWidget(detail_scroll)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 2)
-        split.setSizes([400, 260])
+        split.setSizes([420, 280])
         split.setChildrenCollapsible(False)
 
         # ---- footer: backups opt-in on one line, destination and the one primary button
