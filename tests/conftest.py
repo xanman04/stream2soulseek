@@ -25,6 +25,11 @@ def _qt_application_lifetime():
 @pytest.fixture(autouse=True)
 def _flush_qt_deferred_deletes(_qt_application_lifetime):
     yield
+    # Collect widget cycles here, on the main thread: otherwise automatic GC may run later on a worker thread
+    # (e.g. inside a threaded store test) and destroy Qt widgets there, aborting the whole run.
+    import gc
+    if not os.environ.get("S2S_TEST_NO_GC"):
+        gc.collect(1)  # young generations: where the just-finished test's widget cycles live; full GC is ~45 s slower
     if _qt_application_lifetime is not None:
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

@@ -59,10 +59,7 @@ def test_change_working_folder_requests_settings(page):
     assert requests == [True]
 
 
-def test_examples_explain_nested_downloads_and_flat_tracklist(page):
-    assert "user/album" in page.intro.text()
-    assert "one flat tracklist folder" in page.intro.text()
-    assert "username/album/" in page.downloads_example.text()
-    assert page.tracklist_example.text().splitlines() == [
-        "Track title - Artist.mp3", "Another track - Artist.flac"
-    ]
+def test_flat_tracklist_and_collapsed_downloads_explanation(page):
+    assert "no subfolders" in page.intro.text()
+    assert "user/album" in page.downloads_example.text()
+    assert page.downloads_panel.isHidden()  # the downloads folder is a small expandable, not clutter

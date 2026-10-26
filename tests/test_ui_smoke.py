@@ -90,7 +90,7 @@ def test_window_constructs_without_network_and_destination_not_defaulted(env):
     assert page.chosen_destination()[0] is None  # no default: the user must pick
     assert not hasattr(page, "dest_combo") and not hasattr(page, "new_name")
     assert page.recent_combo.count() == 1 and not page.recent_combo.isEnabled()
-    assert win.sidebar.steps.count() == 5
+    assert win.sidebar.steps.count() == 6
     assert win.service.sign_out_btn is not None
     assert win.ctx.destination is None
 
@@ -105,7 +105,7 @@ def test_sidebar_sections_and_disabled_future_services(env):
     assert flags == [True, True, True]
     assert [t.split(". ", 1)[1] for t in sb.step_texts()] == [
         "Choose playlist", "Choose tracklist folder", "Find on Soulseek", "Review & confirm",
-        "Downloads & import"]
+        "Downloads & import", "Check & export"]
     assert sb.soulseek_label.text().startswith("Soulseek:") and sb.soulseek_btn.text() == "Log in..."
 
 
@@ -167,8 +167,9 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert not f[0].next_btn.isEnabled() and f[0].hint_label.text() == "Pick a playlist first"
     assert f[0].next_btn.text() == "Next: Choose tracklist folder"
     assert f[1].next_btn.text() == "Next: Find on Soulseek"
-    assert f[3].next_btn.text() == "Next: Downloads & import"
-    assert not f[4].next_btn.isVisibleTo(f[4])  # last step has no Next
+    assert f[3].next_btn.text() == "Next: Downloads && import"  # & escaped so Qt shows it
+    assert f[4].next_btn.isVisibleTo(f[4])  # Downloads leads on to Check & export
+    assert not f[5].next_btn.isVisibleTo(f[5])  # last step has no Next
     win.go_step(2)  # locked: ignored
     assert win.stack.currentIndex() == 1
 
@@ -420,7 +421,7 @@ def test_recent_destinations_listed_selectable_and_remembered_on_approval(env, t
     win.ctx.settings.recent_destinations = [str(newer), str(older)]
     page.refresh_destinations()
     assert [page.recent_combo.itemText(i) for i in range(page.recent_combo.count())] == \
-        ["-- recent tracklist folders --", str(newer), str(older)]
+        ["Recent folders...", str(newer), str(older)]
     assert page.dest_edit.text() == ""  # listing recents never selects one
     page.recent_combo.setCurrentIndex(2)
     page.recent_combo.activated.emit(2)
@@ -477,8 +478,8 @@ def test_review_defaults_and_selection_rules(env):
     assert not (m.flags(m.index(2, 0)) & Qt.ItemFlag.ItemIsUserCheckable)
     assert m.data(m.index(1, 0), Qt.ItemDataRole.BackgroundRole) is not None  # highlighted
     assert m.data(m.index(0, 0), Qt.ItemDataRole.BackgroundRole) is None
-    assert "similar" in m.data(m.index(4, review_page.C_LIB))
-    assert m.counts()["checked"] == 2 and "2 files" in rp.confirm_btn.text()
+    assert "similar" in m.data(m.index(4, review_page.C_MATCH))
+    assert m.counts()["checked"] == 2 and "2 tracks" in rp.confirm_btn.text()
     # Cannot tick an unresolved row
     assert m.setData(m.index(2, 0), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole) is False
     # Can tick the flagged one deliberately
@@ -495,10 +496,10 @@ def test_rejected_candidates_not_selectable_alternatives_are(env):
     roles = {}
     for r in range(rp.detail.rowCount()):
         it = rp.detail.item(r, 0)
-        roles[it.text().split()[0]] = it
-    assert set(roles) >= {"best", "alternative", "rejected"}
-    assert not (roles["rejected"].flags() & Qt.ItemFlag.ItemIsSelectable)
-    assert roles["alternative"].flags() & Qt.ItemFlag.ItemIsSelectable
+        roles[it.text()] = it
+    assert set(roles) >= {"In use", "Option", "Rejected"}
+    assert not (roles["Rejected"].flags() & Qt.ItemFlag.ItemIsSelectable)
+    assert roles["Option"].flags() & Qt.ItemFlag.ItemIsSelectable
     assert rp.model.choose_candidate(0, c["rej"]) is False
     assert rp.model.rows[0].chosen == c["good"]
     # a candidate not offered for this track at all is refused too
@@ -662,8 +663,8 @@ def test_search_page_runs_and_never_queues(env, monkeypatch):
     win.search.start()
     assert client.closed
     assert win.search.table.rowCount() == 2
-    statuses = [win.search.table.item(r, 3).text() for r in range(2)]
-    assert statuses == ["proposed", "unresolved"]
+    statuses = [win.search.table.item(r, 2).text() for r in range(2)]
+    assert statuses == ["Found · exact", "Not found"]
     assert ctx.import_id and len(ctx.results) == 2
     assert win.review.model.rowCount() == 2  # search_finished loads the review screen
     assert ctx.approval_id is None
@@ -681,7 +682,7 @@ def test_search_page_reports_unreachable_slskd(env, monkeypatch):
 
     monkeypatch.setattr(AppContext, "slskd_client", no_key)
     win.search.start()
-    assert "not reachable" in win.search.info.text()
+    assert "not reachable" in win.search.summary_label.text()
     assert win.search.start_btn.isEnabled()
 
 
@@ -756,6 +757,7 @@ def test_transfers_refresh_auto_processes_and_shows_archive_status(env, monkeypa
     assert len(calls) == 1 and calls[0] is not None and FakeClient.closed
     t = win.transfers.archive_table
     assert t.rowCount() == 1 and "Archived to OLD" in t.item(0, 1).text() and "2 moved" in t.item(0, 1).text()
+    assert "1 archived" in win.transfers.details_btn.text()
     win.transfers.stop()
 
 
@@ -763,7 +765,7 @@ def test_transfers_auto_import_off_waits_for_manual_button(env, monkeypatch):
     win, calls, _ = _transfers_setup(env, monkeypatch, auto_import=False)
     win.transfers.refresh()
     assert calls == []
-    assert win.transfers.import_btn.text() == "Process completed now"
+    assert win.transfers.import_btn.text() == "Copy finished downloads"
     win.transfers.import_btn.setEnabled(True)
     win.transfers.import_btn.click()
     assert len(calls) == 1 and win.transfers.import_btn.isEnabled()
@@ -783,7 +785,7 @@ def test_review_header_sort_keeps_checkbox_and_candidate_mapping(env, monkeypatc
     assert px.rowCount() == 5
 
     px.sort(review_page.C_TITLE, Qt.SortOrder.DescendingOrder)  # Song 4, 3, 2, 1, 0
-    assert [px.index(r, review_page.C_TITLE).data() for r in range(5)] == [f"Song {n}" for n in (4, 3, 2, 1, 0)]
+    assert [px.index(r, review_page.C_TITLE).data() for r in range(5)] == [f"Song {n} — Artist" for n in (4, 3, 2, 1, 0)]
     # numeric: '#' ascending/descending and Dur
     px.sort(review_page.C_POS, Qt.SortOrder.AscendingOrder)
     assert [px.index(r, review_page.C_POS).data() for r in range(5)] == [1, 2, 3, 4, 5]
@@ -791,7 +793,7 @@ def test_review_header_sort_keeps_checkbox_and_candidate_mapping(env, monkeypatc
 
     # tick the flagged track (Song 1) through the sorted view: it is proxy row 3
     idx = px.index(3, review_page.C_USE)
-    assert px.index(3, review_page.C_TITLE).data() == "Song 1"
+    assert px.index(3, review_page.C_TITLE).data() == "Song 1 — Artist"
     assert px.setData(idx, Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
     assert m.rows[1].checked and m.counts()["checked"] == 3
     # an unresolved row (Song 2, proxy row 2) still cannot be ticked
@@ -800,10 +802,10 @@ def test_review_header_sort_keeps_checkbox_and_candidate_mapping(env, monkeypatc
     # choosing the detail view of a clicked sorted row shows THAT track's candidates
     rp.view.setCurrentIndex(px.index(4, 0))  # Song 0 (has alternatives)
     assert "Song 0" in rp.detail_title.text()
-    roles = {rp.detail.item(r, 0).text().split()[0] for r in range(rp.detail.rowCount())}
-    assert {"best", "alternative", "rejected"} <= roles
+    roles = {rp.detail.item(r, 0).text() for r in range(rp.detail.rowCount())}
+    assert {"In use", "Option", "Rejected"} <= roles
     for r in range(rp.detail.rowCount()):
-        if rp.detail.item(r, 0).text().startswith("alternative"):
+        if rp.detail.item(r, 0).text() == "Option":
             rp.detail.selectRow(r)
     assert rp.use_btn.isEnabled()
     rp.use_btn.click()

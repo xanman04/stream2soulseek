@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from .theme import button_text, primary, subtle
+
 # (sidebar name, page title, one-sentence explanation)
 STEPS = [
     ("Choose playlist", "Choose a playlist",
@@ -16,6 +18,8 @@ STEPS = [
      "Check every proposed file, change or untick any of them, then confirm: only the files you confirm are downloaded."),
     ("Downloads & import", "Downloads & import",
      "Watch the downloads, then verified files are copied into your chosen library folder."),
+    ("Check & export", "Check & export",
+     "Check that your tracklist folder matches the playlist, then export it as a playlist file or copy it in order."),
 ]
 
 
@@ -32,12 +36,11 @@ class StepFrame(QWidget):
         self.title_label = QLabel(f"Step {index + 1}: {title}")
         self.title_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
         self.hint_label = QLabel("")
-        self.hint_label.setStyleSheet("color: #666;")
-        self.next_btn = QPushButton("")
-        self.next_btn.setStyleSheet("font-weight: bold; padding: 6px 18px;")
+        subtle(self.hint_label)
+        self.next_btn = primary(QPushButton(""))
         has_next = index + 1 < len(STEPS)
         if has_next:
-            self.next_btn.setText(f"Next: {STEPS[index + 1][0]}")
+            self.next_btn.setText(button_text(f"Next: {STEPS[index + 1][0]}"))
         self.next_btn.setVisible(has_next)
 
         foot = QHBoxLayout()

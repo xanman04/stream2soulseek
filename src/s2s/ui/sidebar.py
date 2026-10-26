@@ -22,7 +22,7 @@ SERVICES = [
 
 def _header(text: str) -> QLabel:
     lab = QLabel(text)
-    lab.setStyleSheet("font-weight: bold; color: #666; margin-top: 6px;")
+    lab.setStyleSheet("font-weight: bold; color: palette(placeholder-text); margin-top: 6px;")
     return lab
 
 
@@ -76,8 +76,12 @@ class Sidebar(QWidget):
         lay.addStretch(1)
         lay.addWidget(self.settings_btn)
 
-        self.services.currentRowChanged.connect(self._service_row)
-        self.steps.currentRowChanged.connect(self._step_row)
+        # React to deliberate clicks / Enter only. currentRowChanged also fires when a list merely receives
+        # focus (Qt selects row 0 on focus-in), which used to open the Apple page - and start its embedded
+        # browser - by itself when the window first appeared, intermittently crashing the app.
+        for lst, handler in ((self.services, self._service_row), (self.steps, self._step_row)):
+            lst.itemClicked.connect(lambda it, lst=lst, handler=handler: handler(lst.row(it)))
+            lst.itemActivated.connect(lambda it, lst=lst, handler=handler: handler(lst.row(it)))
         self.soulseek_btn.clicked.connect(self.soulseek_login_requested)
         self.settings_btn.clicked.connect(self.settings_requested)
 
@@ -128,8 +132,9 @@ class Sidebar(QWidget):
         was_blocked = self.steps.blockSignals(True)
         for i, (name, _t, _e) in enumerate(STEPS):
             it = self.steps.item(i)
-            it.setText(("✓ " if done[i] else "") + f"{i + 1}. {name}")
-            if available[i]:
+            is_done = i < len(done) and done[i]
+            it.setText(("✓ " if is_done else "") + f"{i + 1}. {name}")
+            if i < len(available) and available[i]:
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 it.setToolTip("")
             else:

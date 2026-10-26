@@ -92,16 +92,24 @@ class SpotifyClient:
         try:
             response = self._http.get(_PROFILE_URL)
         except httpx.HTTPError:
-            raise SpotifyError("Could not verify the Spotify session.") from None
-        if response.status_code in (401, 403):
+            response = None
+        if response is not None and response.status_code in (401, 403):
             raise SpotifyAuthError("Spotify session expired; sign in again.")
-        if not response.is_success:
-            raise SpotifyError("Spotify could not verify the session.")
+        if response is not None and response.is_success:
+            try:
+                return self._profile_result(response.json())
+            except (ValueError, SpotifyError):
+                pass
+        # The account-settings endpoint is unofficial and answers 400 even for anonymous requests, so it cannot
+        # tell an expired session from anything else. Fall back to what S2S actually needs: the first page of
+        # the user's library. An unauthorised session comes back as data.me == null / "not authorized".
         try:
-            body = response.json()
-        except ValueError:
-            raise SpotifyError("Spotify returned an unexpected account response.") from None
-        return self._profile_result(body)
+            self._library_page(self._library_query(self._private_playlist(), 0, limit=1))
+        except SpotifyError:
+            raise
+        except Exception:
+            raise SpotifyError("Could not verify the Spotify session. Check your connection and try again.") from None
+        return {"display_name": None}
 
     def list_playlists(self) -> list[Playlist]:
         self._require_valid_session()
@@ -206,7 +214,7 @@ class SpotifyClient:
         return self._spot_client
 
     @staticmethod
-    def _library_query(private: Any, offset: int) -> Any:
+    def _library_query(private: Any, offset: int, limit: int = 50) -> Any:
         # SpotAPI 1.2.7's get_library exposes no offset parameter; keep its
         # persisted-query hash/client behavior while requesting subsequent pages.
         import json
@@ -216,7 +224,7 @@ class SpotifyClient:
             "variables": json.dumps({
                 "filters": [], "order": None, "textFilter": "",
                 "features": ["LIKED_SONGS", "YOUR_EPISODES", "PRERELEASES"],
-                "limit": 50, "offset": offset, "flatten": True,
+                "limit": limit, "offset": offset, "flatten": True,
                 "expandedFolders": [], "folderUri": None,
                 "includeFoldersWhenFlattening": False,
             }),
@@ -280,6 +288,10 @@ class SpotifyClient:
 
     @staticmethod
     def _playlist_content(body: Any) -> Mapping[str, Any]:
+        playlist = body.get("data", {}).get("playlistV2") if isinstance(body, Mapping) and isinstance(body.get("data"), Mapping) else None
+        if isinstance(playlist, Mapping) and playlist.get("__typename") in ("GenericError", "NotFound"):
+            raise SpotifyError("Spotify could not open this playlist. It may be private, deleted or unavailable "
+                               "in your country.")
         try:
             content = body["data"]["playlistV2"]["content"]
         except (TypeError, KeyError):
@@ -345,6 +357,9 @@ class SpotifyClient:
 
     @staticmethod
     def _library_page(body: Any) -> tuple[list[Any], int]:
+        if isinstance(body, Mapping) and isinstance(body.get("data"), Mapping) and body["data"].get("me") is None:
+            # Spotify answers an expired/invalid session with data.me == null and "User is not authorized".
+            raise SpotifyAuthError("Spotify session expired; sign in again.")
         try:
             library = body["data"]["me"]["library"]
             section = library.get("items", library)
