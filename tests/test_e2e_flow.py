@@ -640,8 +640,8 @@ def test_restart_resumes_downloads_and_rerun_skips_what_is_already_imported(app_
         win2.ctx.slskd_client = lambda **k: fake
         win2.ctx.playlist_sources = lambda: [FakeSource(tracks)]
         win2.playlists.refresh_sources()
-        assert win2.playlists.resume_btn.isEnabled()
-        win2.playlists.resume_btn.click()
+        assert win2._downloads_running_in_last_import()
+        win2.startup()  # opening S2S again lands straight on the running downloads (no Resume button)
         assert win2.stack.currentIndex() == STEP_TRANSFERS + 1 and win2.ctx.approval_id
         assert win2.transfers.timer.isActive()
         tr = transfer_rows(win2)

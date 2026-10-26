@@ -33,7 +33,6 @@ def summarize_tracks(tracks: list[AppleTrack]) -> str:
 
 class PlaylistPage(QWidget):
     tracks_changed = Signal()  # ctx.tracks / ctx.playlist changed
-    resume_requested = Signal()
     open_service_requested = Signal()
     open_spotify_requested = Signal()
     open_soundcloud_requested = Signal()
@@ -60,15 +59,11 @@ class PlaylistPage(QWidget):
         self.status = subtle(QLabel(""))
         self.reload_btn = QPushButton("Reload")
         self.reload_btn.setToolTip("Reload the playlists from the selected service")
-        self.resume_btn = QPushButton("Resume last import")
-        self.resume_btn.setFlat(True)
-        self.resume_btn.setToolTip("Continue the most recent import where you left off")
         top = QHBoxLayout()
         top.addWidget(QLabel("Source:"))
         top.addWidget(self.source_combo)
         top.addWidget(self.reload_btn)
         top.addWidget(self.status, 1)
-        top.addWidget(self.resume_btn)
 
         # --- open a playlist by link (public Spotify playlists need no sign-in)
         self.link_edit = QLineEdit()
@@ -174,7 +169,6 @@ class PlaylistPage(QWidget):
         lay.addWidget(self.stack, 1)
 
         self.reload_btn.clicked.connect(self.load_playlists)
-        self.resume_btn.clicked.connect(self.resume_requested)
         self.connect_btn.clicked.connect(self.open_service_requested)
         self.connect_spotify_btn.clicked.connect(self.open_spotify_requested)
         self.connect_soundcloud_btn.clicked.connect(self.open_soundcloud_requested)
@@ -185,7 +179,6 @@ class PlaylistPage(QWidget):
         self.playlist_search.textChanged.connect(self._filter_playlists)
         self.track_search.textChanged.connect(self._filter_tracks)
         self.refresh_sources()
-        self.refresh_resume_button()
 
     # ------------------------------------------------------------ sources
 
@@ -233,8 +226,8 @@ class PlaylistPage(QWidget):
         Replaceable in tests (like ReviewPage.ask_confirmation)."""
         box = QMessageBox(QMessageBox.Icon.Question, "Switch playlist?",
                           f"Downloads for {current_name} are still running. Switch to {new_name}?\n\n"
-                          "Downloads continue in Soulseek; S2S imports them when you reopen this import "
-                          "(Resume last import).", parent=self)
+                          "They keep downloading in Soulseek, but S2S stops following them, so they are not "
+                          "copied into your folder.", parent=self)
         switch = box.addButton("Switch", QMessageBox.ButtonRole.AcceptRole)
         stay = box.addButton("Stay", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(stay)
@@ -316,14 +309,6 @@ class PlaylistPage(QWidget):
         self.ctx.reset_import()
         self.refresh_sources()
         self.tracks_changed.emit()
-
-    def refresh_resume_button(self) -> None:
-        try:
-            has = bool(self.ctx.store.list_imports())
-        except Exception:  # noqa: BLE001
-            has = False
-        self.resume_btn.setEnabled(has)
-        self.resume_btn.setVisible(has)
 
     # ------------------------------------------------------------ playlists
 

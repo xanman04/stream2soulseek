@@ -140,11 +140,11 @@ def test_no_source_connected_step1_message_opens_service_page(env, monkeypatch):
     assert win.stack.currentIndex() == 0 and shown  # opened the Apple Music page
 
 
-def test_first_start_without_session_opens_service_page(env, monkeypatch):
+def test_first_start_without_session_opens_step_one(env, monkeypatch):
     win, *_ = env
     monkeypatch.setattr(win.service, "show_login", lambda msg: None)
     win.startup()
-    assert win.stack.currentIndex() == 0
+    assert win.stack.currentIndex() == 1  # step 1, which offers to connect a service; not the service page
 
 
 def test_first_start_with_session_opens_step_one(env, monkeypatch):

@@ -730,7 +730,7 @@ class TransfersPage(QWidget):
         box = QMessageBox(QMessageBox.Icon.Question, "Start another playlist?",
                           f"Downloads for {name} are still running ({_plural(active, 'track', 'tracks')} not "
                           "finished). Start another playlist?\n\nDownloads continue in Soulseek; S2S imports them "
-                          "when you reopen this import (Resume last import).", parent=self)
+                          "when you reopen S2S while they are still running.", parent=self)
         go = box.addButton("Start another", QMessageBox.ButtonRole.AcceptRole)
         stay = box.addButton("Stay here", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(stay)

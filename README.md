@@ -38,7 +38,7 @@ services; they do not establish that real account sign-in or live downloads work
 - Verify completed downloads and copy them into a flat tracklist folder.
 - Check the finished folder against the playlist in order.
 - View a downloaded file's spectrogram with an estimated frequency cutoff to help assess its audio quality.
-- Track failed transfers, review replacement sources, and resume the most recent import.
+- Track failed transfers and review replacement sources. S2S opens on step 1, or on Downloads when the last playlist still has downloads running.
 - Inspect every playlist track in import history, filter outstanding work, and export remaining tracks to CSV.
 - Start another import without reconnecting accounts or losing import history.
 

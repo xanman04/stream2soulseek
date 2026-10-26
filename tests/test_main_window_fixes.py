@@ -416,3 +416,8 @@ def test_keep_downloading_changes_nothing(win, monkeypatch):
     monkeypatch.setattr(win, "ask_cancel_import", lambda: False)
     win.cancel_import()
     assert cancelled == [] and win.ctx.approval_id == "ap"
+
+
+def test_app_opens_on_step_one_without_running_downloads(win):
+    win.startup()
+    assert win.stack.currentIndex() == 1 and not hasattr(win.playlists, "resume_btn")
