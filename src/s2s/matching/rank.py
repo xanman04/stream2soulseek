@@ -1,6 +1,6 @@
 """Candidate evaluation and ranking. Eligibility first, then format, then score.
 
-Ordering key: (tier, format_rank, -score, username, filename). Ties are fully deterministic.
+Ordering key: (tier, flagged, length-gap bucket if flagged, format_rank, -score, username, filename). Ties are fully deterministic.
 No I/O and no side effects; nothing here can queue a download.
 """
 
@@ -24,7 +24,7 @@ from .versions import (
     strip_track_number,
     tokenise,
     version_words,
-    clean_filename_promo,
+    promo_text_present,
 )
 
 MAX_REJECTED = 50
@@ -158,7 +158,7 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     artists = split_names(track.artist)
     full_artist = normalise(track.artist)
     dirs, stem = split_remote_path(f.filename)
-    _clean_stem, promo_changed = clean_filename_promo(stem)
+    promo_changed = promo_text_present(stem)
     path_norm = normalise(" ".join(dirs + [stem]))
     fr = 1 if ignore_format else format_rank(f, policy)
 
@@ -182,7 +182,15 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
         relevance += 1
         if quality == "subset":
             extra = sorted(set(fp.base.split()) - set(req.base.split()))
+            if "vip" in extra and req.kind != "vip":
+                reject.append("different version: file title says VIP, requested does not")
             flags.append("title has extra words: " + " ".join(extra))
+
+    req_norm = normalise(track.name)
+    extras = list(dict.fromkeys(fp.extra_brackets + parse_title(strip_track_number(stem)).extra_brackets))
+    for xb in extras:
+        if normalise(xb) and normalise(xb) not in req_norm:
+            flags.append(f"file name has extra bracketed text: [{xb}]")
 
     # ---- hard exclusions (scanned over the whole filename, nothing stripped first)
     skip = set(artists) | {full_artist, req.base}
@@ -238,7 +246,12 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     if tier is not None and req_s is not None and f.length_s:
         diff = f.length_s - req_s
         if tier == Tier.EXACT:
-            if abs(diff) > policy.duration_tolerance_s:
+            if quality == "subset" and abs(diff) > 2 * policy.duration_tolerance_s:
+                # two independent signals of a different song: extra title words AND a clearly wrong length
+                reject.append(
+                    f"different song: title has extra words and length differs by {abs(diff):.0f} s"
+                )
+            elif abs(diff) > policy.duration_tolerance_s:
                 flags.append(f"duration differs by {abs(diff):.0f}s (file {f.length_s}s, requested {req_s:.0f}s)")
             dur_bonus = 10.0 - min(abs(diff), 60) / 6
         else:
@@ -333,36 +346,52 @@ def evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = None
 # ------------------------------------------------------------------ match
 
 
-def _key(c: Candidate, policy: MatchPolicy):
+def _gap_bucket(c: Candidate, req_s: float | None, policy: MatchPolicy) -> int:
+    """For flagged candidates only: 0 within the duration tolerance, 1 within 2x, 2 beyond or unknown."""
+    if not c.flagged:
+        return 0
+    if req_s is None or not c.file.length_s:
+        return 2
+    gap = abs(c.file.length_s - req_s)
+    tol = max(policy.duration_tolerance_s, 1)
+    return 0 if gap <= tol else (1 if gap <= 2 * tol else 2)
+
+
+def _key(c: Candidate, policy: MatchPolicy, req_s: float | None = None):
+    """Certainty first: unflagged beats flagged, then (flagged only) closer length, then format, then score."""
+    gb = _gap_bucket(c, req_s, policy)
     if policy.tier_before_format:
-        return (int(c.tier), c.format_rank, -c.score, c.file.username, c.file.filename)
-    return (c.format_rank, int(c.tier), -c.score, c.file.username, c.file.filename)
+        return (int(c.tier), c.flagged, gb, c.format_rank, -c.score, c.file.username, c.file.filename)
+    return (c.flagged, gb, c.format_rank, int(c.tier), -c.score, c.file.username, c.file.filename)
 
 
-def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str], policy: MatchPolicy) -> list[Candidate]:
+def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str], policy: MatchPolicy,
+                   req_s: float | None = None) -> list[Candidate]:
     """Flag candidates from peers that declined us before and order them AFTER otherwise-equal candidates.
 
     `declined_peers` maps casefolded username -> reason text. Only the order inside an equal
     (tier, format) bucket changes, and the candidate stays eligible (flagged, never hidden); no version
     or format rule is touched. Returns the candidates best first.
     """
-    out: list[tuple[bool, Candidate]] = []
+    out: list[tuple[bool, Candidate, int, bool]] = []
     for c in eligible:
+        gb = _gap_bucket(c, req_s, policy)  # judged before the declined-peer flag is added
+        orig_flagged = c.flagged
         reason = declined_peers.get(c.file.username.casefold())
         if reason:
             if reason not in c.reasons:
                 c = replace(c, flagged=True, reasons=c.reasons + (reason,))
-            out.append((True, c))
+            out.append((True, c, gb, orig_flagged))
         else:
-            out.append((False, c))
+            out.append((False, c, gb, orig_flagged))
 
-    def key(pair: tuple[bool, Candidate]):
-        penalised, c = pair
+    def key(item):
+        penalised, c, gb, fl = item
         if policy.tier_before_format:
-            return (int(c.tier), c.format_rank, penalised, -c.score, c.file.username, c.file.filename)
-        return (c.format_rank, int(c.tier), penalised, -c.score, c.file.username, c.file.filename)
+            return (int(c.tier), fl, gb, c.format_rank, penalised, -c.score, c.file.username, c.file.filename)
+        return (fl, gb, c.format_rank, int(c.tier), penalised, -c.score, c.file.username, c.file.filename)
 
-    return [c for _, c in sorted(out, key=key)]
+    return [item[1] for item in sorted(out, key=key)]
 
 
 def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None,
@@ -384,9 +413,10 @@ def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | 
     if not evaluated:
         return MatchResult(track, MatchStatus.UNRESOLVED, None, note="no files returned")
 
-    eligible = sorted((c for c, _ in evaluated if c.tier != Tier.REJECTED), key=lambda c: _key(c, policy))
+    req_s = track.duration_ms / 1000 if track.duration_ms else None
+    eligible = sorted((c for c, _ in evaluated if c.tier != Tier.REJECTED), key=lambda c: _key(c, policy, req_s))
     if declined_peers:
-        eligible = penalise_peers(eligible, declined_peers, policy)
+        eligible = penalise_peers(eligible, declined_peers, policy, req_s)
     rejected_pairs = sorted(
         ((c, r) for c, r in evaluated if c.tier == Tier.REJECTED),
         key=lambda cr: (-cr[1], cr[0].format_rank, -cr[0].score, cr[0].file.username, cr[0].file.filename),

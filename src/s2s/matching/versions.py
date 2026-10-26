@@ -47,6 +47,7 @@ class ParsedTitle:
     extended: bool
     excluded: str | None
     featured: tuple[str, ...]
+    extra_brackets: tuple[str, ...] = ()  # bracket groups with no version word (label/store names)
 
 
 # ------------------------------------------------------------------ tokenising
@@ -102,6 +103,35 @@ def tokenise(text: str) -> tuple[str, list[tuple[str, bool]]]:
 _FORMAT_WORDS = {"mp3", "flac", "320", "kbps", "320kbps", "320k", "256", "192", "128", "v0", "vbr", "cbr", "web", "cdq", "cd", "wav"}
 
 
+# DJ-pool / store naming noise. Conservative on purpose: "Clean", "Dirty" and "Explicit" only change
+# the lyrics, not the recording, so they are noise. "Intro", "Short", "Quick Hit", "Radio" etc. are
+# real edits and stay version labels (Radio/Short/Single Edit are still excluded by label_exclusion).
+_LYRIC_NOISE = {"clean", "dirty", "explicit", "clean explicit"}
+_CAM = r"(?:1[0-2]|[1-9])[ab]"  # Camelot 1A-12B
+_OPEN = r"(?:1[0-2]|[1-9])[md]"  # Open Key 1m-12d
+_BPMN = r"(?:6\d|[7-9]\d|1\d\d|200)"  # 60-200
+_BPM = rf"{_BPMN}(?: ?bpm)?"
+_SEP = r"(?:\s*[-,/]\s*|\s+)"
+_KEY_COMBO = (
+    rf"(?:{_CAM}{_SEP}{_BPM}|{_BPM}{_SEP}{_CAM}|{_OPEN}{_SEP}{_BPM}|{_BPM}{_SEP}{_OPEN}|{_CAM})"
+)
+_KEY_BPM_ONLY = re.compile(rf"(?i)\s*(?:{_KEY_COMBO}|{_BPM}\s*bpm)\s*")
+
+
+# A bracket group is a version label only if it contains one of these words; anything else
+# ("[Hospital Records]", "(Critical Music)", "[Free DL]") is label/store text and is ignored for identity.
+_VERSION_WORDS = frozenset(
+    "mix remix rmx remixed remixes edit reedit vip dub dubplate version rework reworked refix flip bootleg "
+    "remaster remastered extended ext radio live acoustic instrumental instr inst acapella acappella capella "
+    "cappella original orig club cover remake short intro outro single album main mixed vocal unplugged demo "
+    "session rerub".split()
+)
+
+
+def _has_version_word(label: str) -> bool:
+    return any(w in _VERSION_WORDS for w in normalise(label).split())
+
+
 def _is_noise(label: str) -> bool:
     n = normalise(label)
     if not n:
@@ -113,6 +143,12 @@ def _is_noise(label: str) -> bool:
     if all(w in _FORMAT_WORDS for w in n.split()):
         return True
     if re.fullmatch(r"[a-z]{2,8} ?\d{2,5}[a-z]?", n):  # catalogue number
+        return True
+    if n in _LYRIC_NOISE or re.fullmatch(r"(clean|dirty|explicit) (version|edit)", n):
+        return True
+    if _KEY_BPM_ONLY.fullmatch(label.strip()) or re.fullmatch(r"\d{2,3} ?bpm", n):
+        return True
+    if re.fullmatch(r"(web|flac|mp3|wav)( (19|20)\d\d)?|\d{2} ?bit|(44 1|48|96) ?khz|\d{3} ?(kbps|k)", n):
         return True
     return False
 
@@ -199,10 +235,14 @@ def parse_title(text: str) -> ParsedTitle:
     featured += feat
     vlabels: list[str] = []
     excluded: str | None = None
+    extra: list[str] = []
     for lab, _br in labels:
         lab, feat = _extract_feat(lab)
         featured += feat
         if not lab or _is_noise(lab):
+            continue
+        if _br and not _has_version_word(lab) and not label_exclusion(lab):
+            extra.append(lab)
             continue
         ex = label_exclusion(lab)
         if ex and not excluded:
@@ -217,6 +257,7 @@ def parse_title(text: str) -> ParsedTitle:
         extended=extended,
         excluded=excluded,
         featured=tuple(dict.fromkeys(featured)),
+        extra_brackets=tuple(extra),
     )
 
 
@@ -275,6 +316,67 @@ def clean_filename_promo(stem: str) -> tuple[str, bool]:
     return cleaned, True
 
 
+_BRACKET_DOMAIN = re.compile(
+    r"(?i)\s*[\(\[\{]\s*(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|co|io|info|biz|me|tv|fm|ru|de|uk)(?:/\S*)?\s*[\)\]\}]"
+)
+_AT_SITE = re.compile(r"(?i)\s+@[a-z0-9_-]+(?:\.[a-z]{2,6})?\s*$")
+_TAIL_DOMAIN = re.compile(
+    r"(?i)(?<=\s)(?:https?://)?(?:www\.)?[a-z0-9-]+\.(?:com|net|org|info|biz|tv)\s*$"
+)
+_KEY_TAIL = re.compile(rf"(?i)(\s+-\s+|\s+){_KEY_COMBO}(?=\s*(?:[(\[{{]|$|\s-\s))")
+_KEY_LEAD = re.compile(rf"(?i)^{_KEY_COMBO}\s+-\s+(?=\S)")
+_BPM_AFTER_BRACKET = re.compile(rf"(?i)(?<=[)\]}}])\s+{_BPM}\s*$")
+_BPM_WORD = re.compile(r"(?i)\s+\d{2,3}\s*bpm\s*$")
+_FORMAT_TAIL = re.compile(
+    r"(?i)(?:\s*-\s*|\s+)\[?(?:320(?:\s*kbps|k)?|(?:128|192|256)\s*kbps|web|flac|mp3|24\s*bit|(?:44\.1|48|96)\s*khz)\]?"
+    r"(?:\s*-\s*(?:19|20)\d\d)?\s*$"
+)
+
+
+def strip_dj_noise(stem: str) -> str:
+    """Remove DJ-pool / store naming noise from a filename stem for the title comparison only.
+
+    Strips (as whole trailing/leading tokens, never from the middle of a title): Camelot / Open Key musical
+    keys, BPM numbers next to a key or after a closing bracket or with 'bpm', bitrate/format tags
+    (320, 320kbps, WEB, FLAC, 24bit, 44.1kHz, scene '-WEB-2026'), bracketed promo domains and trailing
+    '@site' / bare domains. Version labels are never touched. Callers keep the raw filename for display;
+    key/BPM/format noise alone does not flag a candidate, promo text does (see promo_text_present).
+    """
+    cur = stem or ""
+    for _ in range(8):
+        before = cur
+        cur = _BRACKET_DOMAIN.sub("", cur).strip()
+        cur = _AT_SITE.sub("", cur)
+        cur = _TAIL_DOMAIN.sub("", cur).rstrip(" -")
+        cur = _KEY_LEAD.sub("", cur)
+
+        def _drop(m: re.Match[str], _cur: str = cur) -> str:
+            # "Artist - 4A" must keep its (odd) title: only drop a dash segment when others remain.
+            if m.group(1).strip() == "-" and " - " not in _cur[: m.start()]:
+                return m.group(0)
+            return ""
+
+        cur = _KEY_TAIL.sub(_drop, cur)
+        cur = _BPM_AFTER_BRACKET.sub("", cur)
+        cur = _BPM_WORD.sub("", cur)
+        cur = _FORMAT_TAIL.sub("", cur).strip()
+        if cur == before:
+            break
+    return cur or (stem or "")
+
+
+def promo_text_present(stem: str) -> bool:
+    """True when the stem carries website/promo text (bracketed or bare domain, @site, promo boilerplate)."""
+    if not stem:
+        return False
+    return bool(
+        clean_filename_promo(stem)[1]
+        or _BRACKET_DOMAIN.search(stem)
+        or _AT_SITE.search(stem)
+        or _TAIL_DOMAIN.search(stem)
+    )
+
+
 def split_remote_path(path: str) -> tuple[list[str], str]:
     """(directory components, filename stem with extension removed). Handles both separators."""
     parts = [p for p in re.split(r"[\\/]+", path or "") if p]
@@ -312,6 +414,7 @@ def remote_interpretations(path: str) -> list[tuple[str | None, ParsedTitle]]:
     """
     _dirs, stem = split_remote_path(path)
     stem, _promo = clean_filename_promo(stem)
+    stem = strip_dj_noise(stem)
     stripped = strip_track_number(stem)
     out = _interps_for(stripped)
     if stripped != stem:
