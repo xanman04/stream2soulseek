@@ -30,6 +30,54 @@ def install_main_thread_gc(app):
     return timer
 
 
+def running_inside_packaged_app(app_dir=None, local_appdata=None) -> bool:
+    """True when Windows redirects this process's writes in the S2S data folder into an app package's folder.
+
+    Programs started from a packaged (MSIX) app's built-in terminal can have their %LOCALAPPDATA% writes silently
+    redirected to `%LOCALAPPDATA%\\Packages\\<package>\\LocalCache\\Local\\...`, even when the process itself reports
+    no package identity. S2S would then read and save a different copy of its settings, saved logins and import
+    history than when started normally. Detect it directly: write a probe file and look for it in package folders.
+    """
+    if sys.platform != "win32":
+        return False
+    import os
+    import uuid
+    from pathlib import Path
+
+    from . import config
+
+    base = Path(app_dir) if app_dir else config.app_dir()
+    local = Path(local_appdata or os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    probe_name = f".s2s-redirect-probe-{uuid.uuid4().hex}"
+    probe = base / probe_name
+    try:
+        probe.write_text("probe", encoding="ascii")
+    except OSError:
+        return False
+    try:
+        try:
+            rel = base.resolve().relative_to(local.resolve())
+        except ValueError:
+            return False  # data folder is not under %LOCALAPPDATA% (e.g. S2S_HOME): nothing is redirected
+        packages = local / "Packages"
+        if not packages.is_dir():
+            return False
+        return any((pkg / "LocalCache" / "Local" / rel / probe_name).exists()
+                   for pkg in packages.iterdir() if pkg.is_dir())
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            pass
+
+
+PACKAGED_WARNING = (
+    "S2S was started from inside another app's terminal. Windows redirects S2S's data (settings, saved logins "
+    "and import history) to that app's private folder, so this session will not see or keep your normal S2S "
+    "data.\n\nClose S2S and start it with run-s2s.cmd (double-click it in Explorer) or from a normal PowerShell "
+    "or Windows Terminal window.")
+
+
 def main() -> int:
     from PySide6.QtCore import QCoreApplication, Qt
     from PySide6.QtWidgets import QApplication
@@ -52,6 +100,11 @@ def main() -> int:
     store = Store(config.db_path())
     window = MainWindow(store, SecretStore(), config.load_settings())
     window.show()
+    if running_inside_packaged_app():
+        from PySide6.QtWidgets import QMessageBox
+
+        window.statusBar().showMessage("Data is redirected: started from inside another app. See the warning.")
+        QMessageBox.warning(window, "S2S is using a redirected data folder", PACKAGED_WARNING)
     try:
         return app.exec()
     finally:

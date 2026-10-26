@@ -307,3 +307,42 @@ def test_spotify_cookie_values_are_scrubbed_from_errors(win):
     assert 'synthetic-cookie-value' not in win.ctx.describe(RuntimeError('bad synthetic-cookie-value'))
     win.ctx.secrets.set(SPOTIFY_SESSION, '"malformed-session"')
     assert win.ctx.describe(RuntimeError('ordinary failure')) == 'ordinary failure'
+
+
+def test_packaged_app_detection_is_safe_to_call():
+    from s2s.app import PACKAGED_WARNING, running_inside_packaged_app
+
+    assert isinstance(running_inside_packaged_app(), bool)
+    assert "run-s2s.cmd" in PACKAGED_WARNING
+
+
+def test_redirect_probe_detects_package_copy(tmp_path):
+    import sys
+
+    from s2s.app import running_inside_packaged_app
+
+    if sys.platform != "win32":
+        return
+    local = tmp_path / "Local"
+    app = local / "S2S"
+    app.mkdir(parents=True)
+    pkg = local / "Packages" / "Some.App_abc" / "LocalCache" / "Local" / "S2S"
+    pkg.mkdir(parents=True)
+    assert running_inside_packaged_app(app, local) is False  # probe only in the normal folder
+
+    # Simulate redirection: anything written in the app folder also appears in the package copy.
+    import pathlib
+    orig = pathlib.Path.write_text
+
+    def mirrored(self, data, *a, **k):
+        r = orig(self, data, *a, **k)
+        if self.parent == app:
+            orig(pkg / self.name, data, *a, **k)
+        return r
+
+    pathlib.Path.write_text = mirrored
+    try:
+        assert running_inside_packaged_app(app, local) is True
+    finally:
+        pathlib.Path.write_text = orig
+    assert not any(p.name.startswith(".s2s-redirect-probe") for p in app.iterdir())  # probe cleaned up

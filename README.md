@@ -78,6 +78,10 @@ Launch S2S:
 .\.venv\Scripts\python.exe -m s2s.app
 ```
 
+Or double-click `run-s2s.cmd` in Explorer. Start S2S from Explorer or a normal PowerShell / Windows Terminal
+window, not from the built-in terminal of another desktop app: some packaged apps make Windows redirect S2S's
+data folder (settings, saved logins, history) to their own private copy. S2S warns when this happens.
+
 The installation also provides an `s2s` GUI entry point.
 
 ## Import workflow
