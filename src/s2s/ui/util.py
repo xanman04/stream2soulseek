@@ -40,7 +40,9 @@ def item(text: str, tooltip: str | None = None) -> QTableWidgetItem:
 
 
 def make_table(headers: list[str], parent: QWidget | None = None) -> QTableWidget:
+    from .theme import polish_table
     t = QTableWidget(0, len(headers), parent)
+    polish_table(t)
     t.setHorizontalHeaderLabels(headers)
     t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     t.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)

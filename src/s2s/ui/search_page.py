@@ -331,6 +331,8 @@ class SearchPage(QWidget):
                 (f"{res.track.name} — {res.track.artist}", f"{res.track.name}\n{res.track.artist}"),
                 (text, detail), (sources_text(res), None)]):
             it = item(label, tip)
+            if col == COL_RESULT:
+                it.setForeground(accent(kind))
             if kind != "ok" or col in (COL_RESULT, COL_SOURCES):
                 it.setBackground(bg)
             self.table.setItem(r, col, it)

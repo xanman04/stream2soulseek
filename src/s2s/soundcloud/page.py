@@ -32,7 +32,7 @@ class SoundCloudServicePage(QWidget):
         self._pending_candidate = None
         self._verifying = False
         self.title_label = QLabel("SoundCloud")
-        self.title_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        self.title_label.setObjectName("pageTitle")
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.sign_out_btn = QPushButton("Sign out")
@@ -42,6 +42,7 @@ class SoundCloudServicePage(QWidget):
 
         self.account_page = QWidget()
         self.account_card = QFrame()
+        self.account_card.setObjectName("accountCard")
         self.account_card.setFrameShape(QFrame.Shape.StyledPanel)
         self.account_card.setMaximumWidth(650)
         self.connection_value = QLabel()
@@ -88,6 +89,8 @@ class SoundCloudServicePage(QWidget):
         self.stack.addWidget(self.account_page)
         self.stack.addWidget(self.login_holder)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 16)
+        layout.setSpacing(12)
         layout.addWidget(self.title_label)
         layout.addLayout(top)
         layout.addWidget(self.stack, 1)

@@ -80,6 +80,8 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         h = QHBoxLayout(central)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
         h.addWidget(self.sidebar)
         h.addWidget(self.stack, 1)
         self.setCentralWidget(central)
