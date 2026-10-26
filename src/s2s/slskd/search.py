@@ -201,10 +201,12 @@ def build_queries(track: AppleTrack) -> list[str]:
 # below that with a sliding window and margins on every side:
 RATE_LIMIT = 30  # search starts in any RATE_WINDOW_S, across every worker, run and S2S process together
 RATE_WINDOW_S = 220
-MIN_SPACING_S = 1.0  # never two search starts closer together than this (no bursts of simultaneous starts)
+MIN_SPACING_S = 3.0  # never two search starts closer together than this: no bursts, at most 20 a minute
 REPEAT_COOLDOWN_S = 120  # the same query text is never sent again within this time
-# A small playlist still runs at full speed: up to 30 searches start without waiting (one a second); only a run
-# needing more than that is paced, at about 8 searches a minute.
+# Pacing scales with the run: when the searches still expected fit in what the window has left, they start every
+# 3 s (a small playlist never waits for the window). When they do not, starts are spread evenly at the window's rate
+# (about 8 a minute), so a big playlist makes steady progress instead of bursting 30 searches and then stalling
+# for minutes while the window clears. The window rule still applies on top, whatever the estimate says.
 # A short outage (network blip) gets this long to recover. Anything longer is treated as a ban: searching stops
 # instead of making the user wait half an hour.
 RECONNECT_WAIT_S = 60
@@ -310,6 +312,16 @@ class SearchRateLimiter:
         self._path: Path | None = None
         self.total_started = 0
         self.unlimited = False  # tests only
+        self._demand = 0  # searches this process still expects to need (set by the running search)
+
+    def set_demand(self, searches: int) -> None:
+        """Tell the limiter how many more searches the current run expects; it paces evenly when they do not fit."""
+        with self._lock:
+            self._demand = max(0, int(searches))
+
+    @property
+    def steady_spacing_s(self) -> float:
+        return self._window / self._limit * 1.02  # a hair slower than the window's rate: the window never binds
 
     @property
     def limit(self) -> int:
@@ -375,10 +387,13 @@ class SearchRateLimiter:
             waits.append(self._times[len(self._times) - self._limit] + self._window - now)
         if len(self._local) >= self._limit:
             waits.append(self._local[len(self._local) - self._limit] + self._window - mono_now)
+        spacing = self._spacing
+        if self._demand > self._limit - max(len(self._times), len(self._local)):
+            spacing = max(spacing, self.steady_spacing_s)  # more to do than the window has left: spread out
         if self._times:
-            waits.append(self._times[-1] + self._spacing - now)
+            waits.append(self._times[-1] + spacing - now)
         if self._local:
-            waits.append(self._local[-1] + self._spacing - mono_now)
+            waits.append(self._local[-1] + spacing - mono_now)
         if key is not None and key in self._queries:
             waits.append(self._queries[key] + self._repeat - now)
         return max(waits)
@@ -389,6 +404,16 @@ class SearchRateLimiter:
             self._trim(self._clock())
             self._trim_local(self._mono())
             return max(0, self._limit - max(len(self._times), len(self._local)))
+
+    def seconds_until_next(self) -> float:
+        """How long a new (never sent) search would have to wait right now; for the progress display."""
+        with self._lock:
+            if self.unlimited:
+                return 0.0
+            now, mono_now = self._clock(), self._mono()
+            self._trim(now)
+            self._trim_local(mono_now)
+            return max(0.0, self._wait_needed(now, mono_now, None))
 
     def used(self) -> int:
         """Searches started in the current window (by any S2S process, as far as this one knows)."""
@@ -464,6 +489,7 @@ class SearchRateLimiter:
         if key is not None:
             self._queries[key] = now
         self.total_started += 1
+        self._demand = max(0, self._demand - 1)  # one of the expected searches is now under way
         return 0.0
 
 

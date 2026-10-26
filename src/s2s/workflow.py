@@ -6,6 +6,7 @@ approval.create_approval -> download.DownloadService.enqueue_approved, driven by
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 import threading
@@ -64,6 +65,7 @@ def _unresolved(track: AppleTrack, note: str) -> MatchResult:
 # ceiling on how fast searches start. A playlist that fits in that limit's burst therefore runs as parallel as
 # possible, and a big one is paced by the limit alone; no track is held to a fixed per-track pace.
 PARALLEL_SEARCHES = 8
+EXPECTED_SEARCHES_PER_TRACK = 2.0  # until a few tracks are done and the real average is known
 
 NOT_FOUND_PREFIX = "Not found after"
 SEARCH_FAILED_PREFIX = "search failed"
@@ -155,6 +157,15 @@ def search_and_match(
     results: list[MatchResult] = []
     done = 0
 
+    started_before = _search.LIMITER.total_started
+    searched = 0  # tracks finished by an actual search (not skipped)
+
+    def update_demand(remaining: int) -> None:
+        """Expected further searches, so the limiter can spread a big run evenly (see slskd/search.py)."""
+        used = _search.LIMITER.total_started - started_before
+        avg = used / searched if searched >= 3 else EXPECTED_SEARCHES_PER_TRACK
+        _search.LIMITER.set_demand(math.ceil(remaining * max(avg, 1.0)))
+
     def finish(res: MatchResult) -> None:
         nonlocal done
         store.save_match_results(import_id, [res])
@@ -232,18 +243,24 @@ def search_and_match(
     if todo and not cancel.is_set():
         workers = max(1, min(PARALLEL_SEARCHES, len(todo)))
         ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="search")
+        remaining = len(todo)
+        update_demand(remaining)
         try:
             futures = [ex.submit(work, t) for t in todo]
             for fut in as_completed(futures):
                 if fut.cancelled():
                     continue
                 res = fut.result()
+                remaining -= 1
                 if res is not None:
+                    searched += 1
+                    update_demand(remaining)
                     finish(res)
                 if cancel.is_set():
                     for f in futures:
                         f.cancel()
         finally:
+            _search.LIMITER.set_demand(0)
             ex.shutdown(wait=True, cancel_futures=True)
     results.sort(key=lambda r: (r.track.position, r.track.apple_id))
     return results

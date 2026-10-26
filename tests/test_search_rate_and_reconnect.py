@@ -135,7 +135,7 @@ def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
     lim = SearchRateLimiter()
     assert (lim.limit, lim.window_s) == (search.RATE_LIMIT, search.RATE_WINDOW_S) == (30, 220)
     assert search.RATE_LIMIT < 34  # stricter than slsk-batchdl's long-used 34 per 220 s
-    assert search.MIN_SPACING_S >= 1 and search.REPEAT_COOLDOWN_S >= 60
+    assert search.MIN_SPACING_S >= 3 and search.REPEAT_COOLDOWN_S >= 60  # never bursts
     # a settings file written by the short-lived version that had these options still loads; the values are ignored
     home = config.app_dir()
     (home / "settings.json").write_text('{"search_rate_limit": 500, "search_rate_window_s": 10}', encoding="utf-8")
@@ -148,13 +148,13 @@ def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
 
 
 def test_small_runs_are_not_slowed_down():
-    """Up to 30 searches start one a second; only the 31st waits for the window (a 10-track playlist never does)."""
+    """Searches start 3 s apart (never in bursts); 30 of them fit in the window, so a small playlist never waits."""
     t = FakeTime()
     lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
     cancel = threading.Event()
     for i in range(30):
         lim.acquire(cancel, f"query {i}")
-    assert 29 <= t.clock() < 31
+    assert 87 <= t.clock() < 91
     lim.acquire(cancel, "query 30")
     assert t.clock() >= 220
 
@@ -166,7 +166,7 @@ def test_starts_are_spaced_out():
     for i in range(5):
         lim.acquire(threading.Event(), f"q{i}")
         stamps.append(t.clock())
-    assert all(b - a >= 1.0 for a, b in zip(stamps, stamps[1:]))
+    assert all(b - a >= search.MIN_SPACING_S for a, b in zip(stamps, stamps[1:]))
 
 
 def test_the_same_query_is_not_sent_again_quickly():
@@ -786,3 +786,60 @@ def test_workers_keep_the_limiter_saturated_and_never_exceed_it(monkeypatch):
         assert sum(1 for x in starts if s <= x < s + 1.0) <= 6
     # saturated: 6 burst + 18 more at 6/s is 3 s at best; idle workers would take far longer
     assert elapsed < 3.0 * 1.5 + 0.5, elapsed
+
+
+# ------------------------------------------------------------------ pacing that scales with the run
+
+
+def test_a_big_run_is_spread_evenly_instead_of_stalling():
+    """66 tracks need more searches than the window allows: starts are evenly spaced, no multi-minute stall."""
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    lim.set_demand(130)
+    stamps = []
+    for i in range(70):
+        lim.acquire(threading.Event(), f"q{i}")
+        stamps.append(t.clock())
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    assert max(gaps) < 8.0  # never a long pause
+    assert min(gaps) >= lim.steady_spacing_s - 0.01
+    for s in stamps:  # and the window is still never exceeded
+        assert sum(1 for x in stamps if s <= x < s + search.RATE_WINDOW_S) <= search.RATE_LIMIT
+
+
+def test_a_small_run_is_not_slowed_by_the_pacing():
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    lim.set_demand(20)
+    for i in range(20):
+        lim.acquire(threading.Event(), f"q{i}")
+    assert t.clock() < 20 * search.MIN_SPACING_S + 1  # the plain 3 s spacing, not the slower steady pace
+
+
+def test_pacing_speeds_up_once_the_rest_fits_in_the_window():
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    lim.set_demand(100)
+    lim.acquire(threading.Event(), "a")
+    lim.acquire(threading.Event(), "b")
+    assert t.clock() >= lim.steady_spacing_s
+    lim.set_demand(5)  # near the end of the run: what is left fits
+    before = t.clock()
+    lim.acquire(threading.Event(), "c")
+    assert t.clock() - before <= search.MIN_SPACING_S + 0.01
+
+
+def test_the_page_says_when_the_next_search_starts(qapp, env, monkeypatch):
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    monkeypatch.setattr(search, "LIMITER", lim)
+    page, ctx = make_page(qapp, env, monkeypatch, FlakyClient({}), [])
+    page._limiter_base = 0
+    page._set_running(True)
+    page._done, page._total = 10, 66
+    lim.set_demand(100)
+    lim.acquire(threading.Event(), "a")
+    page._tick()
+    assert "next search in 8 s" in page.pace_label.text()
+    page._set_running(False)
+    page.close()
