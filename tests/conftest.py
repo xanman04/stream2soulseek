@@ -44,10 +44,12 @@ def _isolated_app_home(tmp_path_factory, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_search_limits(monkeypatch):
-    """Searching is rate limited process-wide; tests get an unlimited limiter and a healthy connection gate."""
+    """Searching is rate limited process-wide; tests get an unlimited limiter, a healthy connection gate and
+    an empty shared result cache."""
     from s2s.slskd import search
 
     limiter = search.SearchRateLimiter()
     limiter.unlimited = True
     monkeypatch.setattr(search, "LIMITER", limiter)
     monkeypatch.setattr(search, "GATE", search.ConnectionGate())
+    monkeypatch.setattr(search, "SHARED_CACHE", search.SearchCache(ttl_s=search.SHARED_CACHE_TTL_S))

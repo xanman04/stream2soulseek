@@ -29,6 +29,12 @@ SOULSEEK_PASSWORD = "soulseek_password"
 SLSKD_WEB_PASSWORD = "slskd_web_password"
 
 _PID_FILE = "s2s-slskd.pid"
+_LOGINS_FILE = "soulseek-logins.json"
+# The Soulseek server also bans for "connecting and disconnecting quickly". Every slskd start is a login, so
+# starts are spaced out and capped (wall-clock times kept on disk: they also hold across S2S restarts).
+LOGIN_SPACING_S = 15.0
+LOGIN_LIMIT = 4
+LOGIN_WINDOW_S = 10 * 60
 _CREATE_NO_WINDOW = 0x08000000
 
 
@@ -217,6 +223,7 @@ class SlskdService:
         client_factory: Callable[[str, str], SlskdClient] = SlskdClient,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], float] = time.time,
     ) -> None:
         # A callable is read on every use, so a downloads folder or shares saved in Settings take effect
         # without restarting the app (the Settings dialog replaces the Settings object rather than mutating it).
@@ -229,6 +236,7 @@ class SlskdService:
         self._client_factory = client_factory
         self._sleep = sleep
         self._clock = clock
+        self._wall = wall
         self._proc: subprocess.Popen | None = None
 
     @property
@@ -314,6 +322,7 @@ class SlskdService:
         exe = self._exe or find_slskd_exe(self._settings)
         if exe is None:
             raise SlskdServiceError("slskd is not installed (expected under %LOCALAPPDATA%\\Programs\\slskd).")
+        self._pace_login()
         self.stop()
         self._stop_previous()
         if self._port_in_use():
@@ -333,6 +342,32 @@ class SlskdService:
             log.close()
         (self._dir / _PID_FILE).write_text(str(self._proc.pid))
         self._wait_logged_in(ready_timeout, login_timeout)
+
+    def _pace_login(self) -> None:
+        """Wait out the spacing since the last Soulseek login, or refuse when there were too many recently."""
+        import json
+
+        path = self._dir / _LOGINS_FILE
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = []
+        now = self._wall()
+        recent = sorted(min(float(x), now) for x in raw if isinstance(x, (int, float)) and x > now - LOGIN_WINDOW_S)
+        if len(recent) >= LOGIN_LIMIT:
+            wait_min = max(1, int((recent[-LOGIN_LIMIT] + LOGIN_WINDOW_S - now) // 60) + 1)
+            raise SlskdServiceError(
+                f"S2S connected to Soulseek {len(recent)} times in the last {LOGIN_WINDOW_S // 60} minutes. To avoid a "
+                f"Soulseek ban for reconnecting too often, wait about {wait_min} min and try again.")
+        if recent and now - recent[-1] < LOGIN_SPACING_S:
+            self._sleep(LOGIN_SPACING_S - (now - recent[-1]))
+            now = self._wall()
+        recent.append(now)
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(recent), encoding="utf-8")
+        except OSError:
+            pass
 
     def _wait_logged_in(self, ready_timeout: float, login_timeout: float) -> None:
         key = self.api_key()

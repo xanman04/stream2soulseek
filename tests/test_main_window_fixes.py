@@ -346,3 +346,17 @@ def test_redirect_probe_detects_package_copy(tmp_path):
     finally:
         pathlib.Path.write_text = orig
     assert not any(p.name.startswith(".s2s-redirect-probe") for p in app.iterdir())  # probe cleaned up
+
+
+def test_a_second_s2s_is_refused():
+    import sys
+    import uuid
+
+    from s2s.app import single_instance_lock
+
+    if sys.platform != "win32":
+        return
+    name = rf"Local\S2S-test-{uuid.uuid4().hex}"
+    first = single_instance_lock(name)
+    assert first is not None
+    assert single_instance_lock(name) is None

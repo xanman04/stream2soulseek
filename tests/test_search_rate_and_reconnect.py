@@ -55,7 +55,7 @@ class FakeTime:
 
 def test_limiter_allows_34_then_waits_for_the_window():
     t = FakeTime()
-    lim = SearchRateLimiter(34, 220, clock=t.clock, sleep=t.sleep)
+    lim = SearchRateLimiter(34, 220, spacing_s=0, clock=t.clock, sleep=t.sleep)
     cancel = threading.Event()
     stamps = []
     for _ in range(34):
@@ -65,7 +65,6 @@ def test_limiter_allows_34_then_waits_for_the_window():
     lim.acquire(cancel)
     assert t.clock() >= 220  # the 35th waited until the first one left the window
     assert lim.total_started == 35
-    assert lim.per_minute == pytest.approx(34 * 60 / 220)
 
 
 def test_limiter_never_exceeds_limit_across_threads():
@@ -134,7 +133,9 @@ def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
     names = {f.name for f in __import__("dataclasses").fields(Settings)}
     assert not names & {"search_rate_limit", "search_rate_window_s", "search_reconnect_wait_min"}
     lim = SearchRateLimiter()
-    assert (lim._limit, lim._window) == (search.RATE_LIMIT, search.RATE_WINDOW_S) == (34, 220)
+    assert (lim.limit, lim.window_s) == (search.RATE_LIMIT, search.RATE_WINDOW_S) == (30, 220)
+    assert search.RATE_LIMIT < 34  # stricter than slsk-batchdl's long-used 34 per 220 s
+    assert search.MIN_SPACING_S >= 1 and search.REPEAT_COOLDOWN_S >= 60
     # a settings file written by the short-lived version that had these options still loads; the values are ignored
     home = config.app_dir()
     (home / "settings.json").write_text('{"search_rate_limit": 500, "search_rate_window_s": 10}', encoding="utf-8")
@@ -147,15 +148,57 @@ def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
 
 
 def test_small_runs_are_not_slowed_down():
-    """Up to 34 searches start at once; only the 35th waits (a 10-track playlist never waits)."""
+    """Up to 30 searches start one a second; only the 31st waits for the window (a 10-track playlist never does)."""
     t = FakeTime()
     lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
     cancel = threading.Event()
-    for _ in range(34):
-        lim.acquire(cancel)
-    assert t.clock() == 0.0
-    lim.acquire(cancel)
+    for i in range(30):
+        lim.acquire(cancel, f"query {i}")
+    assert 29 <= t.clock() < 31
+    lim.acquire(cancel, "query 30")
     assert t.clock() >= 220
+
+
+def test_starts_are_spaced_out():
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    stamps = []
+    for i in range(5):
+        lim.acquire(threading.Event(), f"q{i}")
+        stamps.append(t.clock())
+    assert all(b - a >= 1.0 for a, b in zip(stamps, stamps[1:]))
+
+
+def test_the_same_query_is_not_sent_again_quickly():
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    cancel = threading.Event()
+    lim.acquire(cancel, "artist song")
+    lim.acquire(cancel, "Artist  SONG")  # the same query, written differently
+    assert t.clock() >= search.REPEAT_COOLDOWN_S
+
+
+def test_a_refused_search_does_not_start_the_repeat_cooldown():
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    cancel = threading.Event()
+    lim.acquire(cancel, "artist song")
+    lim.forget_query("artist song")
+    lim.acquire(cancel, "artist song")
+    assert t.clock() < 5  # only the 1 s spacing
+
+
+def test_disconnected_slskd_refusal_releases_the_query(monkeypatch):
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    monkeypatch.setattr(search, "LIMITER", lim)
+    client = FlakyClient({})
+    client.connected = False
+    with pytest.raises(SlskdError):
+        search._start_when_free(client, "id", "artist song", threading.Event(), 5, 10, 10,
+                                lambda s: None, t.clock)
+    assert "artist song" not in lim._queries
+    assert lim.total_started == 1  # the start itself still counts: errs on the safe side
 
 
 def test_search_times_survive_a_restart(tmp_path):
@@ -166,28 +209,128 @@ def test_search_times_survive_a_restart(tmp_path):
     first = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
     first.attach(path)
     cancel = threading.Event()
-    for _ in range(34):
-        first.acquire(cancel)
-    t.now += 100  # "restart" 100 s later: a fresh limiter in a new process
+    for i in range(30):
+        first.acquire(cancel, f"q{i}")
+    t.now += 10  # "restart" 10 s later: a fresh limiter in a new process
     second = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
     second.attach(path)
     assert second.available() == 0
-    second.acquire(cancel)
+    second.acquire(cancel, "q0")  # also a repeat of a query the first process sent
     assert t.clock() >= 1220  # waited until the first run's searches left the window
     t.now += 1000
     third = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
     third.attach(path)
-    assert third.available() == 34  # old searches no longer count
+    assert third.available() == 30  # old searches no longer count
+
+
+def test_two_s2s_processes_share_one_budget(tmp_path):
+    """Two limiters (two S2S windows) on the same ledger never exceed the limit together."""
+    import time as _time
+
+    path = tmp_path / "search-times.json"
+    a = SearchRateLimiter(5, 2.0, spacing_s=0)
+    b = SearchRateLimiter(5, 2.0, spacing_s=0)
+    a.attach(path)
+    b.attach(path)
+    stamps: list[float] = []
+    lock = threading.Lock()
+
+    def worker(lim):
+        for i in range(5):
+            lim.acquire(threading.Event(), f"{id(lim)}-{i}")
+            with lock:
+                stamps.append(_time.time())
+
+    threads = [threading.Thread(target=worker, args=(lim,)) for lim in (a, b)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(timeout=20)
+    assert len(stamps) == 10
+    stamps.sort()
+    for s in stamps:
+        assert sum(1 for x in stamps if s <= x < s + 1.9) <= 5
+    assert stamps[-1] - stamps[0] >= 1.9  # the second five had to wait for the first five
+
+
+def test_a_wall_clock_jumping_forward_does_not_release_searches():
+    wall = FakeTime()
+    mono = FakeTime()
+
+    def sleep(dt):
+        wall.sleep(dt)
+        mono.sleep(dt)
+
+    lim = SearchRateLimiter(3, 100, spacing_s=0, clock=wall.clock, mono=mono.clock, sleep=sleep)
+    cancel = threading.Event()
+    for i in range(3):
+        lim.acquire(cancel, f"q{i}")
+    wall.now += 10_000  # the PC clock is set forward
+    lim.acquire(cancel, "q3")
+    assert mono.clock() >= 100  # still waited a real window
+
+
+def test_a_wall_clock_jumping_backwards_only_delays(tmp_path):
+    t = FakeTime()
+    t.now = 5000.0
+    path = tmp_path / "search-times.json"
+    lim = SearchRateLimiter(3, 100, spacing_s=0, clock=t.clock, sleep=t.sleep)
+    lim.attach(path)
+    for i in range(3):
+        lim.acquire(threading.Event(), f"q{i}")
+    t.now = 1000.0  # the PC clock is set back: the ledger's entries look like the future
+    other = SearchRateLimiter(3, 100, spacing_s=0, clock=t.clock, sleep=t.sleep)
+    other.attach(path)
+    assert other.available() == 0  # they count as "now", not as expired
 
 
 def test_a_broken_search_times_file_is_ignored(tmp_path):
+    import json
+
     path = tmp_path / "search-times.json"
     path.write_text("not json", encoding="utf-8")
     lim = SearchRateLimiter()
     lim.attach(path)
-    assert lim.available() == 34
-    lim.acquire(threading.Event())
-    assert len(__import__("json").loads(path.read_text(encoding="utf-8"))) == 1
+    assert lim.available() == 30
+    lim.acquire(threading.Event(), "artist song")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert len(data["starts"]) == 1 and list(data["queries"]) == ["artist song"]
+
+
+def test_only_one_code_path_starts_a_search():
+    """Every search start goes through the limiter: start_search is called in exactly one place."""
+    import re
+    from pathlib import Path
+
+    src = Path(search.__file__).parents[1]
+    calls = [f.name for f in src.rglob("*.py") for line in f.read_text(encoding="utf-8").splitlines()
+             if re.search(r"\.start_search\(", line) and "def start_search" not in line]
+    assert calls == ["search.py"]
+
+
+def test_cache_never_derives_from_a_truncated_answer():
+    client = FlakyClient({})
+    cache = search.SearchCache()
+    cancel = threading.Event()
+    many = [RemoteFile(f"u{i}", rf"@@u{i}\Artist - Alpha Remix.mp3", 9_000_000, "mp3", 320, False)
+            for i in range(3)]
+    cache.get_or_run("alpha", lambda: many, cancel, response_limit=3)  # 3 uploaders = the limit: cut off
+    out = run_search(client, AppleTrack("i.1", "Alpha", "Artist"), cancel=cancel, timeout_s=5,
+                     response_limit=3, file_limit=10, queries=["artist alpha"], cache=cache)
+    assert client.started == ["artist alpha"] and out == []  # searched for real instead
+
+
+def test_shared_cache_answers_expire():
+    t = FakeTime()
+    cache = search.SearchCache(ttl_s=60, clock=t.clock)
+    calls = []
+    run = lambda: calls.append(1) or []  # noqa: E731
+    cache.get_or_run("q", run, threading.Event())
+    cache.get_or_run("q", run, threading.Event())
+    assert len(calls) == 1
+    t.now += 61
+    cache.get_or_run("q", run, threading.Event())
+    assert len(calls) == 2
 
 
 # ------------------------------------------------------------------ classification
@@ -522,7 +665,7 @@ def test_waiting_banner_and_pacing_text(qapp, env, monkeypatch):
     page._tick()
     text = page.wait_banner.text()
     assert "Soulseek disconnected" in text and "Waiting up to 60 s" in text and "searching stops" in text
-    assert "about 9 searches a minute" in page.pace_label.text()
+    assert "about 8 searches a minute" in page.pace_label.text()
     assert "about 132 more expected" in page.pace_label.text()
     env.gate.begin_run()
     page._tick()
@@ -617,7 +760,7 @@ def test_workers_keep_the_limiter_saturated_and_never_exceed_it(monkeypatch):
     import time
     from concurrent.futures import ThreadPoolExecutor
 
-    lim = SearchRateLimiter(6, 1.0)  # 6 searches per second, real time (scaled-down 34/220)
+    lim = SearchRateLimiter(6, 1.0, spacing_s=0)  # 6 searches per second, real time (scaled-down limit)
     monkeypatch.setattr(search, "LIMITER", lim)
     starts: list[float] = []
 

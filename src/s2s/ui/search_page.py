@@ -200,7 +200,8 @@ class SearchPage(QWidget):
         self.retry_btn.setToolTip("Search again only the tracks whose search could not run. Nothing is downloaded.")
         self._retry_old: dict[str, MatchResult] | None = None
         self._limiter_base = 0
-        self._cache = search_mod.SearchCache()  # responses of this search run; "Retry" reuses it
+        self._cache = search_mod.SHARED_CACHE  # earlier answers: "Search again" and "Retry" re-send nothing
+        self._hits_base = 0
         self.chip_found = chip("", "ok")
         self.chip_check = chip("", "warn")
         self.chip_missing = chip("", "error")
@@ -438,7 +439,8 @@ class SearchPage(QWidget):
     def _pace_text(self) -> str:
         lim = search_mod.LIMITER
         used = lim.total_started - self._limiter_base
-        reused = f" ({self._cache.hits} answered from earlier results)" if self._cache.hits else ""
+        hits = self._cache.hits - self._hits_base
+        reused = f" ({hits} answered from earlier results)" if hits else ""
         text = f"{used} searches run{reused} · about {self._expected_searches()} more expected"
         if self._pace_seconds() > 0:  # more searches needed than Soulseek allows at once: say why it slows down
             text += f" · paced to about {self._per_minute():.0f} searches a minute to stay under Soulseek's search limit"
@@ -523,8 +525,9 @@ class SearchPage(QWidget):
         else:
             self.prepare()
             tracks = list(ctx.tracks)
-            self._cache = search_mod.SearchCache()
+            self._cache = search_mod.SHARED_CACHE
         cache = self._cache
+        self._hits_base = cache.hits
         self._auto_key = self._selection_key()
         self._cancel = threading.Event()
         cancel = self._cancel
