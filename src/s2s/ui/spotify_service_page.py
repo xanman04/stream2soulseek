@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ..secretstore import protection_text
 from ..spotify.session import clear_session, load_session, save_session
 from ..sources.spotify import SpotifySource
 from .context import AppContext
@@ -69,7 +70,7 @@ class SpotifyServicePage(QWidget):
         connected = self.is_connected()
         self.status.setText(self.state_text())
         self.connection_value.setText("Connected" if connected else "Not signed in")
-        self.session_value.setText("Saved on this PC, protected by Windows" if connected else "No session saved")
+        self.session_value.setText(f"Saved on this computer, {protection_text()}" if connected else "No session saved")
         self.sign_out_btn.setEnabled(connected)
         self.reconnect_btn.setText("Reconnect Spotify…" if connected else "Sign in to Spotify…")
         if connected and self.stack.count():

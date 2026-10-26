@@ -8,6 +8,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 
@@ -285,9 +286,21 @@ class ImportResult:
     sha256: str | None = None
 
 
+# Apps opened from the macOS Finder get a minimal PATH without Homebrew, so look in its folders as well.
+EXTRA_TOOL_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
+
+
+def find_tool(name: str) -> str | None:
+    """A command-line tool on PATH, else in the usual Homebrew folders (macOS); None when absent."""
+    found = shutil.which(name)
+    if found:
+        return found
+    return shutil.which(name, path=os.pathsep.join(EXTRA_TOOL_DIRS))
+
+
 def default_ffprobe_path() -> str:
-    """ffprobe found on PATH at load time, or "" when absent."""
-    return shutil.which("ffprobe") or ""
+    """ffprobe found on PATH (or in Homebrew's folders) at load time, or "" when absent."""
+    return find_tool("ffprobe") or ""
 
 
 @dataclass

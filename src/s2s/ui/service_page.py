@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
-from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
+from ..secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN, protection_text
 from ..sources import AppleSource
 from .context import AppContext
 from .util import show_error
@@ -29,7 +29,7 @@ class ServicePage(QWidget):
         self.status = ServiceStatus("Apple Music", self)
         self.sign_out_btn = QPushButton("Sign out")
         self.connection_value = QLabel("Signed in")
-        self.session_value = QLabel("Saved on this PC, protected by Windows")
+        self.session_value = QLabel(f"Saved on this computer, {protection_text()}")
         self.session_value.setWordWrap(True)
         self.access_value = QLabel("Read playlists and track details")
         self.reconnect_btn = QPushButton("Reconnect Apple Music...")
@@ -69,7 +69,7 @@ class ServicePage(QWidget):
         self.status.setText(self.state_text())
         self.sign_out_btn.setEnabled(connected)
         self.connection_value.setText("Signed in" if connected else "Not signed in")
-        self.session_value.setText("Saved on this PC, protected by Windows" if connected else "No session saved")
+        self.session_value.setText(f"Saved on this computer, {protection_text()}" if connected else "No session saved")
         self.reconnect_btn.setText("Reconnect Apple Music…" if connected else "Sign in to Apple Music…")
         self.account_card.update_state(connected)
         if connected:

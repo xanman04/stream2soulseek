@@ -11,7 +11,9 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,7 +37,7 @@ _LOGINS_FILE = "soulseek-logins.json"
 LOGIN_SPACING_S = 15.0
 LOGIN_LIMIT = 4
 LOGIN_WINDOW_S = 10 * 60
-_CREATE_NO_WINDOW = 0x08000000
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # creationflags must be 0 outside Windows
 
 
 class SlskdServiceError(Exception):
@@ -89,21 +91,40 @@ def validate_credentials(username: str, password: str) -> str | None:
 # ------------------------------------------------------------------ locating slskd
 
 
+SLSKD_BINARY = "slskd.exe" if os.name == "nt" else "slskd"
+
+
+def slskd_install_dir() -> Path:
+    """Where slskd versions are installed, one subfolder per version.
+
+    Windows: %LOCALAPPDATA%\\Programs\\slskd. macOS: ~/Library/Application Support/slskd. Elsewhere:
+    ~/.local/share/slskd.
+    """
+    if os.name == "nt":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / "slskd"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "slskd"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "slskd"
+
+
 def find_slskd_exe(settings: Settings) -> Path | None:
-    """settings.extra['slskd_exe'] if set, else the newest %LOCALAPPDATA%\\Programs\\slskd\\<version>\\slskd.exe."""
+    """settings.extra['slskd_exe'] if set, else the newest <install dir>/<version>/slskd(.exe), else slskd on PATH."""
     explicit = settings.extra.get("slskd_exe")
     if explicit:
         p = Path(explicit)
         return p if p.is_file() else None
-    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / "slskd"
-    if not base.is_dir():
-        return None
+    base = slskd_install_dir()
 
     def version_key(p: Path) -> tuple:
         return tuple(int(x) for x in re.findall(r"\d+", p.parent.name)) or (0,)
 
-    found = sorted(base.glob("*/slskd.exe"), key=version_key, reverse=True)
-    return found[0] if found else None
+    found = sorted(base.glob(f"*/{SLSKD_BINARY}"), key=version_key, reverse=True) if base.is_dir() else []
+    if found:
+        return found[0]
+    from ..models import find_tool
+
+    on_path = find_tool("slskd")
+    return Path(on_path) if on_path else None
 
 
 def incomplete_dir_for(settings: Settings) -> str:
@@ -211,6 +232,29 @@ feature:
 # ------------------------------------------------------------------ service
 
 
+def _is_slskd_process(pid: int) -> bool:
+    """True when `pid` is a running slskd (never kill an unrelated process that reused the number)."""
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, creationflags=_CREATE_NO_WINDOW)
+        return "slskd" in out.stdout.lower()
+    out = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True)
+    return "slskd" in out.stdout.lower()
+
+
+def _kill_process(pid: int) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                       creationflags=_CREATE_NO_WINDOW)
+        return
+    import signal
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+
+
 class SlskdService:
     """Owns one slskd child process. Not thread-safe; drive it from one worker at a time."""
 
@@ -307,11 +351,8 @@ class SlskdService:
         except ValueError:
             pid_file.unlink(missing_ok=True)
             return
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                             capture_output=True, text=True, creationflags=_CREATE_NO_WINDOW)
-        if "slskd" in out.stdout.lower():
-            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
-                           creationflags=_CREATE_NO_WINDOW)
+        if _is_slskd_process(pid):
+            _kill_process(pid)
             deadline = self._clock() + 10
             while self._port_in_use() and self._clock() < deadline:
                 self._sleep(0.5)
@@ -324,7 +365,7 @@ class SlskdService:
         """
         exe = self._exe or find_slskd_exe(self._settings)
         if exe is None:
-            raise SlskdServiceError("slskd is not installed (expected under %LOCALAPPDATA%\\Programs\\slskd).")
+            raise SlskdServiceError(f"slskd is not installed (expected under {slskd_install_dir()}).")
         self._pace_login()
         self.stop()
         self._stop_previous()

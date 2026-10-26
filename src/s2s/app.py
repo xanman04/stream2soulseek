@@ -75,10 +75,10 @@ def single_instance_lock(name: str = "Local\\S2S-single-instance"):
     """Hold a named mutex for this process's lifetime; None when another S2S already holds it.
 
     Two S2S windows would mean two Soulseek logins from one PC and two search budgets; the Soulseek server bans
-    for both. (Not Windows: always succeeds; the search ledger is still shared through its file lock.)
+    for both. macOS and Linux use an exclusive lock on a file in the app data folder instead of a mutex.
     """
     if sys.platform != "win32":
-        return object()
+        return _posix_instance_lock()
     import ctypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -90,6 +90,22 @@ def single_instance_lock(name: str = "Local\\S2S-single-instance"):
         kernel32.CloseHandle(ctypes.c_void_p(handle))
         return None
     return handle
+
+
+def _posix_instance_lock(path=None):
+    """An open file holding an exclusive lock for this process's lifetime; None when another S2S holds it."""
+    import fcntl
+
+    from . import config
+
+    lock_path = path or (config.app_dir() / "s2s.lock")
+    fh = open(lock_path, "a+")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh  # released when the process exits
 
 
 ALREADY_RUNNING = ("S2S is already open. Use the window that is already running: two S2S windows would connect "

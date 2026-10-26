@@ -47,20 +47,43 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
         kernel32.LocalFree(blob_out.pbData)
 
 
+KEYCHAIN_SERVICE = "S2S"  # macOS Keychain items are "S2S" / <secret name>
+
+
+def protection_text() -> str:
+    """How saved logins are protected on this computer, for the account pages."""
+    if sys.platform == "darwin":
+        return "kept in your Mac's Keychain"
+    return "protected by Windows" if sys.platform == "win32" else "stored in your user folder"
+
+
 class SecretStore:
+    """Per-user secrets. Windows: DPAPI-encrypted files. macOS: the login Keychain (via `keyring`).
+
+    Tests pass `protect`/`unprotect` (files) or `keychain` (an object with get/set/delete_password).
+    """
+
     def __init__(
         self,
         directory: Path | None = None,
         protect: Callable[[bytes], bytes] | None = None,
         unprotect: Callable[[bytes], bytes] | None = None,
+        *,
+        keychain=None,
     ) -> None:
         if (protect is None) != (unprotect is None):
             raise ValueError("protect and unprotect must be given together")
-        if protect is None:
-            if sys.platform != "win32":
-                raise RuntimeError("DPAPI secret storage is only available on Windows")
-            protect = lambda b: _dpapi(b, True)  # noqa: E731
-            unprotect = lambda b: _dpapi(b, False)  # noqa: E731
+        if protect is None and keychain is None:
+            if sys.platform == "darwin":
+                import keyring  # macOS backend talks to the Security framework directly
+
+                keychain = keyring
+            elif sys.platform == "win32":
+                protect = lambda b: _dpapi(b, True)  # noqa: E731
+                unprotect = lambda b: _dpapi(b, False)  # noqa: E731
+            else:
+                raise RuntimeError("Secret storage is only available on Windows and macOS")
+        self._keychain = keychain
         self._dir = directory or config.secrets_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._protect = protect
@@ -72,19 +95,29 @@ class SecretStore:
         return self._dir / f"{name}.dpapi"
 
     def get(self, name: str) -> str | None:
-        path = self._path(name)
+        path = self._path(name)  # validates the name for both backends
+        if self._keychain is not None:
+            return self._keychain.get_password(KEYCHAIN_SERVICE, name)
         if not path.exists():
             return None
         return self._unprotect(path.read_bytes()).decode("utf-8")
 
     def set(self, name: str, value: str) -> None:
         path = self._path(name)
+        if self._keychain is not None:
+            self._keychain.set_password(KEYCHAIN_SERVICE, name, value)
+            return
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(self._protect(value.encode("utf-8")))
         tmp.replace(path)
 
     def delete(self, name: str) -> None:
-        self._path(name).unlink(missing_ok=True)
+        path = self._path(name)
+        if self._keychain is not None:
+            if self._keychain.get_password(KEYCHAIN_SERVICE, name) is not None:
+                self._keychain.delete_password(KEYCHAIN_SERVICE, name)
+            return
+        path.unlink(missing_ok=True)
 
     def clear_apple_session(self) -> None:
         self.delete(APPLE_DEVELOPER_TOKEN)

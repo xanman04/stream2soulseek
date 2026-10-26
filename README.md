@@ -49,7 +49,8 @@ ineligible regardless of audio quality.
 
 ## Requirements
 
-- Windows and Python 3.11 or newer.
+- Windows or macOS, and Python 3.11 or newer. (macOS support is built and unit-tested but not yet verified on
+  a Mac; see [macOS notes](#macos-notes).)
 - A local slskd installation and a Soulseek account.
 - FFmpeg's `ffprobe` utility for audio verification.
 - FFmpeg's `ffmpeg` utility for the optional spectrogram view.
@@ -82,6 +83,25 @@ window, not from the built-in terminal of another desktop app: some packaged app
 data folder (settings, saved logins, history) to their own private copy. S2S warns when this happens.
 
 The installation also provides an `s2s` GUI entry point.
+
+### macOS notes
+
+```sh
+git clone https://github.com/xanman04/stream2soulseek.git
+cd stream2soulseek
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m s2s.app
+```
+
+Or double-click `run-s2s.command` in Finder. On a Mac, S2S keeps its data in
+`~/Library/Application Support/S2S`, saves logins in the login Keychain (item names start with `S2S`), and looks
+for slskd in `~/Library/Application Support/slskd/<version>/slskd`, then on `PATH`. Install FFmpeg with Homebrew
+(`brew install ffmpeg`); S2S also looks in Homebrew's folders, because apps opened from Finder do not see them on
+`PATH`. Keyboard shortcuts use ⌘ instead of Ctrl.
+
+Not yet verified on a real Mac: the Keychain prompts, slskd's first launch (macOS may block a downloaded binary
+until it is allowed in System Settings > Privacy & Security), and the embedded sign-in pages.
 
 ## Import workflow
 

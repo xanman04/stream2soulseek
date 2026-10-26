@@ -224,6 +224,12 @@ The user explicitly requires that personal credentials never become hardcoded or
 
 The user wants, eventually, a single runnable Windows package (like the SoulseekQt installer) to send to friends, even without open-sourcing. Each friend signs in to their own Apple Music and Soulseek accounts and uses their own folders. Design for this now:
 
+- macOS groundwork done 2026-10-26 (not verified on a Mac): app data in ~/Library/Application Support/S2S
+  (config.app_dir_path), secrets in the login Keychain via `keyring` (SecretStore keychain backend, darwin-only
+  dependency), slskd found in ~/Library/Application Support/slskd/<version>/slskd or PATH, leftover slskd stopped
+  with ps/SIGTERM, creationflags only on Windows, single-instance file lock (fcntl), Homebrew tool fallback
+  (models.find_tool), system font kept on macOS, run-s2s.command launcher. Still to verify on a real Mac:
+  Keychain prompts, Gatekeeper on slskd, Qt WebEngine sign-in, packaging/signing/notarisation.
 - Future distribution must support **macOS as well as Windows** (requested 2026-10-24). Implement macOS compatibility when preparing downloadable packages; no port is requested yet. Plan for platform-specific secret storage (macOS Keychain instead of Windows DPAPI), application-data paths, slskd process management, filesystem behavior, and Qt WebEngine packaging. Verify installation, sign-in, searching, downloads, and imports on macOS before claiming support.
 - Everything per-user and discovered at runtime: no paths, accounts, tokens or settings from the developer's machine in the build. A first-run setup asks for the download location, slskd folders, Soulseek login and Apple sign-in.
 - The app should manage slskd itself: start/stop it as a child process with a generated per-user config (random API key, loopback-only API, HTTPS off, no shares, file retention off). Pass the Soulseek login from DPAPI storage via `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD` environment variables rather than writing the password into `slskd.yml`.

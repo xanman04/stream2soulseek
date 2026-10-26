@@ -1,4 +1,10 @@
-# slskd setup on Windows
+# slskd setup
+
+The steps below are for Windows. On macOS, download `slskd-<version>-osx-arm64.zip` (Apple silicon) or
+`-osx-x64.zip` (Intel), check its SHA-256, and unpack it to `~/Library/Application Support/slskd/<version>/`
+(or install slskd anywhere on `PATH`). The first launch may be blocked by Gatekeeper until you allow it in
+System Settings > Privacy & Security. S2S's own data lives in `~/Library/Application Support/S2S` and saved
+logins in the login Keychain.
 
 The app runs [slskd](https://github.com/slskd/slskd) for you; you only install it once. Verified with slskd
 0.26.2 (win-x64). Other versions may change options or the API.
