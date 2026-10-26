@@ -22,13 +22,6 @@ SHARING_HELP = (
     "you are comfortable sharing (for example your DJ library or the OLD archive). S2S refuses drives, your whole "
     "user folder, and anything containing its own data. Changes apply when slskd restarts (S2S restarts it after "
     "you press Save).")
-RATE_LIMIT_HELP = (
-    "S2S never starts more than this many searches in this time, across all parallel searches. The Soulseek server "
-    "bans users for 30 minutes when too many searches are made in a short time, so higher values risk a 30-minute "
-    "ban (the default, 34 per 220 seconds, is what other Soulseek tools use). If Soulseek disconnects, S2S pauses "
-    "and waits up to the time above for it to come back, then retries; it then marks the track as a failed search, "
-    "never as not found."
-)
 from .context import AppContext
 from .matching_rules import MatchingRulesWidget
 from .util import show_error
@@ -62,26 +55,6 @@ class SettingsDialog(QDialog):
         self.concurrency.setRange(1, 8)
         self.concurrency.setValue(int(s.search_concurrency))
         self.concurrency.setToolTip("Tracks searched at once (recommended: 3). Search-start requests are queued separately.")
-        self.rate_limit = QSpinBox()
-        self.rate_limit.setRange(1, 500)
-        self.rate_limit.setValue(int(s.search_rate_limit))
-        self.rate_window = QSpinBox()
-        self.rate_window.setRange(10, 3600)
-        self.rate_window.setSuffix(" s")
-        self.rate_window.setValue(int(s.search_rate_window_s))
-        self.reconnect_wait = QSpinBox()
-        self.reconnect_wait.setRange(1, 180)
-        self.reconnect_wait.setSuffix(" min")
-        self.reconnect_wait.setValue(int(s.search_reconnect_wait_min))
-        self.rate_help = QLabel(RATE_LIMIT_HELP)
-        self.rate_help.setWordWrap(True)
-        rate_row = QWidget()
-        rh = QHBoxLayout(rate_row)
-        rh.setContentsMargins(0, 0, 0, 0)
-        rh.addWidget(self.rate_limit)
-        rh.addWidget(QLabel("searches per"))
-        rh.addWidget(self.rate_window)
-        rh.addStretch(1)
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         has_key = False
@@ -106,9 +79,6 @@ class SettingsDialog(QDialog):
         form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
         form.addRow("Extended search timeout (s):", self.timeout)
         form.addRow("Parallel searches:", self.concurrency)
-        form.addRow("Search limit (advanced):", rate_row)
-        form.addRow("Wait for Soulseek to reconnect:", self.reconnect_wait)
-        form.addRow(self.rate_help)
         form.addRow(self.test_btn, self.test_result)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.accepted.connect(self.save)
@@ -235,9 +205,7 @@ class SettingsDialog(QDialog):
                 slskd_downloads_dir=self.downloads.text().strip(),
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
-                search_concurrency=self.concurrency.value(),
-                search_rate_limit=self.rate_limit.value(), search_rate_window_s=self.rate_window.value(),
-                search_reconnect_wait_min=self.reconnect_wait.value(), match_policy=self.rules.policy(),
+                search_concurrency=self.concurrency.value(), match_policy=self.rules.policy(),
                 rule_layouts=dict(self.rules.layouts), shared_folders=self.shared_folders())
             for f in new.shared_folders:  # the downloads folder may have changed since a folder was added
                 problem = self._share_problem(f)

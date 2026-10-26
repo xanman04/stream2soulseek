@@ -127,33 +127,67 @@ def test_run_search_starts_pass_through_the_limiter(monkeypatch):
 # ------------------------------------------------------------------ settings
 
 
-def test_settings_round_trip(tmp_path, monkeypatch):
-    monkeypatch.setenv("S2S_HOME", str(tmp_path / "home"))
-    assert Settings().search_rate_limit == 34 and Settings().search_rate_window_s == 220
-    assert Settings().search_reconnect_wait_min == 40
-    s = Settings(search_rate_limit=20, search_rate_window_s=300, search_reconnect_wait_min=50)
-    config.save_settings(s)
-    back = config.load_settings()
-    assert (back.search_rate_limit, back.search_rate_window_s, back.search_reconnect_wait_min) == (20, 300, 50)
-
-
-def test_settings_dialog_exposes_and_saves_the_limit(qapp, tmp_path, monkeypatch):
-    from s2s.ui.settings_dialog import RATE_LIMIT_HELP, SettingsDialog
+def test_the_search_limit_is_fixed_not_a_setting(qapp, tmp_path, monkeypatch):
+    from s2s.ui.settings_dialog import SettingsDialog
 
     monkeypatch.setenv("S2S_HOME", str(tmp_path / "home"))
+    names = {f.name for f in __import__("dataclasses").fields(Settings)}
+    assert not names & {"search_rate_limit", "search_rate_window_s", "search_reconnect_wait_min"}
+    lim = SearchRateLimiter()
+    assert (lim._limit, lim._window) == (search.RATE_LIMIT, search.RATE_WINDOW_S) == (34, 220)
+    # a settings file written by the short-lived version that had these options still loads; the values are ignored
+    home = config.app_dir()
+    (home / "settings.json").write_text('{"search_rate_limit": 500, "search_rate_window_s": 10}', encoding="utf-8")
+    assert not hasattr(config.load_settings(), "search_rate_limit")
     ctx = SimpleNamespace(settings=Settings(slskd_downloads_dir=str(tmp_path / "dl")),
                           secrets=SimpleNamespace(get=lambda k: None), describe=str)
     dlg = SettingsDialog(ctx)
-    assert dlg.rate_limit.value() == 34 and dlg.rate_window.value() == 220
-    assert "30-minute" in RATE_LIMIT_HELP and "ban" in RATE_LIMIT_HELP
-    dlg.rate_limit.setValue(10)
-    dlg.rate_window.setValue(100)
-    dlg.reconnect_wait.setValue(45)
-    dlg.save()
-    assert (ctx.settings.search_rate_limit, ctx.settings.search_rate_window_s,
-            ctx.settings.search_reconnect_wait_min) == (10, 100, 45)
-    assert config.load_settings().search_rate_limit == 10
+    assert not hasattr(dlg, "rate_limit") and not hasattr(dlg, "reconnect_wait")
     dlg.deleteLater()
+
+
+def test_small_runs_are_not_slowed_down():
+    """Up to 34 searches start at once; only the 35th waits (a 10-track playlist never waits)."""
+    t = FakeTime()
+    lim = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    cancel = threading.Event()
+    for _ in range(34):
+        lim.acquire(cancel)
+    assert t.clock() == 0.0
+    lim.acquire(cancel)
+    assert t.clock() >= 220
+
+
+def test_search_times_survive_a_restart(tmp_path):
+    """Closing and reopening S2S, or starting a new run right away, cannot exceed the limit."""
+    t = FakeTime()
+    t.now = 1000.0
+    path = tmp_path / "search-times.json"
+    first = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    first.attach(path)
+    cancel = threading.Event()
+    for _ in range(34):
+        first.acquire(cancel)
+    t.now += 100  # "restart" 100 s later: a fresh limiter in a new process
+    second = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    second.attach(path)
+    assert second.available() == 0
+    second.acquire(cancel)
+    assert t.clock() >= 1220  # waited until the first run's searches left the window
+    t.now += 1000
+    third = SearchRateLimiter(clock=t.clock, sleep=t.sleep)
+    third.attach(path)
+    assert third.available() == 34  # old searches no longer count
+
+
+def test_a_broken_search_times_file_is_ignored(tmp_path):
+    path = tmp_path / "search-times.json"
+    path.write_text("not json", encoding="utf-8")
+    lim = SearchRateLimiter()
+    lim.attach(path)
+    assert lim.available() == 34
+    lim.acquire(threading.Event())
+    assert len(__import__("json").loads(path.read_text(encoding="utf-8"))) == 1
 
 
 # ------------------------------------------------------------------ classification
@@ -261,7 +295,7 @@ def env(tmp_path, monkeypatch):
     store = Store(tmp_path / "s.db")
     iid = store.create_import(Playlist("p.1", "Pl"), str(tmp_path / "House"))
     t = FakeTime()
-    gate = ConnectionGate(clock=t.clock, sleep=t.sleep, poll_s=15, max_wait_s=2400)
+    gate = ConnectionGate(clock=t.clock, sleep=t.sleep, poll_s=10, max_wait_s=search.RECONNECT_WAIT_S)
     monkeypatch.setattr(search, "GATE", gate)
     settings = Settings(slskd_downloads_dir=str(tmp_path / "dl"), search_concurrency=1, search_timeout_s=1)
     yield SimpleNamespace(store=store, iid=iid, t=t, gate=gate, settings=settings, tmp=tmp_path)
@@ -278,7 +312,7 @@ def run(env, client, trs=None, cancel=None):
 def test_disconnect_mid_run_then_reconnect_retries_and_ends_found(env):
     client = FlakyClient({t: remote_for(t) for t in TITLES})
     client.fail_after = 2  # tracks 3 and 4 hit the dead connection
-    reconnect_at = 90.0
+    reconnect_at = 40.0  # a short blip, inside the 60 s allowance
 
     def tick(now):
         if now >= reconnect_at:
@@ -289,12 +323,11 @@ def test_disconnect_mid_run_then_reconnect_retries_and_ends_found(env):
     assert [r.status for r in res] == [MatchStatus.PROPOSED] * 4
     assert not any("not found" in r.note.lower() or "search failed" in r.note.lower() for r in res)
     assert env.t.clock() >= reconnect_at  # it really waited, then continued
-    assert client.polls >= 2  # polled with backoff, not just once
+    assert client.polls >= 2  # kept checking, not just once
     assert {q.split()[-1] for q in client.started} == {t.lower() for t in TITLES}  # interrupted queries repeated
 
 
-def test_never_reconnecting_gives_search_failed_not_not_found_and_fails_fast(env):
-    env.settings.search_reconnect_wait_min = 1
+def test_a_ban_stops_searching_after_one_minute_with_search_failed_not_not_found(env):
     client = FlakyClient({t: remote_for(t) for t in TITLES})
     client.connected = False
     res = run(env, client)
@@ -305,7 +338,7 @@ def test_never_reconnecting_gives_search_failed_not_not_found_and_fails_fast(env
         assert "Soulseek disconnected" in r.note
     from s2s.ui.search_page import classify
     assert classify(res[0])[:2] == ("error", "Search failed: Soulseek disconnected")
-    assert 60 <= env.t.clock() < 400  # one shared wait of the configured maximum, not one per track
+    assert 60 <= env.t.clock() < 120  # one short shared wait, then every track stops at once (no 30 min wait)
     stored = env.store.load_match_results(env.iid)
     assert all(workflow.is_search_failed(r) for r in stored)
 
@@ -318,11 +351,10 @@ def test_cancel_during_the_reconnect_wait(env):
     res = run(env, client, cancel=cancel)
     assert res == []  # nothing is stored or reported for tracks that were not finished
     assert env.store.load_match_results(env.iid) == []
-    assert env.t.clock() < 100  # stopped promptly, long before the 40 minutes
+    assert env.t.clock() < 60  # stopped promptly
 
 
 def test_run_search_raises_interrupted_when_the_wait_runs_out(env):
-    env.gate.configure(60)
     client = FlakyClient({})
     client.connected = False
     with pytest.raises(SearchInterrupted) as ei:
@@ -339,7 +371,6 @@ def test_empty_answer_while_disconnected_is_an_interruption_not_nothing_found(en
 
     client = DropsMidSearch({})
     client.connected = True
-    env.gate.configure(60)
     with pytest.raises(SearchInterrupted):
         run_search(client, AppleTrack("i.1", "Alpha", "Artist"), cancel=threading.Event(), timeout_s=5,
                    response_limit=10, file_limit=10, sleep=lambda s: None, check_empty=True, queries=["artist alpha"])
@@ -455,7 +486,6 @@ def test_retry_button_reruns_only_failed_tracks_and_merges(qapp, env, monkeypatc
 
 
 def test_retry_that_still_fails_keeps_the_button(qapp, env, monkeypatch):
-    env.settings.search_reconnect_wait_min = 1
     trs = track_list()
     results = failed_results(trs, {"Delta"})
     client = FlakyClient({t: remote_for(t) for t in TITLES})
@@ -469,6 +499,19 @@ def test_retry_that_still_fails_keeps_the_button(qapp, env, monkeypatch):
     page.close()
 
 
+def test_a_ban_mid_run_stops_and_says_so(qapp, env, monkeypatch):
+    client = FlakyClient({t: remote_for(t) for t in TITLES})
+    client.fail_after = 2  # Soulseek drops the connection after two searches and never comes back
+    page, ctx = make_page(qapp, env, monkeypatch, client, [])
+    page.start()
+    summary = page.summary_label.text()
+    assert summary.startswith("Searching stopped") and "2 tracks could not be searched" in summary
+    assert "30 minutes" in summary and "Retry failed searches" in summary
+    assert len(workflow.failed_search_tracks(ctx.results)) == 2
+    assert env.t.clock() < 120  # stopped after the short reconnect allowance, not half an hour
+    page.close()
+
+
 def test_waiting_banner_and_pacing_text(qapp, env, monkeypatch):
     client = FlakyClient({})
     page, ctx = make_page(qapp, env, monkeypatch, client, [])
@@ -477,10 +520,9 @@ def test_waiting_banner_and_pacing_text(qapp, env, monkeypatch):
     env.gate.report_loss()
     page._tick()
     text = page.wait_banner.text()
-    assert "Soulseek disconnected" in text and "Waiting to reconnect (40 min left)" in text
-    assert "Searches resume automatically" in text
-    assert "9 searches per minute" in page.pace_label.text()
-    assert "about 132 more searches expected" in page.pace_label.text()
+    assert "Soulseek disconnected" in text and "Waiting up to 60 s" in text and "searching stops" in text
+    assert "about 9 searches a minute" in page.pace_label.text()
+    assert "about 132 more expected" in page.pace_label.text()
     env.gate.begin_run()
     page._tick()
     assert page.wait_banner.isHidden()

@@ -62,8 +62,8 @@ def _unresolved(track: AppleTrack, note: str) -> MatchResult:
 
 NOT_FOUND_PREFIX = "Not found after"
 SEARCH_FAILED_PREFIX = "search failed"
-DISCONNECTED_NOTE = ("search failed: Soulseek disconnected (probably a temporary search limit); this track was "
-                     "not searched. Use \"Retry failed searches\".")
+DISCONNECTED_NOTE = ("search failed: Soulseek disconnected during the search and searching stopped; this track "
+                     "was not searched. Use \"Retry failed searches\" once Soulseek is connected again.")
 
 
 def is_search_failed(res: MatchResult) -> bool:
@@ -76,10 +76,13 @@ def failed_search_tracks(results: Iterable[MatchResult]) -> list[AppleTrack]:
     return [r.track for r in results if is_search_failed(r)]
 
 
-def configure_search_limits(settings: Settings) -> None:
-    """Apply the user's rate limit and reconnect wait to the process-wide limiter and connection gate."""
-    _search.LIMITER.configure(settings.search_rate_limit, settings.search_rate_window_s)
-    _search.GATE.configure(max(0, int(settings.search_reconnect_wait_min)) * 60)
+def configure_search_limits() -> None:
+    """Start a search run: forget an earlier outage, and remember search start times on disk so the fixed
+    search limit also holds across S2S restarts."""
+    from . import config
+
+    _search.GATE.begin_run()
+    _search.LIMITER.attach(config.app_dir() / "search-times.json")
 
 
 def searched_note(tried: list[str]) -> str:
@@ -138,8 +141,7 @@ def search_and_match(
     imp = store.get_import(import_id)
     if imp is None:
         raise ValueError("unknown import")
-    configure_search_limits(settings)
-    _search.GATE.begin_run()
+    configure_search_limits()
     if cache is None:
         cache = _search.SearchCache()  # no query is sent twice within this run
     done_ids = store.completed_apple_ids(imp.destination)
@@ -264,7 +266,7 @@ def search_track_custom(
     if store.get_import(import_id) is None:
         raise ValueError("unknown import")
     cancel = cancel or threading.Event()
-    configure_search_limits(settings)
+    configure_search_limits()
     found = run_search(
         client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
         response_limit=settings.response_limit, file_limit=settings.file_limit,

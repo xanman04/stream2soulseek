@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import threading
 import unicodedata
@@ -9,6 +11,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable
+from pathlib import Path
 
 from ..matching.versions import normalise as _match_normalise
 from ..models import AppleTrack, RemoteFile
@@ -192,10 +195,15 @@ def build_queries(track: AppleTrack) -> list[str]:
 
 # ---------------------------------------------------------------- rate limiting and connection loss
 
-DEFAULT_RATE_LIMIT = 34  # searches per window; slsk-batchdl's default, chosen to stay under the server's ban threshold
-DEFAULT_RATE_WINDOW_S = 220
-DEFAULT_RECONNECT_WAIT_S = 40 * 60  # longer than the server's 30 minute ban
-RECONNECT_POLL_S = 15.0
+# Fixed, not a setting: the Soulseek server bans an account for 30 minutes when it searches too fast, and no user
+# benefits from risking that. 34 per 220 s is slsk-batchdl's long-tested default. A small playlist still runs at
+# full speed: the window allows a burst of 34 searches, and only a run needing more than that is paced.
+RATE_LIMIT = 34
+RATE_WINDOW_S = 220
+# A short outage (network blip) gets this long to recover. Anything longer is treated as a ban: searching stops
+# instead of making the user wait half an hour.
+RECONNECT_WAIT_S = 60
+RECONNECT_POLL_S = 10.0
 
 
 class SearchCancelled(Exception):
@@ -214,11 +222,13 @@ class SearchRateLimiter:
     """Process-wide sliding window: at most `limit` searches may start in any `window_s` seconds.
 
     The Soulseek server bans users for 30 minutes when too many searches are made in a short time. Thread
-    safe; waiting honours the caller's cancel event. `clock`/`sleep` are injectable for tests.
+    safe; waiting honours the caller's cancel event. `clock`/`sleep` are injectable for tests. After
+    `attach(path)` the start times are also saved to disk, so closing and reopening S2S (or starting a second
+    run straight after a first) cannot exceed the limit either; the default clock is wall time for that reason.
     """
 
-    def __init__(self, limit: int = DEFAULT_RATE_LIMIT, window_s: float = DEFAULT_RATE_WINDOW_S, *,
-                 clock: Callable[[], float] = time.monotonic,
+    def __init__(self, limit: int = RATE_LIMIT, window_s: float = RATE_WINDOW_S, *,
+                 clock: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] | None = None) -> None:
         self._lock = threading.Lock()
         self._times: deque[float] = deque()
@@ -228,11 +238,34 @@ class SearchRateLimiter:
         self._sleep = sleep
         self.total_started = 0
         self.unlimited = False  # tests only
+        self._path: Path | None = None
 
-    def configure(self, limit: int, window_s: float) -> None:
+    def attach(self, path: Path) -> None:
+        """Load recent search start times from `path` and save every new one there (best effort)."""
         with self._lock:
-            self._limit = max(1, int(limit))
-            self._window = max(1.0, float(window_s))
+            if self._path == path:
+                return
+            self._path = path
+            try:
+                saved = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return
+            now = self._clock()
+            if not isinstance(saved, list):
+                return
+            merged = sorted([*self._times, *(float(x) for x in saved if isinstance(x, (int, float)) and x <= now)])
+            self._times = deque(merged)
+            self._trim(now)
+
+    def _save(self) -> None:
+        if self._path is None:
+            return
+        try:
+            tmp = self._path.with_name(self._path.name + ".tmp")
+            tmp.write_text(json.dumps(list(self._times)), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError:
+            pass  # the in-memory window still applies
 
     @property
     def per_minute(self) -> float:
@@ -265,6 +298,7 @@ class SearchRateLimiter:
                 if self.unlimited or len(self._times) < self._limit:
                     self._times.append(now)
                     self.total_started += 1
+                    self._save()
                     return
                 wait = self._times[len(self._times) - self._limit] + self._window - now
             step = min(max(wait, 0.01), 0.5)
@@ -283,7 +317,7 @@ class ConnectionGate:
 
     def __init__(self, *, clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] | None = None,
-                 poll_s: float = RECONNECT_POLL_S, max_wait_s: float = DEFAULT_RECONNECT_WAIT_S) -> None:
+                 poll_s: float = RECONNECT_POLL_S, max_wait_s: float = RECONNECT_WAIT_S) -> None:
         self._lock = threading.Lock()
         self._clock = clock
         self._sleep = sleep
@@ -293,9 +327,6 @@ class ConnectionGate:
         self._last_poll = 0.0
         self._polls = 0
         self._polling = False
-
-    def configure(self, max_wait_s: float) -> None:
-        self.max_wait_s = max(0.0, float(max_wait_s))
 
     def begin_run(self) -> None:
         with self._lock:
@@ -318,7 +349,7 @@ class ConnectionGate:
             return True, max(0.0, self.max_wait_s - (self._clock() - self._down_since))
 
     def _interval(self) -> float:
-        return min(self._poll_s * (2 ** (self._polls // 2)), 4 * self._poll_s)  # 15, 15, 30, 30, 60 ...
+        return self._poll_s
 
     def wait_until_connected(self, client, cancel: threading.Event) -> None:
         """Return at once when up; otherwise wait for the reconnect.
@@ -347,7 +378,8 @@ class ConnectionGate:
                         return
                 continue
             if expired:
-                raise SearchInterrupted("Soulseek stayed disconnected; searching was given up.", gave_up=True)
+                raise SearchInterrupted("Soulseek disconnected and did not come back; searching stopped.",
+                                        gave_up=True)
             if self._sleep is not None:
                 self._sleep(1.0)
             else:
