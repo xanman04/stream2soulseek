@@ -27,7 +27,7 @@ a = Analysis(  # noqa: F821
     binaries=binaries,
     datas=datas,
     hiddenimports=hidden,
-    excludes=["pytest", "tkinter", "_pytest"],
+    excludes=["pytest", "tkinter", "_pytest", "cryptography"],  # updates are verified by s2s.ed25519
 )
 pyz = PYZ(a.pure)  # noqa: F821
 exe = EXE(  # noqa: F821
