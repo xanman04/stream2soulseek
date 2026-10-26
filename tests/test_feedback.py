@@ -48,3 +48,14 @@ def test_the_dialog_opens_email_and_never_sends_anything_itself(monkeypatch):
     assert opened[1].startswith("file:")  # the report's folder, so the file can be attached
     assert "attach" in dialog.status.text()
     dialog.deleteLater()
+
+
+def test_report_dialog_always_includes_technical_details():
+    from PySide6.QtWidgets import QCheckBox
+
+    from s2s.ui.feedback_dialog import FeedbackDialog
+
+    dialog = FeedbackDialog()
+    assert not dialog.findChildren(QCheckBox)  # no way to leave the details out
+    assert "S2S" in dialog.report_text() and "log" in dialog.report_text().lower()
+    dialog.deleteLater()
