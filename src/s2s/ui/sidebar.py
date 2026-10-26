@@ -10,11 +10,13 @@ from .steps import STEPS
 
 APPLE_KEY = "apple"
 SPOTIFY_KEY = "spotify"
+SOUNDCLOUD_KEY = "soundcloud"
+SOURCE_NAMES = {APPLE_KEY: "Apple Music", SPOTIFY_KEY: "Spotify", SOUNDCLOUD_KEY: "SoundCloud"}
 # (key, label, available today)
 SERVICES = [
     (APPLE_KEY, "Apple Music", True),
     (SPOTIFY_KEY, "Spotify", True),
-    ("soundcloud", "SoundCloud (coming soon)", False),
+    (SOUNDCLOUD_KEY, "SoundCloud", True),
 ]
 
 

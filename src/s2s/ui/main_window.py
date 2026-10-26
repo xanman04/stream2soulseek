@@ -24,8 +24,9 @@ from .queued_recovery_dialog import QueuedRecoveryDialog
 from .search_page import SearchPage
 from .service_page import ServicePage
 from .spotify_service_page import SpotifyServicePage
+from ..soundcloud.page import SoundCloudServicePage
 from .settings_dialog import SettingsDialog
-from .sidebar import APPLE_KEY, SPOTIFY_KEY, Sidebar
+from .sidebar import APPLE_KEY, SPOTIFY_KEY, SOUNDCLOUD_KEY, SOURCE_NAMES, Sidebar
 from .soulseek_login import SoulseekSession
 from .steps import STEPS, StepFrame
 from .transfers_page import TransfersPage
@@ -55,7 +56,9 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         self.service = ServicePage(self.ctx)
         self.spotify_service = SpotifyServicePage(self.ctx)
-        self._service_pages = {APPLE_KEY: self.service, SPOTIFY_KEY: self.spotify_service}
+        self.soundcloud_service = SoundCloudServicePage(self.ctx)
+        self._service_pages = {APPLE_KEY: self.service, SPOTIFY_KEY: self.spotify_service,
+                               SOUNDCLOUD_KEY: self.soundcloud_service}
         self.playlists = PlaylistPage(self.ctx)
         self.destination = DestinationPage(self.ctx)
         self.search = SearchPage(self.ctx)
@@ -68,6 +71,7 @@ class MainWindow(QMainWindow):
         for f in self.frames:  # 1..5
             self.stack.addWidget(f)
         self.stack.addWidget(self.spotify_service)
+        self.stack.addWidget(self.soundcloud_service)
 
         central = QWidget()
         h = QHBoxLayout(central)
@@ -107,10 +111,14 @@ class MainWindow(QMainWindow):
         self.spotify_service.signed_in.connect(lambda: self._source_signed_in(SPOTIFY_KEY))
         self.spotify_service.signed_out.connect(lambda: self._source_signed_out(SPOTIFY_KEY))
         self.spotify_service.state_changed.connect(self.refresh_navigation)
+        self.soundcloud_service.signed_in.connect(lambda: self._source_signed_in(SOUNDCLOUD_KEY))
+        self.soundcloud_service.signed_out.connect(lambda: self._source_signed_out(SOUNDCLOUD_KEY))
+        self.soundcloud_service.state_changed.connect(self.refresh_navigation)
         self.playlists.tracks_changed.connect(self.refresh_navigation)
         self.playlists.resume_requested.connect(self.resume_last_import)
         self.playlists.open_service_requested.connect(self._open_available_service)
         self.playlists.open_spotify_requested.connect(lambda: self._open_service(SPOTIFY_KEY))
+        self.playlists.open_soundcloud_requested.connect(lambda: self._open_service(SOUNDCLOUD_KEY))
         self.playlists.auth_failed.connect(self._auth_failed)
         self.destination.destination_changed.connect(self.refresh_navigation)
         self.destination.settings_requested.connect(self.open_settings)
@@ -163,6 +171,7 @@ class MainWindow(QMainWindow):
             return
         self._navigation_generation += 1
         self.spotify_service.leave()
+        self.soundcloud_service.leave()
         self.stack.setCurrentIndex(index + 1)
         self.sidebar.show_step(index)
         if index == STEP_TRANSFERS:
@@ -183,6 +192,8 @@ class MainWindow(QMainWindow):
         self._navigation_generation += 1
         if key != SPOTIFY_KEY:
             self.spotify_service.leave()
+        if key != SOUNDCLOUD_KEY:
+            self.soundcloud_service.leave()
         self.transfers.stop()
         self.stack.setCurrentWidget(page)
         self.sidebar.show_service(key)
@@ -190,14 +201,15 @@ class MainWindow(QMainWindow):
 
     def _open_available_service(self) -> None:
         source = self.playlists.current_source()
-        self._open_service(SPOTIFY_KEY if getattr(source, "name", "") == "Spotify" else APPLE_KEY)
+        key = next((key for key, name in SOURCE_NAMES.items() if name == getattr(source, "name", "")), APPLE_KEY)
+        self._open_service(key)
 
     def _signed_in(self) -> None:
         self._source_signed_in(APPLE_KEY)
 
     def _source_signed_in(self, key: str) -> None:
         self.playlists.reset()
-        index = self.playlists.source_combo.findText("Spotify" if key == SPOTIFY_KEY else "Apple Music")
+        index = self.playlists.source_combo.findText(SOURCE_NAMES[key])
         if index >= 0:
             self.playlists.source_combo.blockSignals(True)
             self.playlists.source_combo.setCurrentIndex(index)
@@ -210,7 +222,7 @@ class MainWindow(QMainWindow):
 
     def _source_signed_out(self, key: str) -> None:
         source = self.playlists.current_source()
-        name = "Spotify" if key == SPOTIFY_KEY else "Apple Music"
+        name = SOURCE_NAMES[key]
         if source is None or source.name == name:
             self.playlists.reset()
         else:
@@ -218,7 +230,11 @@ class MainWindow(QMainWindow):
         self.refresh_navigation()
 
     def _auth_failed(self, source: str) -> None:
-        key = SPOTIFY_KEY if source == "Spotify" else APPLE_KEY
+        key = next((key for key, name in SOURCE_NAMES.items() if name == source), None)
+        if key is None:
+            return
+        self.spotify_service.leave()
+        self.soundcloud_service.leave()
         self.playlists.reset()
         # session_rejected owns the fresh login; do not start the embedded page twice.
         if not self._queueing:
@@ -408,7 +424,8 @@ class MainWindow(QMainWindow):
         imp, tracks, results, approval = payload
         ctx = self.ctx
         ctx.playlist = Playlist(imp.playlist_id, imp.playlist_name)
-        source_name = "Spotify" if imp.playlist_id.startswith("spotify:") else "Apple Music"
+        source_name = next((name for key, name in SOURCE_NAMES.items()
+                            if imp.playlist_id.startswith(key + ":")), "Apple Music")
         source_index = self.playlists.source_combo.findText(source_name)
         if source_index >= 0:
             self.playlists.source_combo.blockSignals(True)
@@ -437,5 +454,6 @@ class MainWindow(QMainWindow):
         self.transfers.stop()
         self.search.cancel()
         self.spotify_service.dispose()
+        self.soundcloud_service.dispose()
         self.soulseek.shutdown()  # stop the slskd this app started
         super().closeEvent(event)

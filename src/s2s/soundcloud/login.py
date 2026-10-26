@@ -1,0 +1,139 @@
+"""SoundCloud's own sign-in page in a temporary embedded browser."""
+from __future__ import annotations
+
+import re
+
+from PySide6.QtCore import QUrl, Qt, Signal
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
+import shiboken6
+
+from .session import normalize_session
+
+START_URL = "https://soundcloud.com/signin"
+_DOMAINS = {"soundcloud.com", ".soundcloud.com", "secure.soundcloud.com", ".secure.soundcloud.com"}
+
+
+def origin_label(view, parent):
+    label = QLabel("https://soundcloud.com", parent)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    label.setWordWrap(True)
+    def update(url):
+        host = url.host()
+        port = url.port()
+        label.setText(f"{url.scheme()}://{host}" + (f":{port}" if port not in (-1, 443) else "")
+                      if host else url.toString())
+    view.urlChanged.connect(update)
+    return label
+
+
+def cookie_candidate(cookie):
+    if (bytes(cookie.name()) != b"oauth_token" or cookie.domain().lower() not in _DOMAINS
+            or cookie.path() != "/" or not cookie.isSecure()):
+        return None
+    try:
+        token = bytes(cookie.value()).decode("utf-8", errors="strict")
+        expires = None if cookie.isSessionCookie() else cookie.expirationDate().toSecsSinceEpoch()
+        return normalize_session(token, expires=expires)
+    except (ValueError, UnicodeError):
+        return None
+
+
+class _Page(QWebEnginePage):
+    def __init__(self, profile, owner, parent):
+        super().__init__(profile, parent)
+        self.owner = owner
+        self.settings().setUnknownUrlSchemePolicy(QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes)
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):  # noqa: N802
+        return url.scheme() == "https" or url.toString() == "about:blank"
+
+    def createWindow(self, window_type):  # noqa: N802
+        dialog = QDialog(self.owner)
+        dialog.setWindowTitle("SoundCloud sign-in")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.resize(540, 720)
+        view = QWebEngineView(dialog)
+        page = _Page(self.profile(), self.owner, dialog)
+        view.setPage(page)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(origin_label(view, dialog))
+        layout.addWidget(view)
+        page.windowCloseRequested.connect(dialog.close)
+        key = id(dialog)
+        self.owner._popups[key] = (dialog, view, page)
+        owner = self.owner
+        dialog.destroyed.connect(lambda *_: owner._popups.pop(key, None))
+        dialog.show()
+        return page
+
+
+class SoundCloudLoginWidget(QWidget):
+    session_candidate = Signal(object)
+    login_failed = Signal(str)
+    status_changed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._closed = False
+        self._capture_enabled = False
+        self._last_token = None
+        self._popups = {}
+        self._profile = QWebEngineProfile(self)
+        self._profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
+        self._profile.setHttpUserAgent(re.sub(r"\s*QtWebEngine/[\d.]+", "", self._profile.httpUserAgent()))
+        self._profile.cookieStore().cookieAdded.connect(self._on_cookie)
+        self._view = QWebEngineView(self)
+        self._page = _Page(self._profile, self, self)
+        self._view.setPage(self._page)
+        self._page.loadFinished.connect(self._loaded)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.origin = origin_label(self._view, self)
+        layout.addWidget(self.origin)
+        layout.addWidget(self._view)
+
+    def start(self):
+        if self._closed:
+            return
+        self._capture_enabled = True
+        self.status_changed.emit("Loading SoundCloud sign-in…")
+        self._view.load(QUrl(START_URL))
+
+    def _on_cookie(self, cookie):
+        if not self._capture_enabled or self._closed:
+            return
+        candidate = cookie_candidate(cookie)
+        if candidate is None or candidate["token"] == self._last_token:
+            return
+        self._last_token = candidate["token"]
+        self.session_candidate.emit(candidate)
+
+    def _loaded(self, ok):
+        if self._capture_enabled and not self._closed and not ok:
+            self.login_failed.emit("SoundCloud sign-in could not load. Check your connection and try again.")
+
+    def clear_session(self):
+        if self._closed:
+            return
+        self._capture_enabled = False
+        self._last_token = None
+        self._profile.cookieStore().deleteAllCookies()
+        self._profile.clearHttpCache()
+        self._profile.clearAllVisitedLinks()
+
+    def dispose(self):
+        if self._closed:
+            return
+        self.clear_session()
+        self._closed = True
+        for dialog, view, page in list(self._popups.values()):
+            for obj in (view, page, dialog):
+                if shiboken6.isValid(obj):
+                    shiboken6.delete(obj)
+        self._popups.clear()
+        for obj in (self._view, self._page, self._profile):
+            if shiboken6.isValid(obj):
+                shiboken6.delete(obj)

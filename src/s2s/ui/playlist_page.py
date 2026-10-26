@@ -21,6 +21,7 @@ class PlaylistPage(QWidget):
     resume_requested = Signal()
     open_service_requested = Signal()
     open_spotify_requested = Signal()
+    open_soundcloud_requested = Signal()
     auth_failed = Signal(str)  # the source rejected the stored session (source name)
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
@@ -99,15 +100,17 @@ class PlaylistPage(QWidget):
 
         # --- no connected service
         self.no_service_label = QLabel(
-            "No streaming service is connected yet. Connect Apple Music or Spotify to see your playlists.")
+            "Connect a streaming service to see your playlists.")
         self.no_service_label.setWordWrap(True)
         self.connect_btn = QPushButton("Connect Apple Music")
         self.connect_spotify_btn = QPushButton("Connect Spotify")
+        self.connect_soundcloud_btn = QPushButton("Connect SoundCloud")
         empty = QWidget()
         el = QVBoxLayout(empty)
         el.addWidget(self.no_service_label)
         el.addWidget(self.connect_btn)
         el.addWidget(self.connect_spotify_btn)
+        el.addWidget(self.connect_soundcloud_btn)
         el.addStretch(1)
 
         self.stack = QStackedWidget()
@@ -122,6 +125,7 @@ class PlaylistPage(QWidget):
         self.resume_btn.clicked.connect(self.resume_requested)
         self.connect_btn.clicked.connect(self.open_service_requested)
         self.connect_spotify_btn.clicked.connect(self.open_spotify_requested)
+        self.connect_soundcloud_btn.clicked.connect(self.open_soundcloud_requested)
         self.source_combo.currentIndexChanged.connect(self._source_changed)
         self.playlist_list.currentItemChanged.connect(lambda *_: self.preview_tracks())
         self.playlist_search.textChanged.connect(self._filter_playlists)
