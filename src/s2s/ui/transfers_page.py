@@ -76,10 +76,11 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
         if outcome == ImportOutcome.INVALID:
             why = getattr(result, "detail", "") or "the file failed verification"
             return TrackStatus(f"Downloaded, check needed: {_lower_first(why)[:70]}", "warn", ATTENTION,
-                               f"{why}\nNothing was copied into your folder.", recheck=True,
+                               f"{why}\nNothing was copied into your folder.", fixable=True, recheck=True,
                                help=f"The downloaded file did not pass the check ({_lower_first(why)[:120]}), so "
-                                    "it was not copied into your folder. It is still in the Soulseek downloads "
-                                    "folder. If you changed your matching rules, press Check again.")
+                                    "it was not copied into your folder (it is still in the Soulseek downloads "
+                                    "folder). Find another source to download a different copy, or press Check "
+                                    "again to re-check this one.")
         if auto_import:
             return TrackStatus("Copying…", "info", DOWNLOADING, raw_line)
         return TrackStatus("Downloaded, not copied yet", "info", DOWNLOADING,

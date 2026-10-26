@@ -329,3 +329,24 @@ def test_locate_custom_archive_name(tmp_path):
     archived.write_bytes(DATA)
     with pytest.raises(DownloadNotFoundError):
         locate_download(str(dl), "user", REMOTE, len(DATA), archive_name="Done")
+
+
+def test_probe_reads_only_the_fields_it_needs_and_survives_odd_bytes(tmp_path):
+    """A file's tags once broke the check ("ffprobe returned invalid JSON"): S2S asks for no tags and reads
+    ffprobe's bytes as UTF-8, tolerating raw control characters and undecodable bytes."""
+    from types import SimpleNamespace
+
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    calls = []
+    raw = (b'{"streams": [{"codec_type": "audio", "codec_name": "mp3", "bit_rate": "320000", '
+           b'"duration": "200.5", "title": "Veridis\tQuo \x81\x8d"}], "format": {"bit_rate": "320000"}}')
+
+    def run(args, **kw):
+        calls.append((args, kw))
+        return SimpleNamespace(returncode=0, stdout=raw, stderr=b"")
+
+    assert probe_audio(f, "ffprobe.exe", runner=run) == ("mp3", 320, 200.5)
+    args, kw = calls[0]
+    assert "-show_entries" in args and "-show_streams" not in args and "-show_format" not in args
+    assert "text" not in kw  # bytes, decoded as UTF-8 by S2S rather than with the Windows code page

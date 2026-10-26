@@ -547,3 +547,21 @@ def test_missing_historical_import_is_searched_again(env):
     results, _ = run(env, FakeSlskd({"song": [good_file()]}), [tracks()[0]])
     assert results[0].status == MatchStatus.PROPOSED
     assert not missing.exists()
+
+
+def test_a_file_that_failed_its_check_can_get_another_source(env):
+    """Downloaded but not passing the check: "Find another source" offers the other uploaders, not that file."""
+    run(env, FakeSlskd({"song": [good_file(user="u"), good_file(user="other")]}),
+        trs=[AppleTrack("i.1", "Song", "Artist")])
+    dest = str(env.root / "House")
+    ap = create_approval(env.store, env.iid, [SelectionItem("i.1", "u", REMOTE, 9_000_000, dest)],
+                         downloads_dir=env.settings.slskd_downloads_dir)
+    put_download(env)
+    succeed(env, ap)
+    out = workflow.import_completed(env.store, ap.id, env.settings, runner=fake_runner(bitrate=128000))
+    assert out[0].outcome == ImportOutcome.INVALID
+    plan = workflow.build_replacement_plan(env.store, env.iid, env.settings, include_failed=True)
+    assert [r.track.apple_id for r in plan.results] == ["i.1"]
+    res = plan.results[0]
+    assert res.best is not None and res.best.file.username == "other"
+    assert all(c.file.username != "u" for c in res.alternatives)
