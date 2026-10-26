@@ -44,7 +44,6 @@ _HEADER_TIPS = {
 
 STALE_TEXT = ("Your matching rules changed since this search, so these results may be out of date. "
               "Run the search again and review the new results before downloading.")
-LOCKED_TEXT = "These downloads were queued. Go to Downloads to follow them."
 EMPTY_TEXT = "Nothing to review yet. Run a search first."
 
 FILTERS = ("all", "check", "missing")
@@ -635,14 +634,15 @@ class ReviewPage(QWidget):
         banner_row.addWidget(self.banner, 1)
         banner_row.addWidget(self.banner_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # ---- summary chips and filters
-        self.chip_ready = theme.chip("0 ready", "ok")
-        self.chip_check = theme.chip("0 to check", "warn")
-        self.chip_missing = theme.chip("0 not found", "error")
-        self.chip_skipped = theme.chip("0 skipped", "muted")
-        self.chip_selected = theme.chip("0 selected", "info")
+        # ---- summary counts (plain coloured text) and filters (a segmented control)
+        self.chip_ready = theme.stat("0 ready", "ok")
+        self.chip_check = theme.stat("0 to check", "warn")
+        self.chip_missing = theme.stat("0 not found", "error")
+        self.chip_skipped = theme.stat("0 skipped", "muted")
+        self.chip_selected = theme.stat("0 selected", "info")
         self.counts = self.chip_selected  # compatibility name
         chips = QHBoxLayout()
+        chips.setSpacing(18)
         for c in (self.chip_ready, self.chip_check, self.chip_missing, self.chip_skipped):
             chips.addWidget(c)
         chips.addStretch(1)
@@ -652,6 +652,9 @@ class ReviewPage(QWidget):
         self._filter_group = QButtonGroup(self)
         self._filter_group.setExclusive(True)
         tools = QHBoxLayout()
+        tools.addWidget(theme.subtle(QLabel("Show:")))
+        segment = QHBoxLayout()
+        segment.setSpacing(0)
         for mode, text in (("all", "All"), ("check", "Needs a look"), ("missing", "Not found")):
             b = QPushButton(text)
             b.setCheckable(True)
@@ -659,7 +662,9 @@ class ReviewPage(QWidget):
             b.clicked.connect(lambda _=False, m=mode: self.set_filter(m))
             self._filter_group.addButton(b)
             self.filter_buttons[mode] = b
-            tools.addWidget(b)
+            segment.addWidget(b)
+        theme.segmented(list(self.filter_buttons.values()))
+        tools.addLayout(segment)
         self.filter_all, self.filter_check, self.filter_missing = (self.filter_buttons[m] for m in FILTERS)
         tools.addStretch(1)
         self.alternatives_btn = QPushButton("Next to check")
@@ -1172,7 +1177,7 @@ class ReviewPage(QWidget):
         if self._notice:
             text, kind = self._notice
         elif self._locked:
-            text, kind, action, btn = LOCKED_TEXT, "ok", "downloads", ""  # the page's own button leads on
+            text, kind, action, btn = "", "ok", "downloads", ""  # the page's own button says where to go
         elif self.rules_stale():
             text, kind, action, btn = STALE_TEXT, "warn", "rerun", "Search again"
         elif self.replacement:
@@ -1197,11 +1202,12 @@ class ReviewPage(QWidget):
         c = self.model.counts()
         n = c["checked"]
         zero = lambda v, kind: kind if v else "muted"  # noqa: E731
-        theme.set_chip(self.chip_ready, f"{c['ready']} ready", zero(c["ready"], "ok"))
-        theme.set_chip(self.chip_check, f"{c['flagged']} to check", zero(c["flagged"], "warn"))
-        theme.set_chip(self.chip_missing, f"{c['unresolved']} not found", zero(c["unresolved"], "error"))
-        theme.set_chip(self.chip_skipped, f"{c['skipped']} skipped", "muted")
-        theme.set_chip(self.chip_selected, f"{n} selected", zero(n, "info"))
+        theme.set_stat(self.chip_ready, f"{c['ready']} ready", zero(c["ready"], "ok"))
+        theme.set_stat(self.chip_check, f"{c['flagged']} to check", zero(c["flagged"], "warn"))
+        theme.set_stat(self.chip_missing, f"{c['unresolved']} not found", zero(c["unresolved"], "error"))
+        theme.set_stat(self.chip_skipped, f"{c['skipped']} skipped", "muted")
+        self.chip_skipped.setVisible(c["skipped"] > 0)
+        theme.set_stat(self.chip_selected, f"{n} selected", zero(n, "info"))
         self.confirm_btn.setText("Go to Downloads" if self._locked else f"Download {n} track{'s' if n != 1 else ''}…")
         stale = self.rules_stale()
         self.confirm_btn.setEnabled(self._locked or (n > 0 and not self._busy and not stale))
@@ -1330,5 +1336,5 @@ class ReviewPage(QWidget):
 
 # A download whose uploader has sent nothing for this long switches to another uploader of the same file (the
 # other uploaders are listed in the confirmation). Long enough for an ordinary queue to start moving.
-SWITCH_AFTER_S = 3 * 60
+SWITCH_AFTER_S = 5 * 60
 ROLE_STATE = Qt.ItemDataRole.UserRole + 2  # per-row state in the alternatives list: in use / option / rejected

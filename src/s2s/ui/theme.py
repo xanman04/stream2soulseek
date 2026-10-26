@@ -79,6 +79,30 @@ def set_chip(label: QLabel, text: str, kind: str) -> None:
     label.setStyleSheet(chip_style(kind))
 
 
+def stat_style(kind: str) -> str:
+    """A count shown as plain coloured text (not a chip): reads as information, not as something to click."""
+    r, g, b = _ACCENTS.get(kind, _ACCENTS["muted"])
+    return f"color: rgb({r},{g},{b}); font-weight: 600; background: transparent; border: none; padding: 0;"
+
+
+def stat(text: str, kind: str = "muted", parent: QWidget | None = None) -> QLabel:
+    lab = QLabel(text, parent)
+    lab.setStyleSheet(stat_style(kind))
+    return lab
+
+
+def set_stat(label: QLabel, text: str, kind: str) -> None:
+    label.setText(text)
+    label.setStyleSheet(stat_style(kind))
+
+
+def segmented(buttons: list[QPushButton]) -> None:
+    """Join checkable buttons into one segmented control, so they read as a set of options to click."""
+    for i, b in enumerate(buttons):
+        b.setProperty("segment", "first" if i == 0 else "last" if i == len(buttons) - 1 else "mid")
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+
+
 def subtle(label: QLabel) -> QLabel:
     """Secondary text: palette-aware dimming instead of a fixed grey that vanishes in dark mode."""
     label.setStyleSheet("color: palette(placeholder-text);")
@@ -173,6 +197,12 @@ QPushButton:disabled {{ color: {c['disabled']}; border-color: {c['border']}; bac
 QPushButton:flat {{ background: transparent; border-color: transparent; }}
 QPushButton:flat:hover {{ background: {c['hover']}; }}
 QPushButton:checked {{ background: {c['selection']}; color: {c['selected']}; border-color: {c['focus']}; }}
+QPushButton[segment] {{ padding: 6px 16px; }}
+QPushButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
+QPushButton[segment="mid"] {{ border-radius: 0; border-left: none; }}
+QPushButton[segment="last"] {{ border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }}
+QPushButton[segment]:checked {{ background: {c['primary']}; color: #ffffff; border-color: {c['primary']};
+                               font-weight: 600; }}
 QPushButton[primary="true"] {{ background: {c['primary']}; color: #ffffff; border-color: {c['primary']};
                                font-weight: 600; padding: 7px 16px; }}
 QPushButton[primary="true"]:hover {{ background: #507fa3; border-color: #507fa3; }}

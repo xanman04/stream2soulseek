@@ -182,7 +182,7 @@ def test_next_to_check_jumps_to_flagged_row(page):
 def test_locked_banner_and_downloads_signal(ctx):
     p = ReviewPage(ctx)
     p.set_results(results(), "D:\\lib", locked=True)
-    assert "Go to Downloads" in p.banner.text() and p.banner_btn.isHidden()  # no second button
+    assert p.banner.isHidden() and p.banner_btn.isHidden()  # no notice line and no second button
     got = []
     p.downloads_requested.connect(lambda: got.append(1))
     assert not p.select_ready_btn.isEnabled()

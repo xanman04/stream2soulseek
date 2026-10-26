@@ -165,7 +165,7 @@ use unofficial website APIs; S2S is not affiliated with the streaming services o
 
 ## Queued downloads
 
-Switching is automatic. When an uploader has sent nothing for 3 minutes, S2S tries another uploader of the
+Switching is automatic. When an uploader has sent nothing for 5 minutes, S2S tries another uploader of the
 same file, with at most three attempts active per track. It only switches to a copy of the very recording you
 approved: the same match (an exact match is never swapped for an extended mix), the same version, the same
 format and quality, and the same length within 3 seconds or the same byte size. These other uploaders are listed
