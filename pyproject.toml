@@ -13,6 +13,7 @@ dependencies = [
     "spotapi @ https://github.com/Aran404/SpotAPI/archive/cb862571574e1ddbf5f8975f58a4f61a0e3d2050.zip",
     "curl_cffi>=0.15,<0.17",
     "websockets>=12,<18",
+    "keyring>=24; sys_platform == 'darwin'",  # saved logins live in the macOS Keychain
 ]
 
 [project.optional-dependencies]

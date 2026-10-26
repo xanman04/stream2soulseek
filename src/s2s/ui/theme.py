@@ -6,6 +6,8 @@ both Windows light and dark mode (a solid pale-yellow row with the default white
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QColor, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
@@ -175,9 +177,10 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
         palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(colors["disabled"]))
     app.setPalette(palette)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
-    if "Segoe UI" in QFontDatabase.families():
-        font.setFamily("Segoe UI")
-    font.setPointSizeF(9.5)
+    if sys.platform == "win32":
+        if "Segoe UI" in QFontDatabase.families():
+            font.setFamily("Segoe UI")
+        font.setPointSizeF(9.5)
     app.setFont(font)
     # Replace only our previous stylesheet so repeated application and light/dark previews stay stable.
     previous = app.property("s2sStylesheet") or ""

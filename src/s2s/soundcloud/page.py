@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from ..secretstore import protection_text
 from .. import config
 from ..sources.soundcloud import SoundCloudSource
 from ..ui.workers import run_async
@@ -39,7 +40,7 @@ class SoundCloudServicePage(QWidget):
         self.sign_out_btn = QPushButton("Sign out")
         self.connection_value = QLabel()
         self.account_name = QLabel("—")
-        self.session_value = QLabel("Session saved on this PC, protected by Windows")
+        self.session_value = QLabel(f"Session saved on this computer, {protection_text()}")
         self.session_value.setWordWrap(True)
         self.access_value = QLabel("Read playlist and track details")
         self.enable_check = QCheckBox("Enable SoundCloud web sign-in")
@@ -100,7 +101,7 @@ class SoundCloudServicePage(QWidget):
         self.connection_value.setText("Connected" if connected else "Not signed in")
         self.account_name.setText((load_session(self.ctx.secrets) or {}).get("account", {}).get("display_name") or "—")
         self.sign_out_btn.setEnabled(bool(load_session(self.ctx.secrets)))
-        self.session_value.setText("Session saved on this PC, protected by Windows" if load_session(self.ctx.secrets)
+        self.session_value.setText(f"Session saved on this computer, {protection_text()}" if load_session(self.ctx.secrets)
                                    else "No session saved")
         self.reconnect_btn.setText("Reconnect SoundCloud…" if connected else "Sign in to SoundCloud…")
         self.reconnect_btn.setEnabled(self.enable_check.isChecked())

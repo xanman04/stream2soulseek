@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -17,14 +18,24 @@ from .models import MatchPolicy, Settings, default_ffprobe_path
 MAX_RECENT = 10
 
 
+IS_WINDOWS = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
+
 def app_dir_path() -> Path:
-    """The application data directory path, without creating it."""
+    """The application data directory path, without creating it.
+
+    Windows: %LOCALAPPDATA%\\S2S. macOS: ~/Library/Application Support/S2S. Elsewhere: $XDG_DATA_HOME/S2S
+    (~/.local/share/S2S). S2S_HOME overrides all of them (tests).
+    """
     override = os.environ.get("S2S_HOME")
     if override:
-        base = Path(override)
-    else:
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "S2S"
-    return base
+        return Path(override)
+    if IS_WINDOWS:
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "S2S"
+    if IS_MAC:
+        return Path.home() / "Library" / "Application Support" / "S2S"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "S2S"
 
 
 LEGACY_DIR_NAME = "DJImport"  # the app's data folder before it was renamed to S2S

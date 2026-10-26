@@ -23,14 +23,16 @@ _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def find_ffmpeg(ffprobe_path: str | None = None) -> str | None:
-    """ffmpeg next to the configured ffprobe, else on PATH."""
+    """ffmpeg next to the configured ffprobe, else on PATH (or in Homebrew's folders on macOS)."""
+    from .models import find_tool
+
     if ffprobe_path:
         p = Path(ffprobe_path)
         for name in ("ffmpeg.exe", "ffmpeg"):
             cand = p.with_name(name)
             if cand.is_file():
                 return str(cand)
-    return shutil.which("ffmpeg")
+    return find_tool("ffmpeg")
 
 
 @dataclass(frozen=True)

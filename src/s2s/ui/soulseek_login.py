@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
-from ..secretstore import SecretStore
+from ..secretstore import SecretStore, protection_text
 from ..slskd.service import (
     SlskdService, SoulseekCredentials, SoulseekLoginError, load_credentials, save_credentials,
     validate_credentials,
@@ -35,7 +35,7 @@ class SoulseekLoginDialog(QDialog):
         self._secrets = secrets
 
         intro = QLabel(
-            "Enter your Soulseek account. It is stored on this PC only (protected by Windows) and used "
+            f"Enter your Soulseek account. It is stored on this computer only ({protection_text()}) and used "
             "every time the app starts, so you only log in once.\n\n"
             "Close SoulseekQt or any other Soulseek client that uses the same account first. "
             "Note: Soulseek creates a new account if the username does not exist yet.")
