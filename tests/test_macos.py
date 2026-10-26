@@ -2,27 +2,45 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 from s2s import config
-from s2s.secretstore import KEYCHAIN_SERVICE, SecretStore
+from s2s.secretstore import KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, SecretStore
+from s2s.slskd.service import SoulseekCredentials, clear_credentials, load_credentials, save_credentials
 
 
 class FakeKeychain:
-    def __init__(self) -> None:
+    """Counts calls: on a real Mac every one of them can be a password prompt."""
+
+    def __init__(self, refuse: bool = False) -> None:
         self.items: dict[tuple[str, str], str] = {}
+        self.calls: list[str] = []
+        self.refuse = refuse
+
+    def _call(self, what):
+        self.calls.append(what)
+        if self.refuse:
+            raise RuntimeError("User canceled the operation")
 
     def get_password(self, service, name):
+        self._call("get")
         return self.items.get((service, name))
 
     def set_password(self, service, name, value):
+        self._call("set")
         self.items[(service, name)] = value
 
     def delete_password(self, service, name):
+        self._call("delete")
         del self.items[(service, name)]
+
+    def stored(self) -> dict:
+        raw = self.items.get((KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT))
+        return json.loads(raw) if raw else {}
 
 
 def test_mac_app_data_folder_is_application_support(monkeypatch):
@@ -36,12 +54,14 @@ def test_secrets_go_to_the_keychain_on_mac(tmp_path):
     chain = FakeKeychain()
     store = SecretStore(tmp_path / "sec", keychain=chain)
     store.set("slskd_api_key", "synthetic-key")
-    assert chain.items == {(KEYCHAIN_SERVICE, "slskd_api_key"): "synthetic-key"}
+    assert list(chain.items) == [(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)]  # one item holds every secret
+    assert chain.stored() == {"slskd_api_key": "synthetic-key"}
     assert store.get("slskd_api_key") == "synthetic-key"
     assert not list((tmp_path / "sec").iterdir())  # nothing written to disk
     store.delete("slskd_api_key")
     store.delete("slskd_api_key")  # deleting twice is fine
     assert store.get("slskd_api_key") is None
+    assert chain.items == {}  # the item is removed once nothing is left in it
     with pytest.raises(ValueError):
         store.get("../escape")  # names are validated for every backend
 
@@ -52,7 +72,54 @@ def test_mac_uses_the_keyring_module_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     store = SecretStore(tmp_path / "sec")
     store.set("slskd_api_key", "v")
-    assert fake.items[(KEYCHAIN_SERVICE, "slskd_api_key")] == "v"
+    assert fake.stored() == {"slskd_api_key": "v"}
+
+
+def test_keychain_is_read_once_per_launch(tmp_path):
+    chain = FakeKeychain()
+    SecretStore(tmp_path / "a", keychain=chain).update({"slskd_api_key": "k", "spotify_session": "s"})
+    chain.calls.clear()
+    store = SecretStore(tmp_path / "b", keychain=chain)  # a new launch
+    for _ in range(50):  # pages and the status bar read secrets on every refresh
+        assert store.get("slskd_api_key") == "k"
+        assert store.get("apple_media_user_token") is None
+    assert chain.calls == ["get"]
+
+
+def test_soulseek_sign_in_is_one_keychain_write(tmp_path):
+    chain = FakeKeychain()
+    store = SecretStore(tmp_path / "sec", keychain=chain)
+    save_credentials(store, SoulseekCredentials("someone", "synthetic-password"))
+    assert chain.calls == ["get", "set"]
+    assert load_credentials(store) == SoulseekCredentials("someone", "synthetic-password")
+    store.set("soulseek_username", "someone")  # unchanged value: no write
+    assert chain.calls == ["get", "set"]
+    clear_credentials(store)
+    assert chain.calls == ["get", "set", "delete"]
+    assert load_credentials(store) is None
+
+
+def test_refused_keychain_is_never_asked_again_this_launch(tmp_path):
+    chain = FakeKeychain(refuse=True)
+    store = SecretStore(tmp_path / "sec", keychain=chain)
+    assert store.get("slskd_api_key") is None  # behaves as signed out
+    save_credentials(store, SoulseekCredentials("someone", "synthetic-password"))  # does not raise
+    assert load_credentials(store).username == "someone"  # works from memory until S2S quits
+    for _ in range(20):
+        store.get("slskd_api_key")
+    store.delete("soulseek_password")
+    assert chain.calls == ["get"]  # one prompt, then never again
+
+
+def test_refused_write_is_not_retried(tmp_path):
+    chain = FakeKeychain()
+    store = SecretStore(tmp_path / "sec", keychain=chain)
+    assert store.get("slskd_api_key") is None
+    chain.refuse = True
+    store.set("slskd_api_key", "k")
+    store.set("spotify_session", "s")
+    assert chain.calls == ["get", "set"]
+    assert store.get("slskd_api_key") == "k"
 
 
 def test_account_pages_name_the_right_protection(monkeypatch):

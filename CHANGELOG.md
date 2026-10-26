@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- macOS: keep all secrets in one Keychain item, read once per launch and held in memory. Signing in to
+  Soulseek no longer asks for the Keychain password over and over, and a refused request is not asked again
+  until S2S restarts. Secrets saved by 1.0.5 and earlier are not carried over, so sign in once more.
+
 ## 1.0.5 — 2026-10-26
 
 - Verify update signatures with a built-in Ed25519 (RFC 8032) verifier instead of the cryptography library,

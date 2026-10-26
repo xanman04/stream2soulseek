@@ -114,8 +114,7 @@ class ServicePage(QWidget):
 
     def _tokens_captured(self, dev: str, usr: str) -> None:
         try:
-            self.ctx.secrets.set(APPLE_DEVELOPER_TOKEN, dev)
-            self.ctx.secrets.set(APPLE_MEDIA_USER_TOKEN, usr)
+            self.ctx.secrets.update({APPLE_DEVELOPER_TOKEN: dev, APPLE_MEDIA_USER_TOKEN: usr})
         except Exception as exc:  # noqa: BLE001
             self.status.setText(f"Could not store the session securely: {self.ctx.describe(exc)}")
             return

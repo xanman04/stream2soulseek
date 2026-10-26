@@ -7,8 +7,11 @@ On non-Windows platforms a SecretStore can only be built with an explicit codec 
 from __future__ import annotations
 
 import ctypes
+import json
+import logging
 import re
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -47,7 +50,8 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
         kernel32.LocalFree(blob_out.pbData)
 
 
-KEYCHAIN_SERVICE = "S2S"  # macOS Keychain items are "S2S" / <secret name>
+KEYCHAIN_SERVICE = "S2S"
+KEYCHAIN_ACCOUNT = "secrets"  # one Keychain item ("S2S" / "secrets") holds all of S2S's secrets as JSON
 
 
 def protection_text() -> str:
@@ -59,6 +63,12 @@ def protection_text() -> str:
 
 class SecretStore:
     """Per-user secrets. Windows: DPAPI-encrypted files. macOS: the login Keychain (via `keyring`).
+
+    On macOS all secrets live in ONE Keychain item, read once per launch and then kept in memory. Every Keychain
+    read can show a password prompt (and an ad hoc signed app is a "new app" to macOS after every update), so
+    one item read once means at most one prompt per launch, and none after "Always Allow" until the next update.
+    If a read or write is refused, S2S does not ask again during that launch: values set from then on are kept in
+    memory only, so sign-in still works until S2S quits.
 
     Tests pass `protect`/`unprotect` (files) or `keychain` (an object with get/set/delete_password).
     """
@@ -84,6 +94,9 @@ class SecretStore:
             else:
                 raise RuntimeError("Secret storage is only available on Windows and macOS")
         self._keychain = keychain
+        self._cache: dict[str, str] | None = None  # the Keychain item's contents, once read
+        self._refused = False  # the Keychain was refused this launch: never ask again until restart
+        self._lock = threading.Lock()
         self._dir = directory or config.secrets_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._protect = protect
@@ -94,10 +107,64 @@ class SecretStore:
             raise ValueError("invalid secret name")
         return self._dir / f"{name}.dpapi"
 
+    # ---- macOS Keychain: one item, read once
+
+    def _keychain_items(self) -> dict[str, str]:
+        """All secrets (read from the Keychain the first time only). Caller holds self._lock."""
+        if self._cache is not None:
+            return self._cache
+        if self._refused:
+            return {}
+        try:
+            raw = self._keychain.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        except Exception as exc:  # noqa: BLE001 - refused or locked: behave as signed out, do not ask again
+            self._give_up("read", exc)
+            self._cache = {}
+            return self._cache
+        try:
+            data = json.loads(raw) if raw else {}
+        except ValueError:
+            data = {}
+        self._cache = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)} \
+            if isinstance(data, dict) else {}
+        return self._cache
+
+    def _keychain_write(self, items: dict[str, str]) -> None:
+        """Save all secrets in the one Keychain item (one write). Caller holds self._lock."""
+        self._cache = dict(items)
+        if self._refused:
+            return
+        try:
+            if items:
+                self._keychain.set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, json.dumps(items))
+            else:
+                self._keychain.delete_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        except Exception as exc:  # noqa: BLE001 - keep working from memory, never prompt again this launch
+            self._give_up("write", exc)
+
+    def _give_up(self, action: str, exc: BaseException) -> None:
+        self._refused = True
+        logging.getLogger("s2s").warning("Keychain %s failed (%s); S2S will not ask again until it restarts",
+                                         action, type(exc).__name__)
+
+    def _update(self, changes: dict[str, str | None]) -> None:
+        """Set (str) or delete (None) several secrets with at most one Keychain write. Caller holds self._lock."""
+        items = dict(self._keychain_items())
+        for name, value in changes.items():
+            if value is None:
+                items.pop(name, None)
+            else:
+                items[name] = value
+        if items != self._cache:
+            self._keychain_write(items)
+
+    # ---- public API
+
     def get(self, name: str) -> str | None:
         path = self._path(name)  # validates the name for both backends
         if self._keychain is not None:
-            return self._keychain.get_password(KEYCHAIN_SERVICE, name)
+            with self._lock:
+                return self._keychain_items().get(name)
         if not path.exists():
             return None
         return self._unprotect(path.read_bytes()).decode("utf-8")
@@ -105,7 +172,8 @@ class SecretStore:
     def set(self, name: str, value: str) -> None:
         path = self._path(name)
         if self._keychain is not None:
-            self._keychain.set_password(KEYCHAIN_SERVICE, name, value)
+            with self._lock:
+                self._update({name: value})
             return
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(self._protect(value.encode("utf-8")))
@@ -114,14 +182,27 @@ class SecretStore:
     def delete(self, name: str) -> None:
         path = self._path(name)
         if self._keychain is not None:
-            if self._keychain.get_password(KEYCHAIN_SERVICE, name) is not None:
-                self._keychain.delete_password(KEYCHAIN_SERVICE, name)
+            with self._lock:
+                self._update({name: None})
             return
         path.unlink(missing_ok=True)
 
+    def update(self, changes: dict[str, str | None]) -> None:
+        """Set (str) or delete (None) several secrets together: one Keychain write on macOS, not one each."""
+        for name in changes:
+            self._path(name)
+        if self._keychain is not None:
+            with self._lock:
+                self._update(changes)
+            return
+        for name, value in changes.items():
+            if value is None:
+                self.delete(name)
+            else:
+                self.set(name, value)
+
     def clear_apple_session(self) -> None:
-        self.delete(APPLE_DEVELOPER_TOKEN)
-        self.delete(APPLE_MEDIA_USER_TOKEN)
+        self.update({APPLE_DEVELOPER_TOKEN: None, APPLE_MEDIA_USER_TOKEN: None})
 
     def __repr__(self) -> str:  # never reveal contents
         return f"SecretStore({self._dir})"
