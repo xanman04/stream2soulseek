@@ -74,6 +74,11 @@ def _left_text(seconds: float) -> str:
     return f"up to {max(1, math.ceil(seconds))} s"
 
 
+def _wait_text(seconds: float) -> str:
+    s = int(math.ceil(seconds))
+    return f"{s} s" if s < 90 else f"{s // 60} min {s % 60:02d} s"
+
+
 def _eta_text(seconds: float) -> str:
     if seconds < 8:
         return "a few seconds left"
@@ -240,6 +245,7 @@ class SearchPage(QWidget):
         row.addWidget(self.start_btn)
         lay = QVBoxLayout(self)
         lay.addLayout(row)
+        lay.addLayout(rules_row)  # next to Start search, so the rules are seen before searching
         lay.addWidget(self.stale_label)
         lay.addWidget(self.wait_banner)
         lay.addWidget(self.searching_label)
@@ -250,7 +256,6 @@ class SearchPage(QWidget):
         lay.addWidget(self.summary_label)
         lay.addWidget(self.retry_btn, 0, Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(self.table, 1)
-        lay.addLayout(rules_row)
         self.start_btn.clicked.connect(self.start)
         self.cancel_btn.clicked.connect(self.cancel)
         self.retry_btn.clicked.connect(lambda: self.start(retry=True))
@@ -444,6 +449,9 @@ class SearchPage(QWidget):
         text = f"{used} searches run{reused} · about {self._expected_searches()} more expected"
         if self._pace_seconds() > 0:  # more searches needed than Soulseek allows at once: say why it slows down
             text += f" · paced to about {self._per_minute():.0f} searches a minute to stay under Soulseek's search limit"
+        wait = lim.seconds_until_next()
+        if wait >= 2 and self._done < self._total:  # never look frozen: say when the next search starts
+            text += f" · next search in {_wait_text(wait)}"
         return text
 
     def _tick(self) -> None:
