@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from .. import config, workflow
 from .. import layouts as lay_mod
 from ..matching.formats import describe_policy
 from ..models import MatchResult, MatchStatus, Tier
+from ..slskd import search as search_mod
 from ..slskd.client import SlskdAuthError, SlskdError
 from .context import AppContext
 from .settings_dialog import SettingsDialog
@@ -24,6 +26,9 @@ from .util import item, make_table
 from .workers import run_async
 
 COL_NUM, COL_TRACK, COL_RESULT, COL_SOURCES = range(4)
+EXPECTED_SEARCHES_PER_TRACK = 2.0  # until enough tracks finished to measure it (the ladder runs 1-3 on most)
+DISCONNECTED_WAIT = ("Soulseek disconnected — probably a temporary search limit. Waiting to reconnect "
+                     "({left})… Searches resume automatically.")
 LOCKED_INFO = ("Downloads are already queued for this selection. To search again, use “Start another playlist” "
                "on the Downloads page once they are done.")
 
@@ -50,6 +55,8 @@ def classify(res: MatchResult) -> tuple[str, str, str]:
         return "ok", f"Found · {how}", detail
     note = res.note or ""
     if "search failed" in note.lower():
+        if "soulseek disconnected" in note.lower():
+            return "error", "Search failed: Soulseek disconnected", note
         return "error", "Search failed", note
     return "error", "Not found", note or "No file passed your matching rules."
 
@@ -59,6 +66,11 @@ def sources_text(res: MatchResult) -> str:
         return ""
     n = 1 + workflow.backup_source_count(res)
     return f"{n} uploader{'s' if n != 1 else ''}"
+
+
+def _left_text(seconds: float) -> str:
+    minutes = math.ceil(seconds / 60.0)
+    return "less than 1 min left" if seconds < 60 else f"{minutes} min left"
 
 
 def _eta_text(seconds: float) -> str:
@@ -177,6 +189,17 @@ class SearchPage(QWidget):
         self.searching_label.setVisible(False)
         self.summary_label = QLabel("")  # failures and cancellation notes
         set_banner(self.summary_label, "", "error")
+        self.wait_banner = QLabel("")  # Soulseek is down; searching is paused
+        self.wait_banner.setWordWrap(True)
+        set_banner(self.wait_banner, "", "warn")
+        self.pace_label = subtle(QLabel(""))
+        self.pace_label.setVisible(False)
+        self.retry_btn = QPushButton("Retry failed searches")
+        self.retry_btn.setVisible(False)
+        self.retry_btn.setToolTip("Search again only the tracks whose search could not run. Nothing is downloaded.")
+        self._retry_old: dict[str, MatchResult] | None = None
+        self._limiter_base = 0
+        self._cache = search_mod.SearchCache()  # responses of this search run; "Retry" reuses it
         self.chip_found = chip("", "ok")
         self.chip_check = chip("", "warn")
         self.chip_missing = chip("", "error")
@@ -216,15 +239,19 @@ class SearchPage(QWidget):
         lay = QVBoxLayout(self)
         lay.addLayout(row)
         lay.addWidget(self.stale_label)
+        lay.addWidget(self.wait_banner)
         lay.addWidget(self.searching_label)
+        lay.addWidget(self.pace_label)
         lay.addWidget(self.bar)
         lay.addWidget(self.track_bar)
         lay.addLayout(chips_row)
         lay.addWidget(self.summary_label)
+        lay.addWidget(self.retry_btn, 0, Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(self.table, 1)
         lay.addLayout(rules_row)
         self.start_btn.clicked.connect(self.start)
         self.cancel_btn.clicked.connect(self.cancel)
+        self.retry_btn.clicked.connect(lambda: self.start(retry=True))
         self.rules_btn.clicked.connect(self.change_rules)
         self.layout_combo.activated.connect(self._layout_chosen)
         self.refresh_rules()
@@ -262,6 +289,21 @@ class SearchPage(QWidget):
         stale = bool(self.ctx.results) and fp is not None and fp != pol.fingerprint()
         set_banner(self.stale_label, "Your matching rules changed since this search; search again to apply them."
                    if stale else "", "warn")
+        self._update_retry_button()
+
+    def _retry_candidates(self) -> list:
+        """Tracks of the current results whose search could not run (empty while the rules are stale)."""
+        ctx = self.ctx
+        if not ctx.results or ctx.approval_id is not None or not ctx.import_id:
+            return []
+        if ctx.results_policy is not None and ctx.results_policy != ctx.settings.match_policy.fingerprint():
+            return []
+        return workflow.failed_search_tracks(ctx.results)
+
+    def _update_retry_button(self) -> None:
+        n = len(self._retry_candidates())
+        self.retry_btn.setVisible(n > 0 and not self._running)
+        self.retry_btn.setText(f"Retry failed searches ({n})" if n else "Retry failed searches")
 
     def change_rules(self) -> None:
         if self._running:
@@ -348,7 +390,7 @@ class SearchPage(QWidget):
                 out["warn"] += 1
             elif kind == "muted":
                 out["skipped"] += 1
-            elif text == "Search failed":
+            elif text.startswith("Search failed"):
                 out["failed"] += 1
             else:
                 out["missing"] += 1
@@ -374,12 +416,45 @@ class SearchPage(QWidget):
             text += f" · {n['missing'] + n['failed']} not found"
         if self._done >= 2 and self._done < self._total and self._started_at:
             elapsed = time.monotonic() - self._started_at
-            text += " · " + _eta_text(elapsed / self._done * (self._total - self._done))
+            text += " · " + _eta_text(max(elapsed / self._done * (self._total - self._done), self._pace_seconds()))
         return text
+
+    def _expected_searches(self) -> int:
+        """Searches still expected: measured per-track average once known, else a conservative guess."""
+        remaining = max(0, self._total - self._done)
+        used = search_mod.LIMITER.total_started - self._limiter_base
+        avg = used / self._done if self._done >= 3 else EXPECTED_SEARCHES_PER_TRACK
+        return int(math.ceil(remaining * max(avg, 1.0)))
+
+    def _per_minute(self) -> float:
+        s = self.ctx.settings
+        return max(1, int(s.search_rate_limit)) * 60.0 / max(1, int(s.search_rate_window_s))
+
+    def _pace_seconds(self) -> float:
+        """Minimum time the rate limit forces for the searches still expected (a free burst is not counted)."""
+        need = max(0, self._expected_searches() - search_mod.LIMITER.available())
+        return need * 60.0 / self._per_minute()
+
+    def _pace_text(self) -> str:
+        lim = search_mod.LIMITER
+        s = self.ctx.settings
+        used = lim.total_started - self._limiter_base
+        reused = f" ({self._cache.hits} answered from earlier results)" if self._cache.hits else ""
+        return (f"{used} searches run{reused} · {lim.used()} of {int(s.search_rate_limit)} allowed in the "
+                f"current {int(s.search_rate_window_s)} s window · "
+                f"about {self._per_minute():.0f} searches per minute to avoid Soulseek's search limit · "
+                f"about {self._expected_searches()} more searches expected")
 
     def _tick(self) -> None:
         if self._running:
             self.searching_label.setText(self._progress_text())
+            self.pace_label.setText(self._pace_text())
+            self._show_wait()
+
+    def _show_wait(self) -> None:
+        down, left = search_mod.GATE.snapshot()
+        set_banner(self.wait_banner, DISCONNECTED_WAIT.format(left=_left_text(left)) if down and self._running
+                   else "", "warn")
 
     def _animate_search_label(self) -> None:  # compatibility alias
         self._tick()
@@ -392,6 +467,7 @@ class SearchPage(QWidget):
             self.bar.setValue(done)
             self._update_chips()
             self.searching_label.setText(self._progress_text())
+            self.pace_label.setText(self._pace_text())
 
     def show_results(self, results: list[MatchResult]) -> None:
         self.prepare()
@@ -399,6 +475,7 @@ class SearchPage(QWidget):
             self._set_row(res)
         self._update_chips()
         self._refresh_start_text()
+        self._update_retry_button()
 
     # ------------------------------------------------------------ run
 
@@ -419,7 +496,7 @@ class SearchPage(QWidget):
         self.start()
         return self._running
 
-    def start(self) -> None:
+    def start(self, retry: bool = False) -> None:
         if self._running:
             return
         ctx = self.ctx
@@ -429,17 +506,36 @@ class SearchPage(QWidget):
         if not ctx.tracks or not ctx.destination or ctx.playlist is None:
             self.info.setText("Nothing to search: choose a playlist and a tracklist folder first.")
             return
-        self.prepare()
+        self._retry_old = None
+        if retry:
+            # Re-run only the tracks whose search could not run; results merge into the same import.
+            tracks = self._retry_candidates()
+            if not tracks:
+                return
+            ids = {t.apple_id for t in tracks}
+            self._retry_old = {r.track.apple_id: r for r in ctx.results if r.track.apple_id in ids}
+            for aid in ids:
+                self._shown.pop(aid, None)
+                row = self._row_of.get(aid)
+                if row is not None:
+                    self.table.setItem(row, COL_RESULT, item("Retrying"))
+            set_banner(self.summary_label, "", "error")
+            self._update_chips()
+        else:
+            self.prepare()
+            tracks = list(ctx.tracks)
+            self._cache = search_mod.SearchCache()
+        cache = self._cache
         self._auto_key = self._selection_key()
         self._cancel = threading.Event()
         cancel = self._cancel
-        tracks = list(ctx.tracks)
         playlist, destination = ctx.playlist, ctx.destination
-        self._request_context = (playlist.id, destination, tuple(t.apple_id for t in tracks))
-        reuse = ctx.import_id if (ctx.import_id and ctx.approval_id is None) else None
+        self._request_context = (playlist.id, destination, tuple(t.apple_id for t in ctx.tracks))
+        reuse = ctx.import_id if (ctx.import_id and (retry or ctx.approval_id is None)) else None
         settings = ctx.settings
         policy_fp = settings.match_policy.fingerprint()
         self._done, self._total = 0, len(tracks)
+        self._limiter_base = search_mod.LIMITER.total_started
         self._started_at = time.monotonic()
         self._set_running(True)
         self.searching_label.setText("Connecting to Soulseek...")
@@ -461,7 +557,7 @@ class SearchPage(QWidget):
                     ctx.store.save_tracks(import_id, tracks)
                 results = workflow.search_and_match(
                     ctx.store, client, import_id, tracks, settings, cancel=cancel,
-                    progress=lambda d, t, r: self._progress.step.emit(d, t, r),
+                    progress=lambda d, t, r: self._progress.step.emit(d, t, r), cache=cache,
                 )
                 return import_id, results, cancel.is_set(), policy_fp
             finally:
@@ -477,22 +573,28 @@ class SearchPage(QWidget):
         self._running = running
         if running:
             self.searching_label.setVisible(True)
+            self.pace_label.setVisible(True)
             self.bar.setVisible(True)
             self._search_timer.start()
         else:
             self._search_timer.stop()
             self.searching_label.setVisible(False)
+            self.pace_label.setVisible(False)
+            set_banner(self.wait_banner, "", "warn")
             self.bar.setVisible(False)
         self.start_btn.setEnabled(not running and not self._downloads_queued())
         self.cancel_btn.setEnabled(running)
         self.layout_combo.setEnabled(not running)
         self.rules_btn.setEnabled(not running)
+        self._update_retry_button()
         self.state_changed.emit()
 
     def _finished(self, payload: tuple) -> None:
         requested = getattr(self, "_request_context", None)
         current = (self.ctx.playlist.id if self.ctx.playlist else None, self.ctx.destination,
                    tuple(t.apple_id for t in self.ctx.tracks))
+        retry = self._retry_old
+        self._retry_old = None
         if requested is not None and requested != current:
             self._set_running(False)
             self.info.setText("The playlist or tracklist folder changed during this search. Search again for the current selection.")
@@ -502,11 +604,20 @@ class SearchPage(QWidget):
         self.ctx.import_id = import_id
         self.ctx.approval_id = None
         self.ctx.fingerprint = None
-        self.ctx.results_policy = policy_fp
-        self.ctx.results = workflow.fill_unsearched(self.ctx.tracks, results)
+        if retry is None:
+            self.ctx.results_policy = policy_fp
+            self.ctx.results = workflow.fill_unsearched(self.ctx.tracks, results)
+        else:
+            new_ids = {r.track.apple_id for r in results}
+            kept = [r for r in self.ctx.results if r.track.apple_id not in new_ids]
+            self.ctx.results = workflow.fill_unsearched(self.ctx.tracks, kept + list(results))
         for res in results:
             self._set_row(res)
-        if cancelled:
+        if retry is not None:
+            for aid, old in retry.items():  # tracks a cancelled retry did not reach keep their failed state
+                if aid not in self._shown:
+                    self._set_row(old)
+        if cancelled and retry is None:
             self.track_bar.set_cancelled_pending()
             for tid, r in self._row_of.items():
                 if tid not in self._shown:
@@ -514,10 +625,13 @@ class SearchPage(QWidget):
         self._update_chips()
         n = self._counts()
         total = len(self.ctx.tracks)
-        if cancelled:
+        if cancelled and retry is None:
             set_banner(self.summary_label, f"Search cancelled. {len(self._shown)} of {total} tracks were searched.",
                        "warn")
             self.info.setText("Cancelled; the remaining tracks were not searched.")
+        elif cancelled:
+            set_banner(self.summary_label, "Retry cancelled; the other tracks keep their failed state.", "warn")
+            self.info.setText("Retry cancelled.")
         else:
             self.info.setText(f"Done: {n['ok']} of {total} tracks found" + (
                 f", {n['warn']} to check" if n["warn"] else "") + ". Next, review what was found.")
@@ -527,5 +641,11 @@ class SearchPage(QWidget):
 
     def _failed(self, exc: object) -> None:
         self._set_running(False)
+        if self._retry_old is not None:
+            for old in self._retry_old.values():
+                self._set_row(old)
+            self._retry_old = None
+            self._update_chips()
+            self._update_retry_button()
         set_banner(self.summary_label, f"Search failed: {self.ctx.describe(exc)}", "error")
         self.info.setText("The search could not run.")

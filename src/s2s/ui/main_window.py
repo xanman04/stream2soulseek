@@ -285,7 +285,8 @@ class MainWindow(QMainWindow):
     def _search_finished(self, cancelled: bool) -> None:
         self.review.load(self.ctx.results, self.ctx.destination or "")
         self.refresh_navigation()
-        if not cancelled:
+        # Stay on Search while some searches could not run: its "Retry failed searches" button is there.
+        if not cancelled and not workflow.failed_search_tracks(self.ctx.results):
             self.go_step(STEP_REVIEW)
 
     def start_replacement(self, *, include_failed: bool = False) -> None:
