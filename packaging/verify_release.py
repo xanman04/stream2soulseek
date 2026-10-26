@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import tomllib
 from pathlib import Path
@@ -51,6 +52,9 @@ def main() -> None:
     args = parser.parse_args()
     for archive in verify_assets(args.folder, args.tag):
         print(f"Verified {archive.name}")
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with open(output, "a", encoding="utf-8") as stream:
+            stream.write(f"version={project_version()}\n")
 
 
 if __name__ == "__main__":

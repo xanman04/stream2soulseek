@@ -13,7 +13,7 @@ through the bundled [slskd client](https://github.com/slskd/slskd).
 
 ## Download and install
 
-Download an archive from [GitHub Releases](https://github.com/xanman04/stream2soulseek/releases).
+Download an archive from [the latest release](https://github.com/xanman04/stream2soulseek/releases/latest).
 Use the files attached under **Assets**, rather than GitHub's automatically generated source-code archives.
 Python, slskd and FFmpeg are included; packaged releases need no separate installation of those tools.
 
@@ -155,6 +155,9 @@ The [release workflow](.github/workflows/release.yml) requires tests and builds 
 and Intel Mac, then checks the complete asset set and checksums before publishing a matching version tag.
 A manual workflow run builds artifacts without publishing a release. Live account and transfer testing
 remain separate from these automated checks.
+
+See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
+[release process](docs/RELEASING.md) for version history and maintenance details.
 
 ## License
 
