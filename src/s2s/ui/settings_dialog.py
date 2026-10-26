@@ -51,10 +51,6 @@ class SettingsDialog(QDialog):
         self.timeout.setRange(5, 300)
         self.timeout.setValue(int(s.search_timeout_s))
         self.timeout.setToolTip("Initial searches use up to 8 seconds per query. This budget is used for a deeper search when too few backup sources are found.")
-        self.concurrency = QSpinBox()
-        self.concurrency.setRange(1, 8)
-        self.concurrency.setValue(int(s.search_concurrency))
-        self.concurrency.setToolTip("Tracks searched at once (recommended: 3). Search-start requests are queued separately.")
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         has_key = False
@@ -78,7 +74,6 @@ class SettingsDialog(QDialog):
         form.addRow("", self.auto_import)
         form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
         form.addRow("Extended search timeout (s):", self.timeout)
-        form.addRow("Parallel searches:", self.concurrency)
         form.addRow(self.test_btn, self.test_result)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.accepted.connect(self.save)
@@ -205,7 +200,7 @@ class SettingsDialog(QDialog):
                 slskd_downloads_dir=self.downloads.text().strip(),
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
-                search_concurrency=self.concurrency.value(), match_policy=self.rules.policy(),
+                match_policy=self.rules.policy(),
                 rule_layouts=dict(self.rules.layouts), shared_folders=self.shared_folders())
             for f in new.shared_folders:  # the downloads folder may have changed since a folder was added
                 problem = self._share_problem(f)
