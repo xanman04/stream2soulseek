@@ -665,8 +665,7 @@ def test_waiting_banner_and_pacing_text(qapp, env, monkeypatch):
     page._tick()
     text = page.wait_banner.text()
     assert "Soulseek disconnected" in text and "Waiting up to 60 s" in text and "searching stops" in text
-    assert "about 8 searches a minute" in page.pace_label.text()
-    assert "about 132 more expected" in page.pace_label.text()
+    assert page.pace_label.text() == "0 searches run, 132 more expected"
     env.gate.begin_run()
     page._tick()
     assert page.wait_banner.isHidden()

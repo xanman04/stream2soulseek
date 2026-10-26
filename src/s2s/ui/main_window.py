@@ -111,7 +111,10 @@ class MainWindow(QMainWindow):
         self.sidebar.soulseek_login_requested.connect(lambda: self.soulseek.prompt())
         self.sidebar.settings_requested.connect(self.open_settings)
         for f in self.frames:
-            f.next_clicked.connect(lambda i=f.index: self.go_step(i + 1))
+            if f.index == STEP_FINISH:  # the last step's button starts the next playlist
+                f.next_clicked.connect(self.transfers.request_new_import)
+            else:
+                f.next_clicked.connect(lambda i=f.index: self.go_step(i + 1))
         self.service.signed_in.connect(self._signed_in)
         self.service.signed_out.connect(self._signed_out)
         self.service.state_changed.connect(self.refresh_navigation)
@@ -143,7 +146,7 @@ class MainWindow(QMainWindow):
         self.transfers.settings_requested.connect(self.open_settings)
         self.transfers.review_requested.connect(lambda: self.start_replacement(include_failed=True))
         self.transfers.queued_backups_requested.connect(self.review_queued_backups)
-        if hasattr(self.transfers, "check_requested"):  # Downloads' "Check & export" call to action
+        if hasattr(self.transfers, "check_requested"):  # Downloads' "Check files" call to action
             self.transfers.check_requested.connect(lambda: self.go_step(STEP_FINISH))
         self.finish.find_missing_requested.connect(lambda: self.start_replacement(include_failed=True))
         icon = Path(__file__).with_name("assets") / "s2s-icon.png"
@@ -165,7 +168,7 @@ class MainWindow(QMainWindow):
         has_dest = has_tracks and c.destination is not None
         searched = has_dest and bool(c.results) and not self.search._running
         confirmed = searched and c.approval_id is not None
-        # Step 5 counts as done once downloads were confirmed, so Step 6 (Check & export) is reachable while
+        # Step 5 counts as done once downloads were confirmed, so Step 6 (Check files) is reachable while
         # downloads are still running: the checklist shows what is already in the folder.
         return [has_tracks, has_dest, searched, confirmed, confirmed, False]
 

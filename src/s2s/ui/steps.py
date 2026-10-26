@@ -18,8 +18,8 @@ STEPS = [
      "Check every proposed file, change or untick any of them, then confirm: only the files you confirm are downloaded."),
     ("Downloads & import", "Downloads & import",
      "Watch the downloads, then verified files are copied into your chosen library folder."),
-    ("Check & export", "Check & export",
-     "Check that your tracklist folder matches the playlist, then export it as a playlist file or copy it in order."),
+    ("Check files", "Check your files",
+     "Check that your tracklist folder matches the playlist, and check a file's real quality with its spectrogram."),
 ]
 
 
@@ -38,10 +38,10 @@ class StepFrame(QWidget):
         self.hint_label = QLabel("")
         subtle(self.hint_label)
         self.next_btn = primary(QPushButton(""))
-        has_next = index + 1 < len(STEPS)
-        if has_next:
+        if index + 1 < len(STEPS):
             self.next_btn.setText(button_text(f"Next: {STEPS[index + 1][0]}"))
-        self.next_btn.setVisible(has_next)
+        else:  # the last step ends the playlist: its button starts the next one
+            self.next_btn.setText("Start another playlist")
 
         foot = QHBoxLayout()
         foot.setContentsMargins(0, 12, 0, 0)

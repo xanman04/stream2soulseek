@@ -105,7 +105,7 @@ def test_sidebar_sections_and_disabled_future_services(env):
     assert flags == [True, True, True]
     assert [t.split(". ", 1)[1] for t in sb.step_texts()] == [
         "Choose playlist", "Choose tracklist folder", "Find on Soulseek", "Review & confirm",
-        "Downloads & import", "Check & export"]
+        "Downloads & import", "Check files"]
     assert sb.soulseek_label.text().startswith("Soulseek:") and sb.soulseek_btn.text() == "Log in..."
 
 
@@ -168,8 +168,8 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert f[0].next_btn.text() == "Next: Choose tracklist folder"
     assert f[1].next_btn.text() == "Next: Find on Soulseek"
     assert f[3].next_btn.text() == "Next: Downloads && import"  # & escaped so Qt shows it
-    assert f[4].next_btn.isVisibleTo(f[4])  # Downloads leads on to Check & export
-    assert not f[5].next_btn.isVisibleTo(f[5])  # last step has no Next
+    assert f[4].next_btn.isVisibleTo(f[4])  # Downloads leads on to Check files
+    assert f[5].next_btn.text() == "Start another playlist"  # the last step starts the next playlist
     win.go_step(2)  # locked: ignored
     assert win.stack.currentIndex() == 1
 

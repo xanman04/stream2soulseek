@@ -437,14 +437,8 @@ class SearchPage(QWidget):
         return need * 60.0 / self._per_minute()
 
     def _pace_text(self) -> str:
-        lim = search_mod.LIMITER
-        used = lim.total_started - self._limiter_base
-        hits = self._cache.hits - self._hits_base
-        reused = f" ({hits} answered from earlier results)" if hits else ""
-        text = f"{used} searches run{reused} · about {self._expected_searches()} more expected"
-        if self._pace_seconds() > 0:  # more searches needed than Soulseek allows at once: say why it slows down
-            text += f" · paced to about {self._per_minute():.0f} searches a minute to stay under Soulseek's search limit"
-        return text
+        used = search_mod.LIMITER.total_started - self._limiter_base
+        return f"{used} searches run, {self._expected_searches()} more expected"
 
     def _tick(self) -> None:
         if self._running:

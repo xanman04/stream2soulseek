@@ -360,3 +360,19 @@ def test_a_second_s2s_is_refused():
     first = single_instance_lock(name)
     assert first is not None
     assert single_instance_lock(name) is None
+
+
+def test_hover_tooltips_are_switched_off():
+    from PySide6.QtCore import QEvent, QPoint
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from s2s.ui.theme import apply_app_style
+
+    apply_app_style(QApplication.instance())
+    b = QPushButton("x")
+    b.setToolTip("a long explanation")
+    ev = QHelpEvent(QEvent.Type.ToolTip, QPoint(1, 1), QPoint(1, 1))
+    from s2s.ui import theme
+    assert theme._TOOLTIP_FILTER.eventFilter(b, ev) is True  # swallowed: no tooltip is shown
+    b.deleteLater()

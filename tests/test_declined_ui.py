@@ -65,10 +65,10 @@ def test_declined_row_shows_problem_and_banner_with_button(declined):
     assert t.table.rowCount() == 1
     problem = t.table.item(0, COL_STATUS)
     assert problem.text().startswith("Declined:") and "share" in problem.text().lower()
-    assert "you must share files" in problem.toolTip() and "Completed, Rejected" in problem.toolTip()
-    assert not t.banner.isHidden()
-    assert t.banner.text().startswith("1 track needs another source.")
-    assert t.fix_btn.text() == "Find another source…"
+    assert not t.attention.isHidden() and t.problems.rowCount() == 1
+    t.problems.selectRow(0)
+    assert "share" in t.problem_help.text().lower() and "Completed, Rejected" not in t.problem_help.text()
+    assert t.fix_btn.text() == "Find another source for 1 track…"
     t.stop()
 
 

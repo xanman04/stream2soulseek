@@ -70,22 +70,18 @@ def imported(track="t", final=r"D:\Library\a.mp3"):
     return SimpleNamespace(apple_id=track, outcome=ImportOutcome.COPIED, final_path=final, detail="")
 
 
-def test_all_in_folder_shows_success_banner_and_primary_check_button(env):  # noqa: F811
+def test_all_in_folder_shows_success_banner_and_no_problems_panel(env):  # noqa: F811
     win, *_ = env
     page = win.transfers
-    emitted = []
-    page.check_requested.connect(lambda: emitted.append("check"))
     page._names = {"a": "A - X", "b": "B - Y"}
     recs = [(0, rec(TransferState.SUCCEEDED, track="a", filename=r"p\a.flac")),
             (0, rec(TransferState.SUCCEEDED, track="b"))]
     page._refreshed(payload(recs, [imported("a"), imported("b")], [ArchiveResult("peer", "s", "d")]))
     assert page.progress.maximum() == 2 and page.progress.value() == 2
     assert page.chip_folder.text() == "2 in folder" and page.chip_waiting.isHidden()
-    assert "All 2 selected tracks are in your folder" in page.banner.text()
-    assert not page.check_btn.isHidden() and page.check_btn.property("primary") is True
-    assert page.fix_btn.isHidden() and not page.new_import_btn.isHidden()
-    page.check_btn.click()
-    assert emitted == ["check"]
+    assert page.banner.text() == "All 2 tracks are in your folder. Next, check your files."
+    assert page.attention.isHidden() and page.fix_btn.isHidden()
+    assert not hasattr(page, "new_import_btn") and not hasattr(page, "spectrogram_btn")  # both live in Step 6
     assert page.table.rowCount() == 2 and page.table.item(0, COL_STATUS).text() == "In folder ✓"
     assert page.table.item(0, COL_QUALITY).text() == "FLAC · 8.0 MiB"
     page.stop()
@@ -101,8 +97,7 @@ def test_still_downloading_hides_check_and_counts_groups(env):  # noqa: F811
     assert page.chip_folder.text() == "1 in folder"
     assert page.chip_downloading.text() == "1 downloading"
     assert page.chip_waiting.text() == "1 waiting on uploader"
-    assert page.chip_attention.isHidden() and page.banner.isHidden()
-    assert page.check_btn.isHidden() and not page.new_import_btn.isHidden()  # always available
+    assert page.chip_attention.isHidden() and page.banner.isHidden() and page.attention.isHidden()
     assert page._active == 2
     assert not page.queued_backups_btn.isHidden()  # a queued track with no progress
     page.stop()
@@ -117,13 +112,14 @@ def test_one_fix_button_routes_declined_and_failed(env):  # noqa: F811
     page.review_requested.connect(lambda: emitted.append("failed"))
     declined = (0, rec(TransferState.FAILED, "Completed, Rejected", "you must share files", track="a"))
     page._refreshed(payload([declined, (0, rec(TransferState.SUCCEEDED, track="b"))], [imported("b")]))
-    assert page.banner.text().startswith("1 track needs another source.")
-    assert page.fix_btn.text() == "Find another source…" and not page.fix_btn.isHidden()
-    assert not page.check_btn.isHidden() and page.check_btn.property("primary") is False
+    assert not page.attention.isHidden() and page.attention_title.text() == "Needs attention (1)"
+    assert page.problems.rowCount() == 1 and page.problems.item(0, 1).text() == "A"
+    assert page.fix_btn.text() == "Find another source for 1 track…" and not page.fix_btn.isHidden()
+    assert page.table.rowCount() == 2  # the queue still lists every track
     page.fix_btn.click()
     broken = (0, rec(TransferState.FAILED, "Completed, Errored", "boom", track="b"))
     page._refreshed(payload([declined, broken]))
-    assert page.banner.text().startswith("2 tracks need another source.")
+    assert page.attention_title.text() == "Needs attention (2)"
     page.fix_btn.click()
     assert emitted == ["declined", "failed"]
     page.stop()
@@ -138,7 +134,6 @@ def test_replacement_attempt_is_one_row_with_a_note(env):  # noqa: F811
     page._refreshed(payload([old, new], relevant={"a": "r"}))
     assert page.table.rowCount() == 1
     assert page.table.item(0, COL_STATUS).text() == "Waiting on uploader"
-    assert "Replacement" in page.table.item(0, COL_STATUS).toolTip()
     assert page.table.item(0, COL_SOURCE).text() == "other (replacement)"
     assert page.fix_btn.isHidden()
     page.stop()
@@ -150,14 +145,17 @@ def test_refresh_error_and_import_problems_are_a_single_banner(env):  # noqa: F8
     page._names = {"a": "A"}
     recs = [(0, rec(TransferState.SUCCEEDED, track="a"))]
     page._refreshed(payload(recs, err="offline"))
-    assert "Can't reach Soulseek" in page.banner.text() and page.check_btn.isHidden()
-    assert not page.new_import_btn.isHidden()
+    assert "Can't reach Soulseek" in page.banner.text()
     page.ctx.approval_id = "ap"
     page._refresh_failed(RuntimeError("synthetic poll failure"))
-    assert "Can't read the download status" in page.banner.text() and not page.new_import_btn.isHidden()
+    assert "Can't reach Soulseek" in page.banner.text() and "synthetic" not in page.banner.text()
     conflict = SimpleNamespace(apple_id="a", outcome=ImportOutcome.CONFLICT, final_path=None, detail="exists")
     page._refreshed(payload(recs, [conflict]))
-    assert "needs a check" in page.banner.text() and page.fix_btn.isHidden()
+    assert page.banner.isHidden() and page.fix_btn.isHidden()  # a single-track problem goes to the panel
+    assert page.problems.rowCount() == 1
+    page.problems.selectRow(0)
+    assert not page.recheck_btn.isHidden()
+    assert "Check again" in page.problem_help.text() and "{" not in page.problem_help.text()
     page.stop()
 
 
@@ -208,15 +206,44 @@ def test_no_waiting_duration_is_invented():
 def test_start_another_and_history_signals_emit_without_workflow_changes(env):  # noqa: F811
     win, *_ = env
     page = win.transfers
-    page.new_import_btn.setVisible(True)
-    page.new_import_btn.setEnabled(True)
     page.history_btn.setEnabled(True)
     out = []
     page.new_import_requested.disconnect()
     page.new_import_requested.connect(lambda: out.append("new"))
     page.history_requested.disconnect()
     page.history_requested.connect(lambda: out.append("history"))
-    page.new_import_btn.click()
+    win.frames[-1].next_btn.click()  # Step 6's "Start another playlist"
     page.history_btn.click()
     assert out == ["new", "history"]
+    page.stop()
+
+
+def test_problems_panel_explains_in_plain_words_and_never_shows_raw_errors(env):  # noqa: F811
+    win, *_ = env
+    page = win.transfers
+    page._names = {"a": "Song — Artist"}
+    raw = '{"error": "System.Exception: transfer rejected", "code": 500}'
+    page._refreshed(payload([(0, rec(TransferState.FAILED, "Completed, Errored", raw, track="a"))]))
+    page.problems.selectRow(0)
+    assert page.problems.item(0, 2).text() == "Failed"
+    text = page.problem_help.text()
+    assert text.startswith("Song — Artist:") and "{" not in text and "System.Exception" not in text
+    assert page.retry_btn.isEnabled() and not page.fix_btn.isHidden()
+    page.stop()
+
+
+def test_a_long_wait_moves_into_needs_attention(env, monkeypatch):  # noqa: F811
+    win, *_ = env
+    page = win.transfers
+    page._names = {"c": "C"}
+    clock = [1000.0]
+    monkeypatch.setattr(transfers_page.time, "monotonic", lambda: clock[0])
+    waiting = [(0, rec(TransferState.QUEUED, "Queued, Remotely", track="c"))]
+    page._refreshed(payload(waiting))
+    assert page.attention.isHidden()
+    clock[0] += transfers_page.LONG_WAIT_S + 60
+    page._refreshed(payload(waiting))
+    assert not page.attention.isHidden() and page.problems.item(0, 2).text().startswith("Waiting on uploader for")
+    page.problems.selectRow(0)
+    assert not page.stop_wait_btn.isHidden() and page.stop_wait_btn.isEnabled()
     page.stop()
