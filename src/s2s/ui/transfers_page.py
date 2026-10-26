@@ -29,7 +29,9 @@ REFRESH_MS = 3000
 APPROVAL_ROLE = Qt.ItemDataRole.UserRole + 1
 (COL_NUM, COL_TRACK, COL_STATUS, COL_SOURCE, COL_QUALITY) = range(5)
 (P_NUM, P_TRACK, P_PROBLEM) = range(3)
-LONG_WAIT_S = 10 * 60  # waiting on an uploader longer than this counts as stuck
+# Waiting on an uploader longer than this counts as stuck: the track moves to Needs attention, where the user
+# may choose another uploader of the same file. S2S never switches uploader on its own.
+LONG_WAIT_S = 5 * 60
 
 # Where a track is, for the counts at the top.
 FOLDER, DOWNLOADING, WAITING, ATTENTION, IDLE = "folder", "downloading", "waiting", "attention", "idle"
@@ -119,7 +121,8 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
 def stuck_waiting(minutes: int) -> TrackStatus:
     return TrackStatus(f"Waiting on uploader for {minutes} min", "warn", ATTENTION,
                        help="The uploader has not started sending this file. Their queue may be long or they may be "
-                            "away. Keep waiting, cancel it, or switch to another uploader.")
+                            "away. Keep waiting, or press Choose another uploader to pick a different copy of the "
+                            "same file yourself.")
 
 
 def set_label(index: int) -> str:
@@ -149,6 +152,7 @@ class TransfersPage(QWidget):
     settings_requested = Signal()  # kept for compatibility; this page no longer has a Settings button
     review_requested = Signal()  # failed (not only declined) tracks need a reviewed replacement
     queued_backups_requested = Signal()
+    cancel_import_requested = Signal()  # "Cancel downloads": the parent asks, stops downloads and starts over
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -203,8 +207,6 @@ class TransfersPage(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.cancel_btn = QPushButton("Cancel download")
         self.folder_btn = QPushButton("Show in folder")
-        self.queued_backups_btn = QPushButton("Switch to another uploader…")
-        self.queued_backups_btn.setVisible(False)
         self.import_btn = QPushButton("Copy finished downloads")  # only when automatic copying is off
         self.import_btn.setVisible(False)
 
@@ -213,7 +215,7 @@ class TransfersPage(QWidget):
         ql.setContentsMargins(0, 0, 0, 0)
         ql.addWidget(self.table, 1)
         queue_actions = QHBoxLayout()
-        for b in (self.cancel_btn, self.folder_btn, self.queued_backups_btn):
+        for b in (self.cancel_btn, self.folder_btn):
             queue_actions.addWidget(b)
         queue_actions.addStretch(1)
         queue_actions.addWidget(self.import_btn)
@@ -236,6 +238,8 @@ class TransfersPage(QWidget):
         self.retry_btn = QPushButton("Retry same file")
         self.recheck_btn = QPushButton("Check again")
         self.stop_wait_btn = QPushButton("Cancel download")
+        self.queued_backups_btn = QPushButton("Choose another uploader…")  # opens a chooser; nothing is automatic
+        self.queued_backups_btn.setVisible(False)
         self.attention = QWidget()
         al = QVBoxLayout(self.attention)
         al.setContentsMargins(0, 8, 0, 0)
@@ -243,7 +247,7 @@ class TransfersPage(QWidget):
         al.addWidget(self.problems, 1)
         al.addWidget(self.problem_help)
         fix_row = QHBoxLayout()
-        for b in (self.fix_btn, self.retry_btn, self.recheck_btn, self.stop_wait_btn):
+        for b in (self.fix_btn, self.queued_backups_btn, self.retry_btn, self.recheck_btn, self.stop_wait_btn):
             fix_row.addWidget(b)
         fix_row.addStretch(1)
         al.addLayout(fix_row)
@@ -267,6 +271,8 @@ class TransfersPage(QWidget):
         self.history_btn = QPushButton("Import history")
         self.history_btn.setFlat(True)
         self.history_btn.setEnabled(False)
+        self.cancel_import_btn = QPushButton("Cancel downloads…")
+        self.cancel_import_btn.setEnabled(False)
 
         lay = QVBoxLayout(self)
         lay.addWidget(self.progress)
@@ -283,6 +289,7 @@ class TransfersPage(QWidget):
         footer.addWidget(self.history_btn)
         footer.addWidget(self.details_btn)
         footer.addStretch(1)
+        footer.addWidget(self.cancel_import_btn)
         lay.addLayout(footer)
         lay.addWidget(self.archive_table)
 
@@ -291,6 +298,7 @@ class TransfersPage(QWidget):
         self.timer.timeout.connect(self.refresh)
         self.fix_btn.clicked.connect(lambda *_: self.request_fix())
         self.history_btn.clicked.connect(lambda *_: self.history_requested.emit())
+        self.cancel_import_btn.clicked.connect(lambda *_: self.cancel_import_requested.emit())
         self.queued_backups_btn.clicked.connect(lambda *_: self.queued_backups_requested.emit())
         self.retry_btn.clicked.connect(self.retry_selected)
         self.cancel_btn.clicked.connect(self.cancel_selected)
@@ -331,7 +339,9 @@ class TransfersPage(QWidget):
         running = state in (TransferState.QUEUED, TransferState.IN_PROGRESS)
         self.cancel_btn.setEnabled(running)
         self.stop_wait_btn.setEnabled(running)
-        self.stop_wait_btn.setVisible(running and status is not None and status.group == ATTENTION)
+        stuck = running and status is not None and status.group == ATTENTION
+        self.stop_wait_btn.setVisible(stuck)
+        self.queued_backups_btn.setVisible(stuck)
         self.recheck_btn.setVisible(bool(status and status.recheck))
         self.folder_btn.setEnabled(bool(selected and self._final_paths.get(selected[1])))
         if not self.attention.isHidden():
@@ -362,6 +372,7 @@ class TransfersPage(QWidget):
             self._shown_import_id = self.ctx.import_id
         if not self.ctx.approval_id:
             self.info.setText("No approved downloads yet. Confirm a review first.")
+            self.cancel_import_btn.setEnabled(False)
             self.timer.stop()
             self._set_enabled(False)
             return
@@ -370,6 +381,7 @@ class TransfersPage(QWidget):
             self._names = {t.apple_id: f"{t.name} — {t.artist}" for t in self.ctx.store.load_tracks(self.ctx.import_id)}
         self._set_enabled(True)
         self.history_btn.setEnabled(True)
+        self.cancel_import_btn.setEnabled(True)
         self.import_btn.setVisible(not self.ctx.settings.auto_import)
         self.refresh()
         self.timer.start()
@@ -518,10 +530,6 @@ class TransfersPage(QWidget):
         if fixable:
             self.fix_btn.setText(f"Find another source for {_plural(len(fixable), 'track', 'tracks')}…")
 
-        self.queued_backups_btn.setVisible(any(
-            rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS)
-            and rec.status.bytes_transferred == 0 and rec.status.percent == 0
-            for rec in records if relevant.get(rec.apple_id) == rec.approval_id))
         self.history_btn.setEnabled(bool(self.ctx.import_id))
         self._show_archives(records, archives, relevant)
         self._update_row_actions()

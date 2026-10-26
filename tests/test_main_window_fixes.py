@@ -376,3 +376,43 @@ def test_hover_tooltips_are_switched_off():
     from s2s.ui import theme
     assert theme._TOOLTIP_FILTER.eventFilter(b, ev) is True  # swallowed: no tooltip is shown
     b.deleteLater()
+
+
+def _cancel_setup(win, monkeypatch):
+    import contextlib
+    from types import SimpleNamespace
+
+    from s2s.models import TransferState
+    from s2s.ui import main_window
+
+    win.ctx.import_id, win.ctx.approval_id = "imp", "ap"
+    monkeypatch.setattr(main_window.workflow, "approval_ids", lambda store, iid: ["ap"])
+    recs = [SimpleNamespace(apple_id=t, status=SimpleNamespace(state=s)) for t, s in (
+        ("queued", TransferState.QUEUED), ("moving", TransferState.IN_PROGRESS), ("done", TransferState.SUCCEEDED))]
+    monkeypatch.setattr(win.ctx.store, "transfers_for_approval", lambda aid: recs)
+    cancelled = []
+
+    @contextlib.contextmanager
+    def service():
+        yield SimpleNamespace(cancel=lambda aid, tid: cancelled.append((aid, tid)))
+    monkeypatch.setattr(win.ctx, "download_service", service)
+    return cancelled
+
+
+def test_cancel_downloads_stops_unfinished_ones_and_starts_over(win, monkeypatch):
+    cancelled = _cancel_setup(win, monkeypatch)
+    win.refresh_navigation()
+    assert not any(win.step_available()[:4])  # past steps are closed while downloading
+    assert win.transfers.cancel_import_btn.text() == "Cancel downloads…"
+    monkeypatch.setattr(win, "ask_cancel_import", lambda: True)
+    win.transfers.cancel_import_requested.emit()
+    assert cancelled == [("ap", "queued"), ("ap", "moving")]  # finished tracks are left alone
+    assert win.ctx.approval_id is None and win.ctx.import_id is None
+    assert win.stack.currentIndex() == 1 and win.step_available()[0]
+
+
+def test_keep_downloading_changes_nothing(win, monkeypatch):
+    cancelled = _cancel_setup(win, monkeypatch)
+    monkeypatch.setattr(win, "ask_cancel_import", lambda: False)
+    win.cancel_import()
+    assert cancelled == [] and win.ctx.approval_id == "ap"

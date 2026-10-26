@@ -99,7 +99,7 @@ def test_still_downloading_hides_check_and_counts_groups(env):  # noqa: F811
     assert page.chip_waiting.text() == "1 waiting on uploader"
     assert page.chip_attention.isHidden() and page.banner.isHidden() and page.attention.isHidden()
     assert page._active == 2
-    assert not page.queued_backups_btn.isHidden()  # a queued track with no progress
+    assert page.queued_backups_btn.isHidden()  # waiting a little is normal: nothing to choose yet
     page.stop()
 
 
@@ -246,4 +246,6 @@ def test_a_long_wait_moves_into_needs_attention(env, monkeypatch):  # noqa: F811
     assert not page.attention.isHidden() and page.problems.item(0, 2).text().startswith("Waiting on uploader for")
     page.problems.selectRow(0)
     assert not page.stop_wait_btn.isHidden() and page.stop_wait_btn.isEnabled()
+    assert not page.queued_backups_btn.isHidden()  # the user chooses another uploader; nothing is automatic
+    assert transfers_page.LONG_WAIT_S == 5 * 60
     page.stop()
