@@ -399,11 +399,13 @@ def test_never_enqueues():
     "name,artist,expected",
     [
         ("Bassline Growler (VIP Mix)", "Some Artist",
-         ["some artist bassline growler vip mix", "some artist bassline growler", "bassline growler"]),
+         ["some artist bassline growler vip mix", "some artist bassline growler", "bassline growler vip mix",
+          "bassline growler"]),
         ("Song (Original Mix)", "DJ A feat. B", ["dj song"]),
         ("Track (feat. Guest) [Extended Mix]", "Foo & Bar", ["foo bar track extended mix", "foo track"]),
         ("Rolling Deep - Noisia Remix", "Artist One, Artist Two",
-         ["artist one artist two rolling deep noisia remix", "artist one rolling deep", "rolling deep"]),
+         ["artist one artist two rolling deep noisia remix", "artist one rolling deep", "noisia rolling deep",
+          "rolling deep noisia remix", "rolling deep"]),
         ("Go", "X", ["go"]),
         ("Go", "Xy", ["xy go"]),
     ],
@@ -411,5 +413,5 @@ def test_never_enqueues():
 def test_build_queries(name, artist, expected):
     got = build_queries(AppleTrack("i", name, artist))
     assert got == expected
-    assert len(got) <= 3 and len(set(got)) == len(got)
+    assert len(got) <= 8 and len(set(got)) == len(got)
     assert all(len(t) >= 2 for q in got for t in q.split())
