@@ -121,7 +121,11 @@ def find_slskd_exe(settings: Settings) -> Path | None:
     found = sorted(base.glob(f"*/{SLSKD_BINARY}"), key=version_key, reverse=True) if base.is_dir() else []
     if found:
         return found[0]
-    from ..models import find_tool
+    from ..models import bundled_tools_dir, find_tool
+
+    tools = bundled_tools_dir()  # the packaged app ships its own slskd
+    if tools is not None and (tools / "slskd" / SLSKD_BINARY).is_file():
+        return tools / "slskd" / SLSKD_BINARY
 
     on_path = find_tool("slskd")
     return Path(on_path) if on_path else None

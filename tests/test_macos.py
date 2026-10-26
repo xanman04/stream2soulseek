@@ -130,3 +130,35 @@ def test_tools_are_found_in_homebrew_folders_when_path_is_minimal(monkeypatch):
     monkeypatch.setattr(models.shutil, "which", which)
     assert models.find_tool("ffprobe") == "/opt/homebrew/bin/ffprobe"
     assert seen[0] is None  # PATH first
+
+
+def test_the_packaged_app_uses_its_bundled_tools(tmp_path, monkeypatch):
+    """The downloadable app ships slskd, ffmpeg and ffprobe; nothing has to be installed separately."""
+    from s2s import models
+    from s2s.models import Settings
+    from s2s.slskd import service
+
+    exe_name = "S2S.exe" if sys.platform == "win32" else "S2S"
+    app = tmp_path / "S2S"
+    tools = app / "tools"
+    (tools / "slskd").mkdir(parents=True)
+    probe = tools / ("ffprobe.exe" if sys.platform == "win32" else "ffprobe")
+    probe.write_bytes(b"")
+    probe.chmod(0o755)
+    slskd = tools / "slskd" / service.SLSKD_BINARY
+    slskd.write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / exe_name))
+    if sys.platform == "darwin":
+        pytest.skip("the macOS bundle layout (Contents/Resources/tools) is exercised by the packaged-app check")
+    assert models.bundled_tools_dir() == tools
+    assert Path(models.find_tool("ffprobe")).resolve() == probe.resolve()
+    monkeypatch.setattr(service, "slskd_install_dir", lambda: tmp_path / "missing")
+    assert service.find_slskd_exe(Settings()) == slskd
+
+
+def test_running_from_source_has_no_bundled_tools(monkeypatch):
+    from s2s import models
+
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert models.bundled_tools_dir() is None

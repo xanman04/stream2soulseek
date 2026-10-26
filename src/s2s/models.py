@@ -9,6 +9,7 @@ import enum
 import hashlib
 import json
 import os
+from pathlib import Path
 import shutil
 from dataclasses import dataclass, field
 
@@ -290,8 +291,27 @@ class ImportResult:
 EXTRA_TOOL_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
 
 
+def bundled_tools_dir() -> Path | None:
+    """The `tools` folder shipped inside the packaged app (slskd, ffmpeg, ffprobe); None when running from source.
+
+    Windows: <app folder>/tools next to S2S.exe. macOS: S2S.app/Contents/Resources/tools.
+    """
+    import sys
+
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve()
+    folder = exe.parent.parent / "Resources" / "tools" if sys.platform == "darwin" else exe.parent / "tools"
+    return folder if folder.is_dir() else None
+
+
 def find_tool(name: str) -> str | None:
-    """A command-line tool on PATH, else in the usual Homebrew folders (macOS); None when absent."""
+    """A command-line tool shipped with the app, else on PATH, else in Homebrew's folders (macOS); or None."""
+    tools = bundled_tools_dir()
+    if tools is not None:
+        found = shutil.which(name, path=str(tools))
+        if found:
+            return found
     found = shutil.which(name)
     if found:
         return found
