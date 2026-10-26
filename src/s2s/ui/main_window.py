@@ -344,10 +344,14 @@ class MainWindow(QMainWindow):
 
         busy = ""
         if self._queueing or self._downloads_running_in_last_import():
-            busy = ("Downloads are still running. Update when they have finished (or after Cancel downloads), so "
-                    "nothing is interrupted.")
-        dialog = UpdateDialog(info, can_install=updater.can_install(updater.installed_app()), busy_reason=busy,
-                              parent=self)
+            busy = "Finish or cancel the running downloads first."
+        target = updater.install_target()
+        if not updater.can_install(target):
+            from ..applog import get
+
+            get().info("Update cannot install itself (running from %s)", updater.installed_app())
+            target = None
+        dialog = UpdateDialog(info, target=target, busy_reason=busy, parent=self)
         dialog.quit_requested.connect(self._quit_for_update)
         dialog.exec()
         dialog.deleteLater()
