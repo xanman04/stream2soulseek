@@ -372,15 +372,22 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
     review, which creates a NEW approval.
     """
     pending = pending_declined(store, import_id)
+    declined_extra: dict[str, set[str]] = {}
     if include_failed:
         latest = {}
         for approval in store.approvals_for_import(import_id):
             for selected in approval.items:
                 latest[selected.apple_id] = (approval.id, selected)
         pending = []
+        failed_check = {r.apple_id for r in store.import_results(import_id) if r.outcome == ImportOutcome.INVALID}
         for track_id, (aid, selected) in latest.items():
             record = store.get_transfer(aid, track_id)
-            if record is None or record.status.state != TransferState.FAILED:
+            if record is None:
+                continue
+            if record.status.state == TransferState.SUCCEEDED and track_id in failed_check:
+                # downloaded, but the file did not pass the check: another source can fix it too
+                declined_extra.setdefault(track_id, set()).add(selected.username.casefold())
+            elif record.status.state != TransferState.FAILED:
                 continue
             status = record.status
             rejection = classify(status.raw_state, status.error) or classify("Completed, Errored", status.error)
@@ -393,6 +400,8 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
         for record in store.transfers_for_import(import_id):
             if record.status.state == TransferState.FAILED:
                 declined_users.setdefault(record.apple_id, set()).add(record.status.username.casefold())
+        for track_id, users in declined_extra.items():
+            declined_users.setdefault(track_id, set()).update(users)
     stored = {r.track.apple_id: r for r in store.load_match_results(import_id)}
     tracks = {t.apple_id: t for t in store.load_tracks(import_id)}
     peers = declined_peer_reasons(store)

@@ -163,19 +163,25 @@ NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # subprocess.CREATE_NO_WINDOW
 
 def probe_audio(path: Path, ffprobe_path: str, *, runner=subprocess.run) -> tuple[str, int | None, float | None]:
     """Return (codec, bitrate_kbps, duration_s) via ffprobe. No shell; args are a list."""
-    args = [ffprobe_path, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)]
+    # Only the fields the check needs: a file's tags can hold text that breaks ffprobe's JSON output.
+    args = [ffprobe_path, "-v", "error", "-print_format", "json",
+            "-show_entries", "stream=codec_type,codec_name,bit_rate,duration:format=bit_rate,duration", str(path)]
     try:
         # CREATE_NO_WINDOW: S2S runs without a console, so each ffprobe would otherwise flash its own console
-        # window and steal the keyboard focus.
-        proc = runner(args, capture_output=True, text=True, timeout=60, shell=False, creationflags=NO_WINDOW)
+        # window and steal the keyboard focus. Output is read as bytes and decoded as UTF-8 below (the Windows
+        # code page cannot decode every byte ffprobe may print).
+        proc = runner(args, capture_output=True, timeout=60, shell=False, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError) as exc:
         raise ProbeError(f"ffprobe failed: {type(exc).__name__}") from exc
     if proc.returncode != 0:
         raise ProbeError("ffprobe could not read the file")
+    out = proc.stdout
+    if isinstance(out, bytes):
+        out = out.decode("utf-8", errors="replace")
     try:
-        data = json.loads(proc.stdout)
+        data = json.loads(out, strict=False)  # tolerate raw control characters inside strings
     except (ValueError, TypeError) as exc:
-        raise ProbeError("ffprobe returned invalid JSON") from exc
+        raise ProbeError("S2S could not read the file's audio details") from exc
     audio = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), None)
     if audio is None:
         raise ProbeError("no audio stream")

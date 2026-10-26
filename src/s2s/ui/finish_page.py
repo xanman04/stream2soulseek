@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import finalize
-from ..models import TransferState
+from ..models import ImportOutcome, TransferState
 from ..finalize import Checklist, ChecklistEntry
 from . import theme
 from .theme import button_text
@@ -52,10 +52,14 @@ def fixable_track_ids(store, import_id: str) -> set[str]:
     for approval in store.approvals_for_import(import_id):
         for selected in approval.items:
             latest[selected.apple_id] = approval.id
+    failed_check = {r.apple_id for r in store.import_results(import_id) if r.outcome == ImportOutcome.INVALID}
     out = set()
     for track_id, aid in latest.items():
         record = store.get_transfer(aid, track_id)
-        if record is not None and record.status.state == TransferState.FAILED:
+        if record is None:
+            continue
+        if record.status.state == TransferState.FAILED or (
+                record.status.state == TransferState.SUCCEEDED and track_id in failed_check):
             out.add(track_id)
     return out
 
