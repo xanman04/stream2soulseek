@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -98,16 +99,24 @@ def test_unknown_import(env):
         create_approval(s, "nope", [item(1, "x\\1.mp3", 10, root / "House")], downloads_dir=str(root / "Soulseek" / "complete"))
 
 
-DL = "Soulseek\\complete"
+DL = Path("Soulseek") / "complete"
 
 
 @pytest.mark.parametrize("rel", [
-    "..\\Outside", "House\\..\\..\\Outside",
-    DL, DL + "\\OLD", DL + "\\someone\\album", "soulseek\\COMPLETE\\x",  # downloads dir, archive, inside, case
+    Path("..") / "Outside", Path("House") / ".." / ".." / "Outside",
+    DL, DL / "OLD", DL / "someone" / "album",  # downloads dir, archive, inside
 ])
 def test_bad_destinations(env, rel):
     s, iid, root = env
-    dest = str(root) + "\\" + rel
+    dest = root / rel
+    with pytest.raises(ApprovalError):
+        create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], downloads_dir=str(root / DL))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="case-insensitive destination containment is Windows-specific")
+def test_bad_destination_case_variant(env):
+    s, iid, root = env
+    dest = root / "soulseek" / "COMPLETE" / "x"
     with pytest.raises(ApprovalError):
         create_approval(s, iid, [item(1, "x\\1.mp3", 10, dest)], downloads_dir=str(root / DL))
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from s2s.models import ArchiveResult, ImportOutcome, TransferState
@@ -177,12 +178,14 @@ def test_archive_status_is_one_collapsed_summary(env):  # noqa: F811
 
 
 def test_row_actions_follow_the_selected_track(env, monkeypatch):  # noqa: F811
-    win, *_ = env
+    win, _, _, root = env
     page = win.transfers
     page._names = {"a": "A", "b": "B"}
     recs = [(0, rec(TransferState.FAILED, "Completed, Errored", track="a")),
             (0, rec(TransferState.SUCCEEDED, track="b"))]
-    page._refreshed(payload(recs, [imported("b", r"D:\Library\b.mp3")]))
+    final_path = root / "House" / "b.mp3"
+    final_path.write_bytes(b"synthetic")
+    page._refreshed(payload(recs, [imported("b", str(final_path))]))
     page.table.selectRow(0)
     assert page._selected() == ("ap", "a")
     assert page.retry_btn.isEnabled() and not page.cancel_btn.isEnabled() and not page.folder_btn.isEnabled()
@@ -191,7 +194,7 @@ def test_row_actions_follow_the_selected_track(env, monkeypatch):  # noqa: F811
     opened = []
     monkeypatch.setattr(transfers_page.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
     page.folder_btn.click()
-    assert opened and opened[0].replace("/", "\\").lower() == "d:\\library"
+    assert len(opened) == 1 and Path(opened[0]) == final_path.parent
     page._states[("ap", "b")] = TransferState.IN_PROGRESS
     page._update_row_actions()
     assert page.cancel_btn.isEnabled()

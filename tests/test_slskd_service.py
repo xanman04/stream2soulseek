@@ -181,11 +181,13 @@ def test_requires_downloads_folder(tmp_path, store):
 
 
 def test_find_slskd_exe_prefers_newest_version(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    from s2s.slskd import service
+
+    monkeypatch.setattr(service, "slskd_install_dir", lambda: tmp_path / "Programs" / "slskd")
     for v in ("0.9.1", "0.26.2", "0.26.10"):
         d = tmp_path / "Programs" / "slskd" / v
         d.mkdir(parents=True)
-        (d / "slskd.exe").write_bytes(b"")
+        (d / service.SLSKD_BINARY).write_bytes(b"")
     assert find_slskd_exe(Settings()).parent.name == "0.26.10"
     assert find_slskd_exe(Settings(extra={"slskd_exe": str(tmp_path / "missing.exe")})) is None
 
