@@ -1,0 +1,60 @@
+"""Publishing must fail for incomplete, altered or incorrectly versioned artifacts."""
+
+import hashlib
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+spec = importlib.util.spec_from_file_location("verify_s2s_release", Path(__file__).resolve().parents[1] / "packaging" / "verify_release.py")
+release = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(release)
+
+
+@pytest.fixture
+def assets(tmp_path):
+    root = tmp_path / "repo"
+    (root / "src" / "s2s").mkdir(parents=True)
+    (root / "pyproject.toml").write_text('[project]\nversion = "1.0.1"\n', encoding="utf-8")
+    (root / "src" / "s2s" / "__init__.py").write_text('__version__ = "1.0.1"\n', encoding="utf-8")
+    folder = tmp_path / "assets"
+    folder.mkdir()
+    for target in release.TARGETS:
+        archive = folder / f"S2S-1.0.1-{target}.zip"
+        archive.write_bytes(b"synthetic archive bytes")
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        archive.with_name(archive.name + ".sha256").write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+    return root, folder
+
+
+def test_complete_release_passes(assets):
+    root, folder = assets
+    assert len(release.verify_assets(folder, "v1.0.1", root=root)) == 3
+
+
+@pytest.mark.parametrize("change", ["missing_platform", "missing_checksum", "changed_bytes", "wrong_filename", "extra_asset"])
+def test_incomplete_or_changed_release_fails(assets, change):
+    root, folder = assets
+    archive = folder / "S2S-1.0.1-macos-x64.zip"
+    checksum = archive.with_name(archive.name + ".sha256")
+    if change == "missing_platform":
+        archive.unlink()
+    elif change == "missing_checksum":
+        checksum.unlink()
+    elif change == "changed_bytes":
+        archive.write_bytes(b"changed after checksum generation")
+    elif change == "wrong_filename":
+        checksum.write_text(checksum.read_text().replace(archive.name, "wrong.zip"))
+    else:
+        (folder / "unexpected.txt").write_text("must not publish")
+    with pytest.raises(ValueError):
+        release.verify_assets(folder, "v1.0.1", root=root)
+
+
+def test_wrong_tag_or_mismatched_package_version_fails(assets):
+    root, folder = assets
+    with pytest.raises(ValueError, match="release tag"):
+        release.verify_assets(folder, "v9.0.0", root=root)
+    (root / "src" / "s2s" / "__init__.py").write_text('__version__ = "1.0.0"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="must agree"):
+        release.verify_assets(folder, "v1.0.1", root=root)

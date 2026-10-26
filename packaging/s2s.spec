@@ -54,7 +54,7 @@ if sys.platform == "darwin":
             "CFBundleShortVersionString": VERSION,
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
-            "LSMinimumSystemVersion": "12.0",
+            "LSMinimumSystemVersion": "14.4",  # minimum supported by the pinned Qt 6.12 build
             "NSHumanReadableCopyright": "Copyright (C) 2026 xanman04. GNU GPL v3 or later.",
         },
     )
