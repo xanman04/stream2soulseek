@@ -36,8 +36,7 @@ services; they do not establish that real account sign-in or live downloads work
 - Optionally approve exact backup files for queued downloads: wait 45 seconds, try another source, and cancel redundant attempts when one starts.
 - Configure matching rules and save reusable rule sets.
 - Verify completed downloads and copy them into a flat tracklist folder.
-- Check the finished folder against the playlist in order, export an M3U8 playlist, or copy the tracks in
-  playlist order (numbered) to a USB stick or another folder.
+- Check the finished folder against the playlist in order.
 - View a downloaded file's spectrogram with an estimated frequency cutoff to help assess its audio quality.
 - Track failed transfers, review replacement sources, and resume the most recent import.
 - Inspect every playlist track in import history, filter outstanding work, and export remaining tracks to CSV.
@@ -103,15 +102,17 @@ playlists, including accessible private playlists; liked playlists and liked tra
    flagged ones are not. The details panel explains why a file was chosen or flagged and lists alternatives.
    Downloads begin only after you confirm the exact files. Optional queued recovery (remembered once you turn
    it on) lists the exact backup files in the same confirmation.
-5. **Downloads & import.** One row per track with a plain status ("In folder ✓", "Downloading 42%",
-   "Waiting on uploader", "Declined: wants you to share files"). Verified files are copied into the tracklist
-   folder automatically; problems come with one **Find another source** button (a replacement still needs
-   your confirmation).
-6. **Check & export.** Compares the tracklist folder with the playlist in order, lists anything missing or
-   unexpected, exports an M3U8 playlist, copies the tracks in order to a USB stick or folder, or exports the
-   missing list. The checklist reflects saved import results and whether the recorded files still exist.
+5. **Downloads & import.** The queue lists every track with a plain status ("In folder ✓", "Downloading 42%",
+   "Waiting on uploader"). Verified files are copied into the tracklist folder automatically. Any track that
+   fails, is declined, waits on its uploader for more than 10 minutes, or does not pass its check also appears
+   in **Needs attention** underneath, with what happened in plain words and the buttons that fix it (Find
+   another source, Retry, Check again, Cancel) while the rest keeps downloading. A replacement still needs your
+   confirmation.
+6. **Check files.** Compares the tracklist folder with the playlist in order, lists anything missing or
+   unexpected, and opens a track's spectrogram to check its real quality. The missing list can be exported.
+   **Start another playlist** is here.
 
-**Spectrogram** is available for local files in Downloads and Check & export. The frequency cutoff is an
+**Spectrogram** is available for files in your folder in Check files. The frequency cutoff is an
 estimate for manual inspection; it does not prove a file's encoding history or automatically reject a track.
 
 **Import history / outstanding tracks** is available from the File menu and step 5. It preserves the full

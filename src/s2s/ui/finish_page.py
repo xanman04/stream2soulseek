@@ -1,4 +1,4 @@
-"""Step 6: check the finished folder against the original playlist, then export or copy it in order."""
+"""Step 6: check the finished folder against the original playlist, and each file's real quality."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QDesktopServices
 from PySide6.QtWidgets import (
     QHeaderView,
-    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QStackedLayout, QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QLabel, QPushButton, QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from .. import finalize
@@ -74,8 +74,8 @@ class FinishPage(QWidget):
         self.fixable: set[str] = set()  # failed/declined tracks a replacement review can help
         self._generation = 0
 
-        self.heading = QLabel("<b>Check &amp; export</b>", self)
-        self.heading.hide()  # the step frame already shows "Step 6: Check & export"
+        self.heading = QLabel("<b>Check your files</b>", self)
+        self.heading.hide()  # the step frame already shows the step title
         self.verdict = theme.banner("", "info", self)
         self.verdict.setStyleSheet(self.verdict.styleSheet() + " font-size: 15px;")
         self.chip_folder = theme.chip("", "ok", self)
@@ -92,20 +92,14 @@ class FinishPage(QWidget):
         self.table.setWordWrap(False)
         self.table.setAlternatingRowColors(False)
 
-        self.export_button = theme.primary(QPushButton(theme.button_text("Export playlist (M3U8)…"), self))
-        self.export_button.setToolTip("Saves a playlist file in your folder that lists the tracks in playlist order.")
-        self.copy_button = QPushButton("Copy to USB / folder in order…", self)
-        self.copy_button.setToolTip("Copies the tracks to another folder with numbered names, so players that sort "
-                                    "by file name keep the playlist order. Nothing is moved or overwritten.")
+        self.spectrogram_button = theme.primary(QPushButton("Spectrogram…", self))
         self.open_button = QPushButton("Open folder", self)
         self.find_button = QPushButton("Find another source…", self)
-        self.spectrogram_button = QPushButton("Spectrogram…", self)
-        self.spectrogram_button.setToolTip("Draws the selected track's spectrogram to check its real quality "
-                                           "(for example a 320 kbps MP3 that was re-encoded from a worse source).")
         self.csv_button = QPushButton("Export missing list (CSV)…", self)
+        self.spectro_hint = theme.subtle(QLabel("Select a track and open its spectrogram (or double-click it) to "
+                                                "check its real quality.", self))
         actions = QHBoxLayout()
-        for b in (self.export_button, self.copy_button, self.open_button, self.spectrogram_button, self.find_button,
-                  self.csv_button):
+        for b in (self.spectrogram_button, self.open_button, self.find_button, self.csv_button):
             actions.addWidget(b)
         actions.addStretch(1)
 
@@ -122,10 +116,11 @@ class FinishPage(QWidget):
         cl.addWidget(self.table, 1)
         cl.addWidget(self.advice)
         cl.addWidget(self.result)
+        cl.addWidget(self.spectro_hint)
         cl.addLayout(actions)
 
         self.empty = QLabel("Nothing to check yet.\n\nOnce you have searched for a playlist and downloaded tracks, "
-                            "this page compares your folder with the original playlist and lets you export it.", self)
+                            "this page compares your folder with the original playlist.", self)
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         theme.subtle(self.empty)
@@ -138,8 +133,6 @@ class FinishPage(QWidget):
         layout.addWidget(self.heading)
         layout.addLayout(self.stack, 1)
 
-        self.export_button.clicked.connect(self.export_playlist)
-        self.copy_button.clicked.connect(self.copy_in_order)
         self.open_button.clicked.connect(self.open_folder)
         self.find_button.clicked.connect(self.find_missing_requested.emit)
         self.spectrogram_button.clicked.connect(self.open_spectrogram)
@@ -172,7 +165,7 @@ class FinishPage(QWidget):
 
         def failed(exc: BaseException) -> None:
             if generation == self._generation:
-                show_error(self, "Check & export", self.ctx.describe(exc))
+                show_error(self, "Check files", self.ctx.describe(exc))
 
         run_async(self, work, done, failed)
 
@@ -201,12 +194,6 @@ class FinishPage(QWidget):
         extras = checklist.extras
         self._chip(self.chip_extra, f"{len(extras)} other file{'s' if len(extras) != 1 else ''} in folder",
                    "muted", len(extras))
-        if extras:
-            shown = [os.path.basename(p) for p in extras[:15]]
-            more = f"\n… and {len(extras) - 15} more" if len(extras) > 15 else ""
-            self.chip_extra.setToolTip("Audio files in this folder that are not part of this playlist "
-                                       "(they may belong to other playlists). They are never touched.\n"
-                                       + "\n".join(shown) + more)
         self._fill_table(checklist)
         self._show_advice(checklist)
         self._set_actions_enabled()
@@ -292,8 +279,6 @@ class FinishPage(QWidget):
     def _set_actions_enabled(self) -> None:
         c = self.checklist
         has = c is not None and c.total > 0
-        self.export_button.setEnabled(has and c.in_folder > 0)
-        self.copy_button.setEnabled(has and c.in_folder > 0)
         self.open_button.setEnabled(has and bool(c.destination) and Path(c.destination).is_dir())
         missing = bool(has and c.missing)
         fixable = self._fixable_entries() if has else []
@@ -301,8 +286,6 @@ class FinishPage(QWidget):
         if fixable:
             n = len(fixable)
             self.find_button.setText(button_text(f"Find another source for {n} track{'s' if n != 1 else ''}…"))
-            self.find_button.setToolTip("Opens a review with different files for the downloads that failed or were "
-                                        "declined. Nothing downloads until you confirm it.")
         self.csv_button.setVisible(missing)
         self.spectrogram_button.setEnabled(self._selected_path() is not None)
 
@@ -328,72 +311,6 @@ class FinishPage(QWidget):
 
     def _note(self, text: str, kind: str) -> None:
         theme.set_banner(self.result, text, kind)
-
-    def export_playlist(self) -> None:
-        c = self.checklist
-        if c is None or c.in_folder == 0:
-            return
-        default = finalize.default_playlist_path(c)
-        path, _ = QFileDialog.getSaveFileName(self, "Export playlist", str(default), "Playlist (*.m3u8)")
-        if not path:
-            return
-        overwrite = False
-        if Path(path).exists():
-            answer = QMessageBox.question(
-                self, "Replace playlist file?", f"{Path(path).name} already exists. Replace it?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-            overwrite = True
-        try:
-            written = finalize.write_m3u8(c, path, overwrite=overwrite)
-        except OSError as exc:
-            show_error(self, "Export failed", f"Could not write the playlist file:\n{exc}")
-            return
-        self._note(f"Saved {written.name} with {c.in_folder} tracks in playlist order.", "ok")
-
-    def copy_in_order(self) -> None:
-        c = self.checklist
-        if c is None or c.in_folder == 0:
-            return
-        start = str(Path(c.destination).parent) if c.destination else ""
-        folder = QFileDialog.getExistingDirectory(self, "Copy tracks to this folder", start)
-        if not folder:
-            return
-        plan = finalize.ordered_copy_plan(c, folder)
-        if not plan:
-            return
-        first, last = plan[0][1].name, plan[-1][1].name
-        answer = QMessageBox.question(
-            self, "Copy tracks?",
-            f"Copy {len(plan)} tracks to:\n{folder}\n\nThey are numbered in playlist order, from "
-            f"“{first}” to “{last}”.\nExisting files are never overwritten, and your music folder is not changed.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        self.copy_button.setEnabled(False)
-        self._note(f"Copying {len(plan)} tracks…", "info")
-
-        def done(report: finalize.CopyReport) -> None:
-            self._set_actions_enabled()
-            parts = [f"Copied {len(report.copied)} tracks"]
-            if report.identical:
-                parts.append(f"{len(report.identical)} already there")
-            if report.conflicts:
-                parts.append(f"{len(report.conflicts)} skipped because a different file has that name")
-            if report.errors:
-                parts.append(f"{len(report.errors)} failed")
-            kind = "ok" if report.ok else "warn"
-            text = ", ".join(parts) + "."
-            if report.errors:
-                text += " " + report.errors[0]
-            self._note(text, kind)
-
-        def failed(exc: BaseException) -> None:
-            self._set_actions_enabled()
-            self._note("Copy stopped: " + self.ctx.describe(exc), "error")
-
-        run_async(self, lambda: finalize.copy_to(plan), done, failed)
 
     def open_folder(self) -> None:
         c = self.checklist

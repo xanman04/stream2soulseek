@@ -49,7 +49,6 @@ class FakeDialog:
 def fake_dialog(monkeypatch):
     FakeDialog.opened = []
     monkeypatch.setattr(finish_page, "SpectrogramDialog", FakeDialog)
-    monkeypatch.setattr(transfers_page, "SpectrogramDialog", FakeDialog)
     return FakeDialog
 
 
@@ -130,37 +129,23 @@ def test_start_another_always_available_but_asks_while_anything_is_active(env, t
 
     recs = [(0, rec(TransferState.SUCCEEDED, track="a")), (0, rec(TransferState.QUEUED, "Queued, Remotely", track="b"))]
     page._refreshed(payload(recs, [imported("a")]))
-    assert not page.new_import_btn.isHidden() and page.new_import_btn.isEnabled()  # a queued track no longer hides it
-    page.new_import_btn.click()
+    start_another = win.frames[-1].next_btn  # it lives on Step 6 now
+    assert start_another.text() == "Start another playlist" and start_another.isEnabled()
+    start_another.click()
     assert asked == [("this playlist", 1)] and emitted == []  # Stay
-    page.new_import_btn.click()
+    start_another.click()
     assert emitted == [1]  # Start another
 
     recs = [(0, rec(TransferState.SUCCEEDED, track="a")), (0, rec(TransferState.SUCCEEDED, track="b"))]
     page._refreshed(payload(recs, [imported("a"), imported("b")]))
-    page.new_import_btn.click()
+    start_another.click()
     assert len(asked) == 2 and emitted == [1, 1]  # nothing active: no question
     page.stop()
 
 
-def test_step5_spectrogram_for_in_folder_rows(env, tmp_path, fake_dialog):  # noqa: F811
+def test_step5_has_no_spectrogram(env):  # noqa: F811
     win, *_ = env
-    page = win.transfers
-    page.ctx.approval_id = "ap"
-    f = tmp_path / "a.mp3"
-    f.write_bytes(b"x")
-    page._names = {"a": "A", "b": "B"}
-    recs = [(0, rec(TransferState.SUCCEEDED, track="a")), (0, rec(TransferState.QUEUED, "Queued, Remotely", track="b"))]
-    page._refreshed(payload(recs, [imported("a", final=str(f))]))
-    page.table.selectRow(1)
-    assert not page.spectrogram_btn.isEnabled()
-    page.table.selectRow(0)
-    assert page.spectrogram_btn.isEnabled()
-    page.spectrogram_btn.click()
-    page.table.cellDoubleClicked.emit(0, 1)
-    assert [p for p, _ in fake_dialog.opened] == [str(f), str(f)]
-    assert fake_dialog.opened[0][1] is page.ctx.settings
-    page.stop()
+    assert not hasattr(win.transfers, "spectrogram_btn")  # files are checked in Step 6, once downloaded
 
 
 # ------------------------------------------------------------------ item 2: leaving a running import

@@ -396,7 +396,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     refresh(win)
     tr = transfer_rows(win)
     assert all(text == "Waiting on uploader" for text, _s in tr.values())
-    assert not win.transfers.check_btn.isVisibleTo(win.transfers)
+    assert not win.transfers.attention.isVisibleTo(win.transfers)
     # round 2: some downloading
     fake.set_state("djpeer", base(0), TransferState.IN_PROGRESS, "InProgress", percent=40.0)
     fake.set_state("vipguy", base(1), TransferState.IN_PROGRESS, "InProgress", percent=10.0)
@@ -430,13 +430,13 @@ def test_whole_app_flow(app_env, monkeypatch):
         f"{base(n)}.mp3" for n in (0, 2, 9))
     assert not (downloads / "vipguy").exists() and (old / "vipguy").is_dir()
     assert (downloads / "slowpoke").exists() is False                    # never downloaded, nothing to archive
-    # banner: one clear message, one fix button, no jump to another step
+    # the declined track waits in Needs attention with its fix; the queue keeps running; no jump to another step
     wt = win.transfers
-    assert wt.banner.isVisibleTo(wt) and "1 track needs another source" in wt.banner.text()
-    assert wt.fix_btn.isVisibleTo(wt) and not wt.check_btn.isVisibleTo(wt)  # Atlantis is still queued
+    assert wt.attention.isVisibleTo(wt) and wt.problems.rowCount() == 1
+    assert wt.problems.item(0, 1).text().startswith("Hold On")
+    assert wt.fix_btn.isVisibleTo(wt) and wt.fix_btn.text() == "Find another source for 1 track…"
     assert wt.chip_folder.text() == "6 in folder" and wt.chip_attention.text() == "1 need attention"
     assert wt.chip_waiting.text() == "1 waiting on uploader"
-    assert wt.new_import_btn.isVisibleTo(wt)  # never blocked by a queued track (asks first)
     assert win.stack.currentIndex() == STEP_TRANSFERS + 1
     # the declined peer is remembered for later searches
     assert store.declining_peers().get("rejecter")
@@ -498,25 +498,12 @@ def test_whole_app_flow(app_env, monkeypatch):
     assert fp.table.item(0, 1).text() == "Innerbloom — RÜFÜS DU SOL"
     assert fp.table.item(6, 2).text() == "In folder" and fp.table.item(7, 2).text() == "Still waiting to download"
     assert fp.table.item(3, 2).text() == "No file chosen" and fp.table.item(4, 2).text() == "Not found on Soulseek"
-    assert fp.export_button.isEnabled() and not fp.find_button.isVisibleTo(fp)
+    assert fp.spectrogram_button.isVisibleTo(fp) and not fp.find_button.isVisibleTo(fp)
+    assert not hasattr(fp, "export_button") and not hasattr(fp, "copy_button")
     # nothing failed, so no replacement button; each kind of missing track is explained instead
     assert "1 was not found on Soulseek" in fp.advice.text() and "left out by choice" in fp.advice.text()
     assert "still downloading" in fp.advice.text()
 
-    out = tmp_path / "export" / "Liquid Sunday.m3u8"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), "Playlist (*.m3u8)"))
-    fp.export_button.click()
-    lines = out.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "#EXTM3U"
-    entries = [ln for ln in lines if not ln.startswith("#")]
-    assert [Path(e).name for e in entries] == [
-        "Innerbloom - RÜFÜS DU SOL.mp3", "Bassline Growler (VIP Mix) - Sub Focus.mp3",
-        "Afterglow (Extended Mix) - Wilkinson.mp3", "Lose Yourself (Live Wire Remix) - Live Wire.mp3",
-        "Hold On - Rudimental.flac", "Blind Faith (Extended Mix) - Chase & Status.mp3",
-        "Turn the Lights Off - Kato.mp3"]
-    assert all(Path(e).is_file() or (out.parent / e).is_file() or Path(os.path.normpath(
-        os.path.join(out.parent, e))).is_file() for e in entries)
-    assert fp.result.isVisibleTo(fp) and "7 tracks" in fp.result.text()
     # nothing in the music folder was touched besides what was imported; no stray partial files
     assert not any(p.name.endswith(".s2s-partial") for p in dest.iterdir())
 
@@ -524,7 +511,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     enabled, done, nexts, cur = nav(win)
     assert cur == STEP_FINISH and enabled == [True] * 6
     assert done[:5] == [True] * 5 and not done[5]
-    assert not win.frames[5].next_btn.isVisibleTo(win.frames[5])
+    assert win.frames[5].next_btn.text() == "Start another playlist"  # the last step starts the next one
     # Atlantis finally gets going; the page shows it without anything else moving
     win.go_step(STEP_TRANSFERS)
     fake.succeed("slowpoke", base(7))
@@ -625,7 +612,7 @@ def test_existing_different_file_is_a_conflict_not_overwritten_and_not_archived(
     assert mine.read_bytes() == b"MY OWN EDIT"                # never overwritten
     # djpeer still has a file that is not cleanly in the library: its folder must stay put
     assert (downloads / "djpeer" / "Album").is_dir() and not (downloads / "OLD" / "djpeer").exists()
-    assert "check" in win.transfers.banner.text()
+    assert win.transfers.problems.rowCount() == 1 and "conflict" in win.transfers.problems.item(0, 2).text()
     win.go_step(STEP_FINISH)
     by = {e.apple_id: e for e in win.finish.checklist.entries}
     assert by["i.0"].status != "in_folder", by["i.0"]      # the conflicting file is not this download
@@ -668,11 +655,11 @@ def test_restart_resumes_downloads_and_rerun_skips_what_is_already_imported(app_
         win2.transfers.refresh()
         tr = transfer_rows(win2)
         assert all(text == "In folder ✓" for text, _s in tr.values()), tr
-        assert win2.transfers.new_import_btn.isVisibleTo(win2.transfers)
         assert not any((downloads / u).exists() for u in ("djpeer", "vipguy", "rejecter", "slowpoke"))
 
         # start another playlist, pick the same one again: what is already in the folder is skipped
-        win2.transfers.new_import_btn.click()
+        win2.go_step(STEP_FINISH)
+        win2.frames[STEP_FINISH].next_btn.click()  # "Start another playlist"
         assert win2.stack.currentIndex() == STEP_PLAYLIST + 1
         assert win2.ctx.import_id is None and win2.ctx.approval_id is None and win2.ctx.tracks == []
         assert nav(win2)[0] == [True, False, False, False, False, False]
@@ -733,7 +720,7 @@ def test_slskd_going_away_mid_download_is_reported_and_recovers(app_env, monkeyp
     wt = win.transfers
     assert wt.banner.isVisibleTo(wt) and "Can't reach Soulseek" in wt.banner.text()
     assert not (dest / "Innerbloom - RÜFÜS DU SOL.mp3").exists()     # nothing imported on stale information
-    assert wt.new_import_btn.isVisibleTo(wt) and win.stack.currentIndex() == STEP_TRANSFERS + 1
+    assert win.stack.currentIndex() == STEP_TRANSFERS + 1
     assert nav(win)[0] == [True] * 6                                  # no step got locked by the outage
     fake.list_downloads = real_list
     refresh(win)
