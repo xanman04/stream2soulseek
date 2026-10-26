@@ -350,7 +350,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     assert rv.chip_missing.text() == "1 not found" and rv.chip_selected.text() == "8 selected"
     strobe = rv.model.rows[row_of(win, "i.4")]
     assert rv._explain(strobe)[1] == "Not found. 1 file was found, but none passed your rules (see the rejected files on the right)."
-    assert rv.confirm_btn.text().startswith("Download 8 tracks")
+    assert rv.confirm_btn.text() == "Confirm selection (8)"
 
     # prefer the second uploader for "Blind Faith"
     r8 = row_of(win, "i.8")
@@ -377,11 +377,12 @@ def test_whole_app_flow(app_env, monkeypatch):
     approvals = store.approvals_for_import(ctx.import_id)
     assert len(approvals) == 1 and {i.apple_id for i in approvals[0].items} == set(wanted)
     assert all(i.destination == ctx.destination for i in approvals[0].items)
-    assert rv._locked and rv.confirm_btn.text() == "Go to Downloads"
+    assert rv._locked and rv.confirm_btn.text() == "Selection confirmed" and not rv.confirm_btn.isEnabled()
+    assert not win.frames[STEP_REVIEW].next_btn.isVisibleTo(win.frames[STEP_REVIEW])  # Review never has a Next
 
     # confirming moves to Downloads by itself (existing behaviour), and only there
     enabled, done, nexts, cur = nav(win)
-    assert cur == STEP_TRANSFERS and enabled == [True] * 5 + [True] and done[3] and done[4]
+    assert cur == STEP_TRANSFERS and enabled == [False] * 4 + [True, True] and done[3] and done[4]  # steps 1-4 closed
     assert win.transfers.timer.isActive()
 
     # ---------------- Step 5: transfers progress over several refreshes
@@ -450,7 +451,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     row = rv.model.rows[0]
     assert row.chosen.file.username == "goodpeer" and row.checked
     assert all(c.file.username != "rejecter" for c in [row.chosen, *row.result.alternatives])
-    assert rv.confirm_btn.text() == "Download 1 track…"
+    assert rv.confirm_btn.text() == "Confirm selection (1)"
     n_before = len(fake.enqueued)
     shown.clear()
     rv.confirm_download()
@@ -510,7 +511,7 @@ def test_whole_app_flow(app_env, monkeypatch):
 
     # ---------------- navigation stays coherent at the end
     enabled, done, nexts, cur = nav(win)
-    assert cur == STEP_FINISH and enabled == [True] * 6
+    assert cur == STEP_FINISH and enabled == [False] * 4 + [True, True]
     assert done[:5] == [True] * 5 and not done[5]
     assert win.frames[5].next_btn.text() == "Start another playlist"  # the last step starts the next one
     # Atlantis finally gets going; the page shows it without anything else moving
@@ -647,7 +648,7 @@ def test_restart_resumes_downloads_and_rerun_skips_what_is_already_imported(app_
         assert len(tr) == 8
         assert tr["Innerbloom"][0] == "In folder ✓" and tr["Atlantis"][0] in ("Starting…", "Waiting on uploader")
         enabled, done, nexts, cur = nav(win2)
-        assert enabled == [True] * 6 and done[:5] == [True] * 5 and cur == STEP_TRANSFERS
+        assert enabled == [False] * 4 + [True, True] and done[:5] == [True] * 5 and cur == STEP_TRANSFERS
         assert win2.playlists.track_model.rowCount() == 10 and win2.destination.dest_edit.text() == str(dest)
         # the rest finishes after the restart
         for user, name in [("rejecter", base(6)), ("slowpoke", base(7)),
@@ -693,14 +694,13 @@ def test_searching_again_is_closed_while_downloads_are_queued(app_env, monkeypat
     ctx = win.ctx
     import_id, approval_id = ctx.import_id, ctx.approval_id
     searches = len(fake.queries)
-    win.go_step(STEP_SEARCH)
+    win.go_step(STEP_SEARCH)                                # closed once downloads are confirmed
+    assert win.stack.currentIndex() == STEP_TRANSFERS + 1
     sp = win.search
-    assert not sp.start_btn.isEnabled() and "already queued" in sp.info.text()
-    sp.start_btn.click()
-    sp.start()                                              # even called directly
+    sp.start()                                              # even called directly, nothing is searched
     assert len(fake.queries) == searches
     assert (ctx.import_id, ctx.approval_id) == (import_id, approval_id)
-    assert nav(win)[0] == [True] * 6                        # Downloads stay reachable
+    assert nav(win)[0] == [False] * 4 + [True, True]        # Downloads stay reachable
     win.go_step(STEP_TRANSFERS)
     assert win.transfers.timer.isActive()
 
@@ -722,7 +722,7 @@ def test_slskd_going_away_mid_download_is_reported_and_recovers(app_env, monkeyp
     assert wt.banner.isVisibleTo(wt) and "Can't reach Soulseek" in wt.banner.text()
     assert not (dest / "Innerbloom - RÜFÜS DU SOL.mp3").exists()     # nothing imported on stale information
     assert win.stack.currentIndex() == STEP_TRANSFERS + 1
-    assert nav(win)[0] == [True] * 6                                  # no step got locked by the outage
+    assert nav(win)[0] == [False] * 4 + [True, True]                     # the outage changes nothing about which steps are open
     fake.list_downloads = real_list
     refresh(win)
     assert not wt.banner.isVisibleTo(wt) or "Can't reach" not in wt.banner.text()

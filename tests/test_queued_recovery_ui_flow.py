@@ -96,54 +96,27 @@ def prepared(window, tmp_path):
     return track, result, dest, import_id
 
 
-def test_review_always_lists_other_uploaders_of_the_same_file(window, tmp_path, monkeypatch):
-    _track, result, dest, _iid = prepared(window, tmp_path)
-    page = window.review
-    page.set_results([result], dest)
-    entries = page.summary_entries()
-    assert len(entries) == 2
-    other = next(e for e in entries if e.get("backup"))
-    assert (other["username"], other["filename"], other["wait_seconds"]) == (
-        result.alternatives[0].file.username, result.alternatives[0].file.filename, review_page.SWITCH_AFTER_S,
-    )
-
-    called = []
-    monkeypatch.setattr(page, "ask_confirmation", lambda shown: called.append(shown) or False)
-    page.confirm_download()
-    assert called and len(called[0]) == 2
-    assert window.ctx.store.approvals_for_import(window.ctx.import_id) == []
-    assert window.ctx.store.fallback_plans(window.ctx.import_id) == []
-
-
-def test_yes_persists_reviewed_pool_before_primary_enqueue(window, tmp_path, monkeypatch):
+def test_confirming_approves_only_the_ticked_files(window, tmp_path, monkeypatch):
+    """No other uploader is approved at confirmation: switching is the user's choice, from Needs attention."""
     _track, result, dest, import_id = prepared(window, tmp_path)
     page = window.review
     page.set_results([result], dest)
+    entries = page.summary_entries()
+    assert len(entries) == 1 and not entries[0].get("backup")
     monkeypatch.setattr(page, "ask_confirmation", lambda _shown: True)
-
-    events = []
 
     @contextlib.contextmanager
     def fake_download_service():
         class Service:
             def enqueue_approved(self, approval_id, fingerprint):
-                plans = window.ctx.store.fallback_plans(import_id)
-                assert len(plans) == 1
-                assert plans[0]["wait_seconds"] == review_page.SWITCH_AFTER_S
-                events.append(("enqueue", approval_id, fingerprint, plans[0]["items_json"]))
+                pass
         yield Service()
 
     monkeypatch.setattr(window.ctx, "download_service", fake_download_service)
-
-    def inline_run(_owner, work, done, _error):
-        done(work())
-
-    monkeypatch.setattr(review_page, "run_async", inline_run)
+    monkeypatch.setattr(review_page, "run_async", lambda _o, work, done, _e: done(work()))
     page.confirm_download()
-    plans = window.ctx.store.fallback_plans(import_id)
-    assert len(plans) == 1 and events and events[0][0] == "enqueue"
-    assert page._locked
     assert len(window.ctx.store.approvals_for_import(import_id)) == 1
+    assert window.ctx.store.fallback_plans(import_id) == []
 
 
 @pytest.mark.parametrize("accepted", [False, True])

@@ -9,10 +9,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from .. import workflow
-from ..models import Playlist, Settings
+from ..models import Playlist, Settings, TransferState
 from ..queue_recovery import approve_backups
 from ..secretstore import SecretStore
 from ..slskd.service import SlskdService
@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self.ctx = AppContext(store, secrets, settings)
         self._queueing = False
         self._navigation_generation = 0
+        self._replacement_open = False  # a "Find another source" review is open: Review may be shown again
         self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
 
         self.sidebar = Sidebar()
@@ -110,7 +111,7 @@ class MainWindow(QMainWindow):
         self.sidebar.service_selected.connect(self._open_service)
         self.sidebar.soulseek_login_requested.connect(lambda: self.soulseek.prompt())
         self.sidebar.settings_requested.connect(self.open_settings)
-        # Review's own "Download N tracks…" button leads on to Downloads; a second Next there would be redundant.
+        # Review has no Next: "Confirm selection" is the only way on (it opens Downloads by itself).
         self.frames[STEP_REVIEW].next_btn.setVisible(False)
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
         for f in self.frames:
@@ -145,6 +146,7 @@ class MainWindow(QMainWindow):
         self.review.queueing_changed.connect(self._queueing_changed)
         self.transfers.find_another_source.connect(self.start_replacement)
         self.transfers.new_import_requested.connect(self.start_another_import)
+        self.transfers.cancel_import_requested.connect(self.cancel_import)
         self.transfers.history_requested.connect(self.open_history)
         self.transfers.settings_requested.connect(self.open_settings)
         self.transfers.review_requested.connect(lambda: self.start_replacement(include_failed=True))
@@ -177,7 +179,14 @@ class MainWindow(QMainWindow):
 
     def step_available(self) -> list[bool]:
         done = self.step_done()
-        return [True] + [done[i - 1] for i in range(1, len(STEPS))]
+        avail = [True] + [done[i - 1] for i in range(1, len(STEPS))]
+        if self.ctx.approval_id is not None:
+            # Once downloads are confirmed the run is under way: the earlier steps are closed until the playlist
+            # is finished (Start another playlist) or cancelled. A "Find another source" review is the exception.
+            for i in range(STEP_TRANSFERS):
+                avail[i] = False
+            avail[STEP_REVIEW] = self._replacement_open
+        return avail
 
     def refresh_navigation(self) -> None:
         """Update sidebar states and every page's Next button from the current application state."""
@@ -201,6 +210,9 @@ class MainWindow(QMainWindow):
         self._navigation_generation += 1
         self.spotify_service.leave()
         self.soundcloud_service.leave()
+        if index != STEP_REVIEW and self._replacement_open:
+            self._replacement_open = False  # leaving the replacement review closes Review again
+            self.refresh_navigation()
         self.stack.setCurrentIndex(index + 1)
         self.sidebar.show_step(index)
         if index == STEP_TRANSFERS:
@@ -315,6 +327,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("No failed downloads need another source. See import history for queued or unresolved tracks.")
                 return
             self.review.load_replacement(plan)
+            self._replacement_open = True
             self.refresh_navigation()
             self.go_step(STEP_REVIEW)
 
@@ -327,8 +340,57 @@ class MainWindow(QMainWindow):
             self.search.start()
 
     def _approved(self) -> None:
+        self._replacement_open = False
         self.refresh_navigation()
         self.go_step(STEP_TRANSFERS)
+
+    def ask_cancel_import(self) -> bool:
+        """Modal question for "Cancel downloads". True only for an explicit yes. Replaceable in tests."""
+        box = QMessageBox(QMessageBox.Icon.Warning, "Cancel downloads?",
+                          "Downloads that have not finished are stopped, and you start again from step 1.\n\n"
+                          "Tracks already in your folder stay there, and partly downloaded files are kept in the "
+                          "Soulseek downloads folder.", parent=self)
+        go = box.addButton("Cancel downloads", QMessageBox.ButtonRole.DestructiveRole)
+        stay = box.addButton("Keep downloading", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is go
+
+    def cancel_import(self) -> None:
+        """Stop every unfinished download of this playlist, then start over (the only way back once confirmed)."""
+        ctx = self.ctx
+        iid = ctx.import_id
+        if not iid or ctx.approval_id is None or self._queueing or not self.ask_cancel_import():
+            return
+        self.transfers.stop()
+
+        def work():
+            with ctx.download_service() as svc:
+                for aid in workflow.approval_ids(ctx.store, iid):
+                    for rec in ctx.store.transfers_for_approval(aid):
+                        if rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS):
+                            svc.cancel(aid, rec.apple_id)
+
+        def done(_result=None) -> None:
+            if ctx.import_id != iid:
+                return
+            self._when_refresh_idle(self.start_another_import)
+            self.statusBar().showMessage("Downloads cancelled. Choose a playlist to start again.")
+
+        def failed(exc) -> None:
+            self.transfers.start()
+            show_error(self, "Cancel downloads", "Some downloads could not be stopped, so nothing was "
+                       f"reset. Try again in a moment.\n\n{ctx.describe(exc)}")
+
+        run_async(self, work, done, failed)
+
+    def _when_refresh_idle(self, fn) -> None:
+        """Run fn once the Downloads page's background refresh (if any) has finished."""
+        if self.transfers._inflight:
+            QTimer.singleShot(100, lambda: self._when_refresh_idle(fn))
+        else:
+            fn()
 
     def open_history(self) -> None:
         dialog = HistoryDialog(self.ctx, self, import_id=self.ctx.import_id)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from s2s.models import AppleTrack, Candidate, MatchPolicy, MatchResult, MatchStatus, RemoteFile, Settings, Tier
 from s2s.store import Store
@@ -81,7 +81,7 @@ def test_summary_chips_and_row_text(page):
     assert page.chip_missing.text() == "2 not found"
     assert page.chip_skipped.text() == "1 skipped"
     assert page.chip_selected.text() == "2 selected"
-    assert page.confirm_btn.text() == "Download 2 tracks\u2026"
+    assert page.confirm_btn.text() == "Confirm selection (2)"
     px = page.proxy
     match = [px.index(r, review_page.C_MATCH).data() for r in range(6)]
     assert match[0] == "Exact match"
@@ -186,9 +186,7 @@ def test_locked_banner_and_downloads_signal(ctx):
     got = []
     p.downloads_requested.connect(lambda: got.append(1))
     assert not p.select_ready_btn.isEnabled()
-    assert p.confirm_btn.text() == "Go to Downloads"  # one button: once confirmed it leads on
-    p.confirm_btn.click()
-    assert got == [1]
+    assert p.confirm_btn.text() == "Selection confirmed" and not p.confirm_btn.isEnabled()
 
 
 def test_stale_rules_banner_and_rerun_signal(ctx):
@@ -211,14 +209,17 @@ def test_confirm_dialog_is_a_compact_summary(page):
     assert all("quality" in e for e in entries)
     dlg = ConfirmDialog(entries, "D:\\lib")
     assert "2 files" in dlg.summary.text() and "D:\\lib" in dlg.summary.text()
-    assert dlg.table.rowCount() == len(entries) == 3  # two primaries + one backup
+    assert dlg.table.rowCount() == len(entries) == 2  # only the ticked files
     assert dlg.table.isColumnHidden(4) and not dlg.table.isColumnHidden(2)
     assert dlg.table.item(0, 2).text() == "MP3 320"
     dlg.paths_check.setChecked(True)
     assert not dlg.table.isColumnHidden(4)
 
 
-def test_switching_uploaders_is_automatic_with_no_option(page):
+def test_confirmation_lists_only_the_ticked_files(page):
+    """S2S never approves another uploader on its own: a stuck download is shown in Needs attention instead."""
     assert not hasattr(page, "backups_check") and not hasattr(page, "backup_wait")
-    others = [e for e in page.summary_entries() if e.get("backup")]
-    assert others and all(e["wait_seconds"] == review_page.SWITCH_AFTER_S >= 120 for e in others)
+    assert not any(e.get("backup") for e in page.summary_entries())
+    dlg = ConfirmDialog(page.summary_entries(), "D:\\lib")
+    buttons = [b.text() for b in dlg.findChildren(QPushButton)]
+    assert "Continue" in buttons and "Back to review" in buttons

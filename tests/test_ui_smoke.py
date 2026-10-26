@@ -195,10 +195,12 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert not f[3].next_btn.isEnabled()
     ctx.approval_id = "ap"
     win.refresh_navigation()
-    assert f[3].next_btn.isEnabled() and sb.step_enabled(4)
-    # going back stays possible
+    assert sb.step_enabled(4) and sb.step_enabled(5)
+    # once downloads are confirmed there is no going back: steps 1-4 are closed until cancel or finish
+    assert not any(sb.step_enabled(i) for i in range(4))
+    win.go_step(4)
     win.go_step(0)
-    assert win.stack.currentIndex() == 1
+    assert win.stack.currentIndex() == 5
     win.transfers.stop()
 
     # an invalid / cleared destination locks the later steps again
@@ -479,7 +481,7 @@ def test_review_defaults_and_selection_rules(env):
     assert m.data(m.index(1, 0), Qt.ItemDataRole.BackgroundRole) is not None  # highlighted
     assert m.data(m.index(0, 0), Qt.ItemDataRole.BackgroundRole) is None
     assert "similar" in m.data(m.index(4, review_page.C_MATCH))
-    assert m.counts()["checked"] == 2 and "2 tracks" in rp.confirm_btn.text()
+    assert m.counts()["checked"] == 2 and rp.confirm_btn.text() == "Confirm selection (2)"
     # Cannot tick an unresolved row
     assert m.setData(m.index(2, 0), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole) is False
     # Can tick the flagged one deliberately
@@ -555,9 +557,9 @@ def test_confirm_yes_creates_one_approval_and_enqueues_once(env, monkeypatch):
     # locked: no further edits, no second submission
     assert win.review.model.setData(win.review.model.index(1, 0), Qt.CheckState.Checked,
                                     Qt.ItemDataRole.CheckStateRole) is False
-    win.review.confirm_download()  # the same button now leads on to Downloads
+    win.review.confirm_download()
     assert len(created) == 1 and len(svc.calls) == 1
-    assert win.review.confirm_btn.text() == "Go to Downloads" and win.review.confirm_btn.isEnabled()
+    assert win.review.confirm_btn.text() == "Selection confirmed" and not win.review.confirm_btn.isEnabled()
 
 
 def test_confirm_no_does_nothing(env, monkeypatch):

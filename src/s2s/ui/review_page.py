@@ -24,7 +24,7 @@ from .. import config, organize, workflow
 from ..approval import create_approval
 from ..matching.formats import ext_of
 from ..models import Candidate, MatchResult, MatchStatus, RemoteFile, SelectionItem, Tier
-from ..queue_recovery import approve_backups, proposed_backups
+from ..queue_recovery import proposed_backups
 from ..slskd.search import build_queries
 from . import theme
 from .context import AppContext
@@ -521,7 +521,7 @@ class ConfirmDialog(QDialog):
         backups = [e for e in entries if e.get("backup", False)]
         mib = lambda es: sum(e["size"] for e in es) / (1024 * 1024)  # noqa: E731
         lay = QVBoxLayout(self)
-        head = QLabel(f"Download {len(primary)} track{'s' if len(primary) != 1 else ''}?")
+        head = QLabel(f"Download the {len(primary)} selected track{'s' if len(primary) != 1 else ''}?")
         f = head.font()
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
@@ -531,8 +531,8 @@ class ConfirmDialog(QDialog):
                               f"· copied into {destination}")
         self.summary.setWordWrap(True)
         lay.addWidget(self.summary)
-        note = ("Only the files listed here will be requested. You cannot change them afterwards; "
-                "start a new review to pick different ones.")
+        note = ("Only the files listed here will be requested. After you continue, the selection is final: to "
+                "change it, use Cancel downloads on the Downloads page and start again.")
         if backups:
             wait = next((e.get("wait_seconds", 45) for e in backups), 45)
             note += (f"\nIf an uploader has not started sending after {wait} seconds, S2S switches to another "
@@ -563,8 +563,8 @@ class ConfirmDialog(QDialog):
         lay.addWidget(self.paths_check)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No)
         yes = theme.primary(box.button(QDialogButtonBox.StandardButton.Yes))
-        yes.setText(f"Download {len(primary)} track{'s' if len(primary) != 1 else ''}")
-        box.button(QDialogButtonBox.StandardButton.No).setText("Cancel")
+        yes.setText("Continue")
+        box.button(QDialogButtonBox.StandardButton.No).setText("Back to review")
         box.button(QDialogButtonBox.StandardButton.No).setDefault(True)
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
@@ -760,7 +760,7 @@ class ReviewPage(QWidget):
         self.queue_progress = QProgressBar()
         self.queue_progress.setRange(0, 0)
         self.queue_progress.setVisible(False)
-        self.confirm_btn = theme.primary(QPushButton("Download 0 tracks…"))
+        self.confirm_btn = theme.primary(QPushButton("Confirm selection (0)"))
         self.confirm_btn.setEnabled(False)
         foot = QHBoxLayout()
         foot.addWidget(self.dest_label, 1)
@@ -1208,9 +1208,9 @@ class ReviewPage(QWidget):
         theme.set_stat(self.chip_skipped, f"{c['skipped']} skipped", "muted")
         self.chip_skipped.setVisible(c["skipped"] > 0)
         theme.set_stat(self.chip_selected, f"{n} selected", zero(n, "info"))
-        self.confirm_btn.setText("Go to Downloads" if self._locked else f"Download {n} track{'s' if n != 1 else ''}…")
+        self.confirm_btn.setText("Selection confirmed" if self._locked else f"Confirm selection ({n})")
         stale = self.rules_stale()
-        self.confirm_btn.setEnabled(self._locked or (n > 0 and not self._busy and not stale))
+        self.confirm_btn.setEnabled(n > 0 and not self._locked and not self._busy and not stale)
         self.confirm_btn.setToolTip("Run the search again first: your matching rules changed." if stale else
                                     "Review the exact list of files before anything is queued.")
         free = not self._locked and not self._busy
@@ -1240,22 +1240,7 @@ class ReviewPage(QWidget):
              "quality": quality_text(r.chosen.file)}
             for r in self.model.checked_rows()
         ]
-        backups = self._backup_items()
-        for row in self.model.checked_rows():
-            known = {file_key(c): c for c in ([row.result.best] if row.result.best else []) + list(row.result.alternatives)}
-            for n, file in enumerate(backups.get(row.result.track.apple_id, ()), 1):
-                cand = known.get((file.username, file.filename, file.size))
-                entries.append(dict(title=f"Other uploader {n}: {row.result.track.name} - {row.result.track.artist}",
-                    username=file.username, filename=file.filename, size=file.size,
-                    destination=file.destination, backup=True, wait_seconds=SWITCH_AFTER_S,
-                    quality=quality_text(cand.file) if cand else ""))
         return entries
-
-    def _backup_items(self) -> dict:
-        """For every ticked track, the other uploaders of the same file S2S may switch to (always on)."""
-        selected = {item.apple_id: item for item in self.model.selection_items()}
-        return {row.result.track.apple_id: proposed_backups(row.result, selected[row.result.track.apple_id])
-                for row in self.model.checked_rows()}
 
     def ask_confirmation(self, entries: list[dict]) -> bool:
         """Modal summary of every file. Returns True only if the user explicitly answered Yes."""
@@ -1283,8 +1268,6 @@ class ReviewPage(QWidget):
             show_error(self, "Confirm", "No import is active; run a search first.")
             return
         downloads_dir, archive_name = ctx.settings.slskd_downloads_dir, ctx.settings.archive_dir_name
-        backups, wait_seconds = self._backup_items(), SWITCH_AFTER_S
-        settings = ctx.settings
         self._busy = True
         self._load_generation += 1
         self.queue_progress.setVisible(True)
@@ -1299,8 +1282,6 @@ class ReviewPage(QWidget):
             with ctx.download_service() as svc:  # client built first: a missing API key fails before any approval
                 approval = create_approval(ctx.store, import_id, items, downloads_dir=downloads_dir,
                                            archive_name=archive_name)
-                if backups:
-                    approve_backups(ctx.store, approval, backups, settings, wait_seconds=wait_seconds)
                 svc.enqueue_approved(approval.id, approval.fingerprint)
             return approval
 
@@ -1334,7 +1315,4 @@ class ReviewPage(QWidget):
         show_error(self, "Could not queue downloads", self.ctx.describe(exc))
 
 
-# A download whose uploader has sent nothing for this long switches to another uploader of the same file (the
-# other uploaders are listed in the confirmation). Long enough for an ordinary queue to start moving.
-SWITCH_AFTER_S = 5 * 60
 ROLE_STATE = Qt.ItemDataRole.UserRole + 2  # per-row state in the alternatives list: in use / option / rejected

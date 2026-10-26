@@ -33,7 +33,7 @@ services; they do not establish that real account sign-in or live downloads work
 - Search multiple tracks concurrently, using short initial passes and a longer search when too few uploaders
   are found. Aim for a match plus two other uploaders of the same file; availability varies.
 - Review proposed files, alternatives, audio quality, and unresolved matches before downloading.
-- Automatically switch a download that is stuck in an uploader's queue to another uploader of the same file.
+- Flag a download that is stuck in an uploader's queue, and let you choose another uploader of the same file.
 - Configure matching rules and save reusable rule sets.
 - Verify completed downloads and copy them into a flat tracklist folder.
 - Check the finished folder against the playlist in order.
@@ -100,14 +100,17 @@ playlists, including accessible private playlists; liked playlists and liked tra
 4. **Review & confirm.** A summary shows how many tracks are ready, need a look, or were not found; filters
    and **Next to check** take you straight to the ones that need attention. Confident matches are ticked,
    flagged ones are not. The details panel explains why a file was chosen or flagged and lists alternatives.
-   Downloads begin only after you confirm the exact files with **Download N tracks…**; the confirmation also
-   lists, in grey, the other uploaders of the same files that S2S may switch to.
+   Downloads begin only after you press **Confirm selection** and answer **Continue** in the summary of the
+   exact files (**Back to review** returns to the list). After that the selection is final: steps 1–4 are
+   closed until the playlist is finished (**Start another playlist** in step 6) or **Cancel downloads** is used
+   on the Downloads page.
 5. **Downloads & import.** The queue lists every track with a plain status ("In folder ✓", "Downloading 42%",
    "Waiting on uploader"). Verified files are copied into the tracklist folder automatically. Any track that
-   fails, is declined, waits on its uploader for more than 10 minutes, or does not pass its check also appears
+   fails, is declined, waits on its uploader for more than 5 minutes, or does not pass its check also appears
    in **Needs attention** underneath, with what happened in plain words and the buttons that fix it (Find
-   another source, Retry, Check again, Cancel) while the rest keeps downloading. A replacement still needs your
-   confirmation.
+   another source, Choose another uploader, Retry, Check again, Cancel download) while the rest keeps
+   downloading. A replacement still needs your confirmation. **Cancel downloads** stops every unfinished
+   download and starts over from step 1; tracks already in the folder stay there.
 6. **Check files.** Compares the tracklist folder with the playlist in order, lists anything missing or
    unexpected, and opens a track's spectrogram to check its real quality. The missing list can be exported.
    **Start another playlist** is here.
@@ -165,16 +168,14 @@ use unofficial website APIs; S2S is not affiliated with the streaming services o
 
 ## Queued downloads
 
-Switching is automatic. When an uploader has sent nothing for 5 minutes, S2S tries another uploader of the
-same file, with at most three attempts active per track. It only switches to a copy of the very recording you
+S2S never switches uploader on its own. When an uploader has sent nothing for 5 minutes, the track moves to
+**Needs attention** with **Choose another uploader…**. That lists only copies of the very recording you
 approved: the same match (an exact match is never swapped for an extended mix), the same version, the same
-format and quality, and the same length within 3 seconds or the same byte size. These other uploaders are listed
-in the confirmation, and nothing outside that list is ever requested. Once a source starts sending, the other
-attempts are cancelled without deleting partial files. Only the finished, verified file is copied to the
-tracklist folder. For downloads confirmed before this version, **Switch to another uploader…** in Step 5 offers
-the same.
+format and quality, and the same length within 3 seconds or the same byte size. Only the uploaders you tick
+there are tried, at most three at once per track; once one starts sending, the other attempts are cancelled
+without deleting partial files. Only the finished, verified file is copied to the tracklist folder.
 
-Keep Step 5 open for automatic verification, import, archiving, and switching checks. Soulseek downloads
+Keep Step 5 open for automatic verification, import, archiving, and recovery checks. Soulseek downloads
 continue independently when S2S is closed or another page is open; automatic processing resumes when Step 5
 is opened again. This behavior has offline test coverage; live queue recovery remains under user testing.
 
