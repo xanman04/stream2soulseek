@@ -20,6 +20,8 @@
 - Installers: a Windows setup program (per-user, Start menu, uninstaller) and a Mac disk image to drag into
   Applications. The ZIPs remain for the in-app updater.
 - New app icon: the S2S letters on a rounded grey tile.
+- Report a problem always includes the technical details (version, system, recent log; logins and folder
+  names removed); there is no option to leave them out.
 - Release builds use the Node 24 versions of the GitHub Actions.
 
 ## 1.0.7 — 2026-10-26

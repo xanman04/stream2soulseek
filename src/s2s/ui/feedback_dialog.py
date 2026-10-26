@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTextEdit,
+from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTextEdit,
                                QVBoxLayout, QWidget)
 
 from .. import feedback
@@ -18,14 +18,12 @@ class FeedbackDialog(QDialog):
         self.resize(640, 560)
         intro = QLabel("Describe what happened and what you were doing. S2S opens your email app with a message "
                        f"to the developer ({feedback.REPORT_EMAIL}); you can read and change everything before "
-                       "sending. Nothing is sent by S2S itself.")
+                       "sending. Nothing is sent by S2S itself. The S2S version, your system and a recent log "
+                       "are included, with logins and folder names removed.")
         intro.setWordWrap(True)
         self.description = QTextEdit()
         self.description.setAcceptRichText(False)
         self.description.setPlaceholderText("For example: I pressed Sign in to Apple Music and S2S closed.")
-        self.include = QCheckBox("Include technical details (S2S version, system and a recent log; logins and your "
-                                 "folder names are removed)")
-        self.include.setChecked(True)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.show_details = QPushButton("Show details")
@@ -40,7 +38,6 @@ class FeedbackDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(intro)
         lay.addWidget(self.description, 2)
-        lay.addWidget(self.include)
         lay.addWidget(self.show_details, 0)
         lay.addWidget(self.details, 3)
         lay.addWidget(self.status)
@@ -52,7 +49,6 @@ class FeedbackDialog(QDialog):
         lay.addLayout(row)
 
         self.show_details.toggled.connect(self._toggle_details)
-        self.include.toggled.connect(lambda _on: self._refresh_details())
         self.send_btn.clicked.connect(self.send)
         self.copy_btn.clicked.connect(self.copy)
         cancel.clicked.connect(self.reject)
@@ -67,7 +63,7 @@ class FeedbackDialog(QDialog):
             self.details.setPlainText(self.report_text())
 
     def report_text(self) -> str:
-        return feedback.build_report(self.description.toPlainText(), include_log=self.include.isChecked())
+        return feedback.build_report(self.description.toPlainText(), include_log=True)  # always: the developer needs them
 
     def open_url(self, url: str) -> bool:
         """Replaceable in tests."""
@@ -76,11 +72,10 @@ class FeedbackDialog(QDialog):
     def send(self) -> None:
         report = self.report_text()
         path = feedback.save_report(report)
-        body = feedback.mail_body(self.description.toPlainText(), path if self.include.isChecked() else None)
+        body = feedback.mail_body(self.description.toPlainText(), path)
         subject = f"S2S problem report ({feedback.system_summary().split(' · ')[0]})"
         opened = self.open_url(feedback.mailto_url(subject, body))
-        if self.include.isChecked():
-            self.open_url(QUrl.fromLocalFile(str(path.parent)).toString())  # so the file can be attached
+        self.open_url(QUrl.fromLocalFile(str(path.parent)).toString())  # so the file can be attached
         if opened:
             self.status.setText(f"Your email app should now show the message. Please attach {path.name} "
                                 "(its folder was opened) and press Send.")
