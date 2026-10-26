@@ -52,4 +52,7 @@ def make_table(headers: list[str], parent: QWidget | None = None) -> QTableWidge
 
 
 def show_error(parent: QWidget | None, title: str, message: str) -> None:
+    from ..applog import get
+
+    get().warning("%s: %s", title, message)  # every error the user sees is in the log a problem report includes
     QMessageBox.warning(parent, title, message)

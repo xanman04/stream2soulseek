@@ -172,6 +172,15 @@ def self_test(report_path: str) -> int:
         return "valid"
 
     check("service logos", logos)
+
+    def update_verifier():
+        from .updater import verify_signature
+
+        if verify_signature("S2S-0-test.zip", "0" * 64, "AAAA"):
+            raise RuntimeError("accepted a bad signature")
+        return "rejects unsigned updates"
+
+    check("update signatures", update_verifier)
     check("ffprobe", lambda: run_tool(find_tool("ffprobe")))
     check("ffmpeg", lambda: run_tool(find_tool("ffmpeg")))
     def slskd_path():
@@ -202,6 +211,10 @@ def main() -> int:
     # Keep the web view's native window from turning every sibling widget native (repaint artifacts).
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
     app = QApplication.instance() or QApplication(sys.argv)
+    from . import applog
+    from .feedback import system_summary
+
+    applog.setup().info("Started %s", system_summary())
     from .ui.theme import apply_app_style
 
     apply_app_style(app)
@@ -220,6 +233,7 @@ def main() -> int:
 
     store = Store(config.db_path())
     window = MainWindow(store, SecretStore(), config.load_settings())
+    applog.set_secrets(window.ctx.secret_values())
     window.show()
     if running_inside_packaged_app():
         from PySide6.QtWidgets import QMessageBox

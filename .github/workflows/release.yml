@@ -63,7 +63,16 @@ jobs:
         run: python packaging/verify_release.py assets --tag "$S2S_RELEASE_TAG"
         env:
           S2S_RELEASE_TAG: ${{ github.ref_name }}
-      - uses: softprops/action-gh-release@v2
+      - name: Sign the archives for the in-app updater
+        run: |
+          python -m pip install cryptography
+          python packaging/sign_release.py assets
+          python packaging/verify_release.py assets --tag "$S2S_RELEASE_TAG" --signed
+        env:
+          S2S_UPDATE_SIGNING_KEY: ${{ secrets.S2S_UPDATE_SIGNING_KEY }}
+          S2S_RELEASE_TAG: ${{ github.ref_name }}
+      - id: draft
+        uses: softprops/action-gh-release@v2
         with:
           name: S2S ${{ steps.verify.outputs.version }}
           body_path: packaging/RELEASE_NOTES.md
@@ -74,8 +83,9 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const tag = context.ref.replace('refs/tags/', '');
+            // Look the draft up by its id: GitHub's by-tag lookup only returns published releases.
             const repo = {owner: context.repo.owner, repo: context.repo.repo};
-            const {data: release} = await github.rest.repos.getReleaseByTag({...repo, tag});
-            if (release.assets.length !== 6) throw new Error('Expected three archives and three checksums');
-            await github.rest.repos.updateRelease({...repo, release_id: release.id, draft: false, make_latest: 'true'});
+            const release_id = Number('${{ steps.draft.outputs.id }}');
+            const {data: assets} = await github.rest.repos.listReleaseAssets({...repo, release_id, per_page: 100});
+            if (assets.length !== 9) throw new Error(`Expected three archives, three checksums and three signatures, found ${assets.length}`);
+            await github.rest.repos.updateRelease({...repo, release_id, draft: false, make_latest: 'true'});

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.4 — 2026-10-26
+
+- In-app updates: S2S checks GitHub Releases at start (packaged app only) and via Help > Check for updates,
+  downloads this platform's archive, verifies its Ed25519 signature against the key built into the app, swaps
+  the app with a small helper after quitting and restarts. Release builds sign every archive
+  (packaging/sign_release.py, secret S2S_UPDATE_SIGNING_KEY) and publishing now looks the draft up by id.
+- Help > Report a problem: a prefilled email to xnc2301+S2S@gmail.com with a scrubbed recent log; nothing is
+  sent by S2S itself.
+- S2S keeps a log (app data `logs/s2s.log`, secrets and home folder removed) and records native crashes
+  (`logs/crash.log`).
+
 ## 1.0.3 — 2026-10-26
 
 - Fixed a crash on macOS when opening Apple Music sign-in: the app-wide Python event filter that hid hover texts

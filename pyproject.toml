@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s2s"
-version = "1.0.3"
+version = "1.0.4"
 description = "Streaming-service playlists, reviewed Soulseek downloads, and flat music libraries"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
@@ -16,6 +16,7 @@ dependencies = [
     "curl_cffi>=0.15,<0.17",
     "websockets>=12,<18",
     "keyring>=24; sys_platform == 'darwin'",  # saved logins live in the macOS Keychain
+    "cryptography>=42",  # verifies the signature of in-app updates
 ]
 
 [project.optional-dependencies]
