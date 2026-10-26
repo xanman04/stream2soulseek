@@ -201,10 +201,11 @@ def build_queries(track: AppleTrack) -> list[str]:
 # below that with a sliding window and margins on every side:
 RATE_LIMIT = 30  # search starts in any RATE_WINDOW_S, across every worker, run and S2S process together
 RATE_WINDOW_S = 220
-MIN_SPACING_S = 3.0  # never two search starts closer together than this: no bursts, at most 20 a minute
+MIN_SPACING_S = 1.0  # never two search starts at the same moment
 REPEAT_COOLDOWN_S = 120  # the same query text is never sent again within this time
-# Pacing scales with the run: when the searches still expected fit in what the window has left, they start every
-# 3 s (a small playlist never waits for the window). When they do not, starts are spread evenly at the window's rate
+# Pacing scales with the run: when the searches still expected fit in what the window has left, they start as
+# soon as a search is needed (a small playlist never waits). When they do not, starts are spread evenly at the
+# window's rate
 # (about 8 a minute), so a big playlist makes steady progress instead of bursting 30 searches and then stalling
 # for minutes while the window clears. The window rule still applies on top, whatever the estimate says.
 # A short outage (network blip) gets this long to recover. Anything longer is treated as a ban: searching stops
@@ -404,16 +405,6 @@ class SearchRateLimiter:
             self._trim(self._clock())
             self._trim_local(self._mono())
             return max(0, self._limit - max(len(self._times), len(self._local)))
-
-    def seconds_until_next(self) -> float:
-        """How long a new (never sent) search would have to wait right now; for the progress display."""
-        with self._lock:
-            if self.unlimited:
-                return 0.0
-            now, mono_now = self._clock(), self._mono()
-            self._trim(now)
-            self._trim_local(mono_now)
-            return max(0.0, self._wait_needed(now, mono_now, None))
 
     def used(self) -> int:
         """Searches started in the current window (by any S2S process, as far as this one knows)."""

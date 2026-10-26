@@ -74,11 +74,6 @@ def _left_text(seconds: float) -> str:
     return f"up to {max(1, math.ceil(seconds))} s"
 
 
-def _wait_text(seconds: float) -> str:
-    s = int(math.ceil(seconds))
-    return f"{s} s" if s < 90 else f"{s // 60} min {s % 60:02d} s"
-
-
 def _eta_text(seconds: float) -> str:
     if seconds < 8:
         return "a few seconds left"
@@ -449,9 +444,6 @@ class SearchPage(QWidget):
         text = f"{used} searches run{reused} · about {self._expected_searches()} more expected"
         if self._pace_seconds() > 0:  # more searches needed than Soulseek allows at once: say why it slows down
             text += f" · paced to about {self._per_minute():.0f} searches a minute to stay under Soulseek's search limit"
-        wait = lim.seconds_until_next()
-        if wait >= 2 and self._done < self._total:  # never look frozen: say when the next search starts
-            text += f" · next search in {_wait_text(wait)}"
         return text
 
     def _tick(self) -> None:
