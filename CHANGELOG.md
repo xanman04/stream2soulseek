@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.0.4 — 2026-10-26
+## 1.0.5 — 2026-10-26
+
+- Verify update signatures with a built-in Ed25519 (RFC 8032) verifier instead of the cryptography library,
+  whose OpenSSL clashed with Python's on Intel Macs (1.0.4 was never released for that reason).
+
+## 1.0.4 — 2026-10-26 (not released)
 
 - In-app updates: S2S checks GitHub Releases at start (packaged app only) and via Help > Check for updates,
   downloads this platform's archive, verifies its Ed25519 signature against the key built into the app, swaps

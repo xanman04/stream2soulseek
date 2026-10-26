@@ -43,10 +43,10 @@ on Windows or `shasum -a 256 <archive>` on macOS to check the download's integri
 
 ## Updates and problem reports
 
-From version 1.0.4, S2S updates itself: at start it checks the latest release (also **Help → Check for
+From version 1.0.5, S2S updates itself: at start it checks the latest release (also **Help → Check for
 updates**), and **Update now** downloads the archive for your computer, checks that it is signed with the
 developer's update key, installs it and restarts. Settings, logins and history are kept. Updates are not
-offered while downloads are running. Earlier versions need one manual download of 1.0.4.
+offered while downloads are running. Earlier versions need one manual download of 1.0.5.
 
 **Help → Report a problem** opens your email app with a message to the developer: your description, the S2S
 and system versions, and a recent log with logins and folder names removed. The full report is saved as a
