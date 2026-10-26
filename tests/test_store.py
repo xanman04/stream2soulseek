@@ -1,3 +1,4 @@
+import os
 import threading
 
 import pytest
@@ -101,7 +102,12 @@ def test_import_results_and_completed(store, tmp_path):
     store.record_import_result(i2, ImportResult("i.4", ImportOutcome.COPIED, "s", "f"))
     assert store.import_results(i1)[0] == r
     assert store.completed_apple_ids(dest) == {"i.1", "i.3"}
-    assert store.completed_apple_ids(dest.upper() + "\\") == {"i.1", "i.3"}
+    case_variant = dest.upper() + os.sep
+    if os.name == "nt":
+        assert store.completed_apple_ids(case_variant) == {"i.1", "i.3"}
+    else:
+        # normcase is case-sensitive on POSIX; only the trailing separator is normalized.
+        assert store.completed_apple_ids(dest + os.sep) == {"i.1", "i.3"}
     final.unlink()
     assert store.completed_apple_ids(dest) == set()
 

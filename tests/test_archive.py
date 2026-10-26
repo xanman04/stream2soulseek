@@ -1,6 +1,7 @@
 """archive.py: moving a peer's download folder into OLD without ever overwriting or losing data."""
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -26,8 +27,8 @@ def test_simple_move_preserves_relative_paths(tmp_path):
     (dl / "peer" / "empty").mkdir()
     res = archive_peer_bundle(str(dl), "peer", now=NOW)
     assert res.ok and res.source_removed and not (dl / "peer").exists()
-    assert sorted(res.moved) == sorted(["Album\\a.mp3", "Album\\sub\\b.mp3"])
-    assert tree(dl / "OLD" / "peer") == {"Album\\a.mp3": b"A", "Album\\sub\\b.mp3": b"B"}
+    assert sorted(res.moved) == sorted([str(Path("Album") / "a.mp3"), str(Path("Album") / "sub" / "b.mp3")])
+    assert tree(dl / "OLD" / "peer") == {str(Path("Album") / "a.mp3"): b"A", str(Path("Album") / "sub" / "b.mp3"): b"B"}
 
 
 def test_merge_dedupes_identical_and_renames_different(tmp_path):
@@ -40,16 +41,16 @@ def test_merge_dedupes_identical_and_renames_different(tmp_path):
     write(dl / "peer" / "Album" / "fresh.mp3", b"FRESH")
     res = archive_peer_bundle(str(dl), "peer", now=NOW)
     assert res.ok and not (dl / "peer").exists()
-    assert res.deduped == ("Album\\same.mp3",)
-    assert res.moved == ("Album\\fresh.mp3",)
-    assert res.renamed == (("Album\\diff.mp3", "Album\\diff (archived 20261024-123005).mp3"),)
+    assert res.deduped == (str(Path("Album") / "same.mp3"),)
+    assert res.moved == (str(Path("Album") / "fresh.mp3"),)
+    assert res.renamed == ((str(Path("Album") / "diff.mp3"), str(Path("Album") / "diff (archived 20261024-123005).mp3")),)
     out = tree(dl / "OLD" / "peer")
     assert out == {
-        "Album\\same.mp3": b"SAME",
-        "Album\\diff.mp3": b"OLD-BYTES",  # existing archive content untouched
-        "Album\\diff (archived 20261024-123005).mp3": b"NEW-BYTES",  # incoming bytes kept
-        "Album\\keep.mp3": b"KEEP",
-        "Album\\fresh.mp3": b"FRESH",
+        str(Path("Album") / "same.mp3"): b"SAME",
+        str(Path("Album") / "diff.mp3"): b"OLD-BYTES",  # existing archive content untouched
+        str(Path("Album") / "diff (archived 20261024-123005).mp3"): b"NEW-BYTES",  # incoming bytes kept
+        str(Path("Album") / "keep.mp3"): b"KEEP",
+        str(Path("Album") / "fresh.mp3"): b"FRESH",
     }
 
 
