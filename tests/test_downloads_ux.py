@@ -115,14 +115,12 @@ def test_one_fix_button_routes_declined_and_failed(env):  # noqa: F811
     page._refreshed(payload([declined, (0, rec(TransferState.SUCCEEDED, track="b"))], [imported("b")]))
     assert not page.attention.isHidden() and page.attention_title.text() == "Needs attention (1)"
     assert page.problems.rowCount() == 1 and page.problems.item(0, 1).text() == "A"
-    assert page.fix_btn.text() == "Find another source for 1 track…" and not page.fix_btn.isHidden()
+    assert page.fix_btn.isHidden() and not page.sources.isHidden()  # fixed in place, not in Review
     assert page.table.rowCount() == 2  # the queue still lists every track
-    page.fix_btn.click()
     broken = (0, rec(TransferState.FAILED, "Completed, Errored", "boom", track="b"))
     page._refreshed(payload([declined, broken]))
     assert page.attention_title.text() == "Needs attention (2)"
-    page.fix_btn.click()
-    assert emitted == ["declined", "failed"]
+    assert emitted == []  # nothing sends the user back to Review
     page.stop()
 
 
@@ -231,7 +229,7 @@ def test_problems_panel_explains_in_plain_words_and_never_shows_raw_errors(env):
     assert page.problems.item(0, 2).text() == "Failed"
     text = page.problem_help.text()
     assert text.startswith("Song — Artist:") and "{" not in text and "System.Exception" not in text
-    assert page.retry_btn.isEnabled() and not page.fix_btn.isHidden()
+    assert page.retry_btn.isEnabled() and not page.sources.isHidden()
     page.stop()
 
 

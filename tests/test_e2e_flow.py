@@ -436,26 +436,23 @@ def test_whole_app_flow(app_env, monkeypatch):
     wt = win.transfers
     assert wt.attention.isVisibleTo(wt) and wt.problems.rowCount() == 1
     assert wt.problems.item(0, 1).text().startswith("Hold On")
-    assert wt.fix_btn.isVisibleTo(wt) and wt.fix_btn.text() == "Find another source for 1 track…"
+    assert not wt.fix_btn.isVisibleTo(wt) and wt.sources.isVisibleTo(wt)  # other files listed beside it
     assert wt.chip_folder.text() == "6 in folder" and wt.chip_attention.text() == "1 need attention"
     assert wt.chip_waiting.text() == "1 waiting on uploader"
     assert win.stack.currentIndex() == STEP_TRANSFERS + 1
     # the declined peer is remembered for later searches
     assert store.declining_peers().get("rejecter")
 
-    # ---------------- "Find another source": a replacement review limited to the declined track
-    wt.fix_btn.click()
-    assert win.stack.currentIndex() == STEP_REVIEW + 1
-    assert [r.result.track.apple_id for r in rv.model.rows] == ["i.6"]
-    assert rv.replacement and not rv._locked
-    row = rv.model.rows[0]
-    assert row.chosen.file.username == "goodpeer" and row.checked
-    assert all(c.file.username != "rejecter" for c in [row.chosen, *row.result.alternatives])
-    assert rv.confirm_btn.text() == "Confirm selection (1)"
+    # ---------------- another file for the declined track, chosen right on the Downloads page
+    wt.problems.selectRow(0)
+    panel = wt.sources
+    offered = [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())]
+    assert offered[0] == "goodpeer" and "rejecter" not in offered
     n_before = len(fake.enqueued)
     shown.clear()
-    rv.confirm_download()
-    assert len(shown) == 1 and [(e["username"]) for e in shown[0]] == ["goodpeer"]
+    monkeypatch.setattr(panel, "ask_download", lambda name, cand: shown.append(cand) or True)
+    panel.download_selected()
+    assert len(shown) == 1 and shown[0].file.username == "goodpeer"
     new_files = [f for e in fake.enqueued[n_before:] for f in e.files]
     assert [(f.username, f.size) for f in new_files] == [("goodpeer", 20_009)]
     assert len(fake.enqueued) == n_before + 1               # nothing besides the replacement was queued

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Fixed every download failing its check on a Mac ("ffprobe failed"): S2S saved the path of the ffprobe inside
+  the app, which moves on a Mac (a new temporary folder each launch when opened from Downloads, a new place after
+  an update). A saved path that no longer exists is now replaced with the bundled one. Press Check again.
+- Downloads, Needs attention: the other files found for a failed track are listed right beside it; pick one and
+  confirm to download it. No more trip back to Review.
+- Review: the lower panel always fits the window (only the lists scroll), "search with your own words" is a
+  search bar in that panel instead of a small popup, and queuing shows a popup instead of a banner.
+- New app icon: the S2S letters on a rounded grey tile.
+- Release builds use the Node 24 versions of the GitHub Actions.
+
 ## 1.0.7 — 2026-10-26
 
 - In-app updates now work on a Mac that opened S2S straight from Downloads: macOS runs such an app from a

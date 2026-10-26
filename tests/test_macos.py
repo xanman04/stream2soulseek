@@ -229,3 +229,26 @@ def test_running_from_source_has_no_bundled_tools(monkeypatch):
 
     monkeypatch.delattr(sys, "frozen", raising=False)
     assert models.bundled_tools_dir() is None
+
+
+def test_a_saved_ffprobe_path_that_no_longer_exists_is_replaced(tmp_path, monkeypatch):
+    """A Mac app opened from Downloads runs from a new temporary folder on each launch, so a saved path to its
+    bundled ffprobe goes stale; every downloaded file then failed its check."""
+    import json
+
+    monkeypatch.setattr(config, "default_ffprobe_path", lambda: "/Applications/S2S.app/Contents/Resources/tools/ffprobe")
+    config.settings_path().write_text(json.dumps(
+        {"ffprobe_path": "/private/var/folders/x/T/AppTranslocation/ABC/d/S2S.app/Contents/Resources/tools/ffprobe"}),
+        encoding="utf-8")
+    assert config.load_settings().ffprobe_path == "/Applications/S2S.app/Contents/Resources/tools/ffprobe"
+    real = tmp_path / "ffprobe"
+    real.write_bytes(b"")
+    config.settings_path().write_text(json.dumps({"ffprobe_path": str(real)}), encoding="utf-8")
+    assert config.load_settings().ffprobe_path == str(real)  # a path that exists is kept
+
+
+def test_a_missing_ffprobe_is_reported_plainly(tmp_path):
+    from s2s.organize import ProbeError, probe_audio
+
+    with pytest.raises(ProbeError, match="could not find ffprobe"):
+        probe_audio(tmp_path / "a.mp3", str(tmp_path / "missing-ffprobe"))

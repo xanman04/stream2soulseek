@@ -329,3 +329,26 @@ def test_review_custom_search_error_shows_banner(page_env, monkeypatch):
     assert "Search failed" in page.banner.text() and "not reachable" in page.banner.text()
     assert page.model.searching == set() and page.model.rows[0].chosen is None
     assert page.custom_btn.isEnabled()
+
+
+def test_review_search_bar_uses_typed_words_or_its_suggestion(page_env):
+    page, ctx, fake, track = page_env
+    ctx.slskd_client = lambda **k: fake
+    assert page.custom_query.isEnabled() and page.custom_query.placeholderText()  # suggestion, no popup
+    assert page.ask_custom_query("suggested") == "suggested"
+    page.custom_query.setText("my words")
+    page.custom_query.returnPressed.emit()  # Enter in the bar searches
+    assert page.model.rows[0].chosen is not None
+
+
+def test_queuing_popup_cannot_be_closed_until_queuing_ends():
+    from s2s.ui.review_page import QueuingDialog
+
+    popup = QueuingDialog(3)
+    popup.show()
+    popup.reject()
+    popup.close()
+    assert popup.isVisible()
+    popup.finish()
+    assert not popup.isVisible()
+    popup.deleteLater()

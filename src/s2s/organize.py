@@ -171,6 +171,8 @@ def probe_audio(path: Path, ffprobe_path: str, *, runner=subprocess.run) -> tupl
         # window and steal the keyboard focus. Output is read as bytes and decoded as UTF-8 below (the Windows
         # code page cannot decode every byte ffprobe may print).
         proc = runner(args, capture_output=True, timeout=60, shell=False, creationflags=NO_WINDOW)
+    except FileNotFoundError as exc:
+        raise ProbeError("S2S could not find ffprobe, the tool that checks files; restart S2S") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise ProbeError(f"ffprobe failed: {type(exc).__name__}") from exc
     if proc.returncode != 0:
