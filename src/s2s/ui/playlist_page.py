@@ -65,7 +65,7 @@ class PlaylistPage(QWidget):
 
         # --- open a playlist by link (public Spotify playlists need no sign-in)
         self.link_edit = QLineEdit()
-        self.link_edit.setPlaceholderText("Or paste a Spotify playlist link to open it (no sign-in needed)")
+        self.link_edit.setPlaceholderText("Or paste a Spotify playlist link (no sign-in needed)")
         self.link_edit.setClearButtonEnabled(True)
         self.link_edit.setAccessibleName("Spotify playlist link")
         self.link_btn = QPushButton("Open")
