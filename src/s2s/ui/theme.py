@@ -127,8 +127,9 @@ def primary(button: QPushButton) -> QPushButton:
 def polish_table(table) -> None:
     """Keep data views compact and readable; status backgrounds supply the row separation."""
     table.setShowGrid(False)
-    table.verticalHeader().setDefaultSectionSize(29)
-    table.horizontalHeader().setMinimumHeight(32)
+    table.setAlternatingRowColors(True)
+    table.verticalHeader().setDefaultSectionSize(32)
+    table.horizontalHeader().setMinimumHeight(36)
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
 
@@ -179,7 +180,7 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     if sys.platform == "win32":
         if "Segoe UI" in QFontDatabase.families():
             font.setFamily("Segoe UI")
-        font.setPointSizeF(9.5)
+        font.setPointSizeF(10)
     app.setFont(font)
     # Replace only our previous stylesheet so repeated application and light/dark previews stay stable.
     previous = app.property("s2sStylesheet") or ""
@@ -188,9 +189,15 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     stylesheet = f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}
 QWidget#sidebar {{ background: {c['side']}; border-right: 1px solid {c['border']}; }}
-QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 5px; padding: 6px; }}
-QLabel#pageTitle {{ font-size: 20px; font-weight: 600; margin-bottom: 8px; }}
-QPushButton {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 4px;
+QLabel#appWordmark {{ font-size: 23px; font-weight: 700; letter-spacing: 1px; }}
+QLabel#navHeading {{ color: {c['muted']}; font-size: 11px; font-weight: 600;
+    margin: 10px 4px 3px 4px; }}
+QFrame#connectionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; }}
+QFrame#connectionPanel QLabel {{ background: transparent; border: none; }}
+QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
+QLabel#pageTitle {{ font-size: 23px; font-weight: 600; margin-bottom: 4px; }}
+QWidget#pageFooter {{ border-top: 1px solid {c['border']}; }}
+QPushButton {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 6px;
               padding: 6px 12px; min-height: 18px; }}
 QPushButton:hover {{ background: {c['hover']}; border-color: {c['muted']}; }}
 QPushButton:pressed {{ background: {c['selection']}; }}
@@ -211,24 +218,25 @@ QPushButton[primary="true"]:hover {{ background: #507fa3; border-color: #507fa3;
 QPushButton[primary="true"]:pressed {{ background: #345d7e; }}
 QPushButton[primary="true"]:disabled {{ background: {c['hover']}; color: {c['disabled']}; border-color: {c['border']}; }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: {c['panel']}; border: 1px solid {c['border']};
-    border-radius: 4px; padding: 6px 8px; min-height: 18px; }}
+    border-radius: 6px; padding: 7px 10px; min-height: 18px; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {c['focus']}; }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {c['disabled']}; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox QAbstractItemView {{ background: {c['panel']}; border: 1px solid {c['border']}; padding: 4px; }}
 QTableView, QTableWidget, QListWidget {{ background: {c['panel']}; border: 1px solid {c['border']};
-    border-radius: 4px; outline: 0; alternate-background-color: {c['window']}; }}
+    border-radius: 6px; outline: 0; alternate-background-color: {c['window']}; }}
 QTableView::item {{ padding: 4px 8px; border: none; border-radius: 0; }}
 QTableView::item:selected {{ background: {c['selection']}; color: {c['selected']}; }}
-QHeaderView::section {{ background: {c['panel']}; color: {c['muted']}; border: none;
-    border-bottom: 1px solid {c['border']}; padding: 7px 8px; font-weight: 600; }}
+QHeaderView::section {{ background: {c['side']}; color: {c['muted']}; border: none;
+    border-bottom: 1px solid {c['border']}; padding: 9px 8px; font-weight: 600; }}
 QTableCornerButton::section {{ background: {c['panel']}; border: none; }}
 QListWidget::item {{ padding: 7px 10px; border: 1px solid transparent; border-radius: 3px; }}
 QListWidget::item:hover {{ background: {c['hover']}; }}
 QListWidget::item:selected {{ background: {c['selection']}; color: {c['selected']}; }}
 QListWidget#navigation {{ background: transparent; border: none; }}
-QListWidget#navigation::item {{ padding: 6px 8px; }}
-QListWidget#navigation::item:selected {{ border-left: 2px solid {c['focus']}; }}
+QListWidget#navigation::item {{ padding: 6px 9px; border-left: 3px solid transparent; border-radius: 5px; }}
+QListWidget#navigation::item:selected {{ border-left-color: {c['focus']}; }}
+QListWidget#navigation::item:disabled {{ color: {c['disabled']}; }}
 QGroupBox {{ border: 1px solid {c['border']}; border-radius: 4px; margin-top: 12px; padding: 12px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {c['muted']}; }}
 QTabWidget::pane {{ border: 1px solid {c['border']}; border-radius: 4px; }}
@@ -251,7 +259,8 @@ QMenuBar::item {{ padding: 4px 8px; background: transparent; }}
 QMenuBar::item:selected, QMenu::item:selected {{ background: {c['selection']}; }}
 QMenu {{ background: {c['panel']}; border: 1px solid {c['border']}; padding: 4px; }}
 QMenu::item {{ padding: 6px 24px; }}
-QStatusBar {{ color: {c['muted']}; border-top: 1px solid {c['border']}; font-size: 11px; }}
+QStatusBar {{ color: {c['muted']}; background: {c['side']}; border-top: 1px solid {c['border']};
+    font-size: 11px; padding: 3px 8px; }}
 QStatusBar::item {{ border: none; }}
 QToolTip {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 6px; }}
 """

@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
         # Review has no Next: "Confirm selection" is the only way on (it opens Downloads by itself).
         self.frames[STEP_REVIEW].next_btn.setVisible(False)
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
+        self.frames[STEP_REVIEW].footer.setVisible(False)
         for f in self.frames:
             if f.index == STEP_FINISH:  # the last step's button starts the next playlist
                 f.next_clicked.connect(self.transfers.request_new_import)
