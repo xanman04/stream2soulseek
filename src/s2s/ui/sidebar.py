@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QFont, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
 
 from .steps import STEPS
+from .service_identity import logo_renderer
 
 APPLE_KEY = "apple"
 SPOTIFY_KEY = "spotify"
@@ -22,7 +25,7 @@ SERVICES = [
 
 def _header(text: str) -> QLabel:
     lab = QLabel(text)
-    lab.setStyleSheet("font-weight: 600; color: palette(placeholder-text); margin-top: 12px; margin-bottom: 4px;")
+    lab.setObjectName("navHeading")
     return lab
 
 
@@ -36,24 +39,51 @@ class Sidebar(QWidget):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(244)
+        self.setFixedWidth(252)
+
+        brand = QWidget()
+        brand.setObjectName("appBrand")
+        brand_row = QHBoxLayout(brand)
+        brand_row.setContentsMargins(4, 6, 4, 16)
+        brand_row.setSpacing(10)
+        mark = QLabel()
+        mark.setPixmap(QPixmap(str(Path(__file__).with_name("assets") / "s2s-icon.png")).scaled(
+            34, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        name = QLabel("S2S")
+        name.setObjectName("appWordmark")
+        brand_row.addWidget(mark)
+        brand_row.addWidget(name)
+        brand_row.addStretch(1)
 
         self.services_header = _header("Streaming services")
         self.services = QListWidget()
         self.services.setObjectName("navigation")
+        self.services.setIconSize(QSize(17, 17))
         self.services.setSpacing(2)
         for key, label, available in SERVICES:
             it = QListWidgetItem(label)
-            it.setSizeHint(QSize(0, 34))
+            it.setSizeHint(QSize(0, 36))
+            pixmap = QPixmap(34, 34)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            with QPainter(pixmap) as painter:
+                logo_renderer(key).render(painter)
+            it.setIcon(QIcon(pixmap))
             it.setData(Qt.ItemDataRole.UserRole, key)
             if not available:
                 it.setFlags(Qt.ItemFlag.NoItemFlags)  # visible, greyed, not clickable
             self.services.addItem(it)
-        self.services.setFixedHeight(38 * len(SERVICES) + 4)
+        self.services.setFixedHeight(40 * len(SERVICES) + 4)
 
         self.soulseek_label = QLabel("Soulseek: not logged in")
         self.soulseek_label.setWordWrap(True)
         self.soulseek_btn = QPushButton("Log in...")
+        connection = QFrame()
+        connection.setObjectName("connectionPanel")
+        connection_layout = QVBoxLayout(connection)
+        connection_layout.setContentsMargins(12, 12, 12, 12)
+        connection_layout.setSpacing(9)
+        connection_layout.addWidget(self.soulseek_label)
+        connection_layout.addWidget(self.soulseek_btn)
 
         self.steps_header = _header("Workflow")
         self.steps = QListWidget()
@@ -61,18 +91,19 @@ class Sidebar(QWidget):
         self.steps.setSpacing(2)
         for i, (name, _t, _e) in enumerate(STEPS):
             it = QListWidgetItem(f"{i + 1}. {name}")
-            it.setSizeHint(QSize(0, 34))
+            it.setSizeHint(QSize(0, 36))
             self.steps.addItem(it)
-        self.steps.setFixedHeight(38 * len(STEPS) + 4)
+        self.steps.setFixedHeight(40 * len(STEPS) + 4)
         self.settings_btn = QPushButton("Settings...")
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 8, 14, 14)
+        lay.setContentsMargins(14, 14, 14, 14)
         lay.setSpacing(8)
+        lay.addWidget(brand)
         lay.addWidget(self.services_header)
         lay.addWidget(self.services)
-        lay.addWidget(self.soulseek_label)
-        lay.addWidget(self.soulseek_btn)
+        lay.addSpacing(6)
+        lay.addWidget(connection)
         lay.addWidget(self.steps_header)
         lay.addWidget(self.steps)
         lay.addStretch(1)

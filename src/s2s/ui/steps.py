@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .theme import button_text, primary, subtle
@@ -43,17 +43,20 @@ class StepFrame(QWidget):
         else:  # the last step ends the playlist: its button starts the next one
             self.next_btn.setText("Start another playlist")
 
-        foot = QHBoxLayout()
-        foot.setContentsMargins(0, 12, 0, 0)
+        footer = self.footer = QWidget()
+        footer.setObjectName("pageFooter")
+        footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        foot = QHBoxLayout(footer)
+        foot.setContentsMargins(0, 14, 0, 0)
         foot.addStretch(1)
         foot.addWidget(self.hint_label)
         foot.addWidget(self.next_btn)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 20, 22, 16)
-        lay.setSpacing(12)
+        lay.setContentsMargins(26, 24, 26, 18)
+        lay.setSpacing(16)
         lay.addWidget(self.title_label)
         lay.addWidget(content, 1)
-        lay.addLayout(foot)
+        lay.addWidget(footer)
         self.next_btn.clicked.connect(self.next_clicked)
 
     def set_next(self, enabled: bool, hint: str = "") -> None:
