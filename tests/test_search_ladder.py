@@ -279,11 +279,9 @@ def page_env(tmp_path, monkeypatch):
     store.close()
 
 
-def test_review_shows_searched_list_for_not_found(page_env):
+def test_review_not_found_offers_the_search_bar(page_env):
     page, ctx, fake, track = page_env
-    assert page.custom_btn.isEnabled()
-    assert not page.tried_label.isHidden()
-    assert "artist song" in page.tried_label.text()
+    assert page.custom_btn.isEnabled() and page.custom_query.placeholderText() == "Search…"
     assert page.model.rows[0].chosen is None
 
 
@@ -297,7 +295,6 @@ def test_review_custom_search_flow_updates_row(page_env, monkeypatch):
     row = page.model.rows[0]
     assert row.chosen is not None and row.checked
     assert page.model.searching == set()
-    assert page.tried_label.isHidden()
     assert page.chip_ready.text() == "1 ready"
     assert fake.calls == ["start"]  # one search, nothing queued
     assert ctx.store.load_match_results(ctx.import_id)[0].status == MatchStatus.PROPOSED
@@ -334,8 +331,8 @@ def test_review_custom_search_error_shows_banner(page_env, monkeypatch):
 def test_review_search_bar_uses_typed_words_or_its_suggestion(page_env):
     page, ctx, fake, track = page_env
     ctx.slskd_client = lambda **k: fake
-    assert page.custom_query.isEnabled() and page.custom_query.placeholderText()  # suggestion, no popup
-    assert page.ask_custom_query("suggested") == "suggested"
+    assert page.custom_query.isEnabled() and page.custom_query.placeholderText() == "Search…"  # no popup
+    assert page.ask_custom_query("suggested") is None  # nothing typed: nothing is searched
     page.custom_query.setText("my words")
     page.custom_query.returnPressed.emit()  # Enter in the bar searches
     assert page.model.rows[0].chosen is not None
