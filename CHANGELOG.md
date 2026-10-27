@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0 — 2026-10-27
+
+- Windows updates keep a separate progress window open while S2S closes, installs and reopens. The window
+  follows the app's theme and offers recovery actions if installation fails. Reopening S2S during installation
+  brings that window forward instead of starting the app while its runtime files are being replaced.
+- Update downloads show progress, stream to a temporary file and verify the signature before installation.
+- The Windows installer compares file hashes and preserves unchanged runtime files instead of replacing the
+  entire runtime directory. Actual update time depends on the changed files, disk and Windows scanning.
+- Search candidates are cached locally for up to 12 hours, including across app restarts. Repeated and
+  overlapping searches can reuse those candidates; current matching rules and explicit download approval
+  still apply. This does not substantially accelerate a fresh playlist of unrelated tracks.
+- Ready searches take turns fairly, so one waiting track cannot be repeatedly overtaken by newer requests.
+  The search rate and repeat protections are unchanged.
+- Backend result counters now prevent responses cut short by a search limit from being treated as complete
+  when reusing results for a narrower query.
+- Upgrading from 1.2.0 uses that version's updater. The new Windows progress window applies to updates started
+  from 1.3.0 or later; install 1.3.0 manually if you prefer to avoid the previous updater experience.
+
 ## 1.2.0 — 2026-10-27
 
 - Faster searching: a track stops searching at its first good file (exact version, preferred format); the other
