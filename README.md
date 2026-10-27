@@ -24,8 +24,8 @@ Python, slskd and FFmpeg are included; packaged releases need no separate instal
 | Intel Mac, macOS 14.4+ | `S2S-<version>-macos-x64.dmg` |
 
 The Windows setup installs S2S for your user account (no administrator rights) with a Start menu entry and an
-uninstaller. On a Mac, open the disk image and drag S2S into Applications. The ZIP files next to them are what
-the in-app updater downloads.
+uninstaller. On a Mac, open the disk image and drag S2S into Applications. Later versions install from inside
+S2S (**Help → Check for updates**), which downloads the same installer and checks its signature first.
 
 On a Mac, **Apple menu → About This Mac** shows the chip or processor and macOS version.
 The macOS requirement follows the [Qt version bundled with S2S](https://doc.qt.io/qt-6/supported-platforms.html).

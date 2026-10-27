@@ -4,8 +4,8 @@
 
 Steps: download the pinned slskd and FFmpeg builds (each checked against its published SHA-256), run PyInstaller,
 copy the tools and licence notices into the app, sign the macOS app ad hoc, run the app's self-test, and write
-to dist/ the ZIP (used by the in-app updater) and the installer people download: a setup program on Windows
-(Inno Setup 6, packaging/s2s.iss), a disk image with an Applications shortcut on macOS. Runs from a clean
+to dist/ the installer (with its .sha256): a setup program on Windows (Inno Setup 6, packaging/s2s.iss), a disk
+image with an Applications shortcut on macOS. The in-app updater installs these same files. Runs from a clean
 checkout; nothing from this computer's S2S data is included.
 """
 
@@ -255,17 +255,6 @@ def self_test(exe: Path) -> None:
         raise SystemExit(f"the packaged browser test failed (exit code {proc.returncode})")
 
 
-def archive(kind: str, app: Path, ver: str) -> Path:
-    out = DIST / f"S2S-{ver}-{kind}.zip"
-    out.unlink(missing_ok=True)
-    if kind.startswith("windows"):
-        shutil.make_archive(str(out.with_suffix("")), "zip", root_dir=DIST, base_dir=app.name)
-    else:  # ditto keeps the bundle's symlinks, permissions and signatures intact
-        subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(out)], check=True)
-    write_checksum(out)
-    return out
-
-
 def write_checksum(out: Path) -> None:
     digest = hashlib.sha256(out.read_bytes()).hexdigest()
     (out.parent / (out.name + ".sha256")).write_text(f"{digest}  {out.name}\n", encoding="utf-8")
@@ -322,7 +311,6 @@ def main() -> None:
     app, exe = assemble(kind, tools, lic)
     self_test(exe)
     check_directory(app)
-    archive(kind, app, ver)
     installer(kind, app, ver)
 
 

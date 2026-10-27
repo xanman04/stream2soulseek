@@ -108,8 +108,13 @@ class UpdateDialog(QDialog):
             from .. import config
 
             archive = updater.download_update(info, config.app_dir() / "updates")
-            new_app = updater.stage_update(archive, target)
-            archive.unlink(missing_ok=True)
+            try:
+                new_app = updater.stage_update(archive, target)
+            except Exception:
+                archive.unlink(missing_ok=True)
+                raise
+            if new_app != archive:  # macOS: the app was copied out of the disk image, which is no longer needed
+                archive.unlink(missing_ok=True)
             _script, cmd = updater.installer_script(target, new_app, os.getpid())
             return cmd
 

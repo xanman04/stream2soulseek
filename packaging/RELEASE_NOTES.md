@@ -19,8 +19,7 @@
 | Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.0/S2S-1.1.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
 | Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.0/S2S-1.1.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
-Python, slskd and FFmpeg are included. The ZIP files under Assets are for S2S's in-app updater; the **Source
-code** archives are for developers. Matching `.sha256` files are available under Assets.
+Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
 ## Installation
 

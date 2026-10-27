@@ -47,6 +47,12 @@ NEXT_HINTS = {
 }
 
 
+def updater_cleanup():
+    from .. import updater
+
+    return updater.clean_leftovers()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, store: Store, secrets: SecretStore, settings: Settings, *, autostart: bool = True,
                  slskd_service: SlskdService | None = None) -> None:
@@ -307,6 +313,7 @@ class MainWindow(QMainWindow):
         if self._downloads_running_in_last_import():
             self.resume_last_import()
         if getattr(sys, "frozen", False):  # only the packaged app updates itself; source runs use git
+            run_async(self, updater_cleanup, lambda removed: None, lambda exc: None)  # leftovers of past updates
             QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
 
     # ------------------------------------------------------------ problem reports and updates

@@ -33,7 +33,7 @@ choose **More info → Run anyway**, where offered.
 
 ## Verify a download
 
-Each installer and ZIP has a `.sha256` file next to it. Compare its digest with the output of:
+The release text lists each installer's SHA-256 under **SHA-256 checksums**. Compare it with the output of:
 
 ```powershell
 Get-FileHash <file> -Algorithm SHA256
