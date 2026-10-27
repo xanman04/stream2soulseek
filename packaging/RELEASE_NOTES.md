@@ -1,23 +1,18 @@
 ## What's changed
 
-- **Downloads pass their check on a Mac again.** In 1.0.7 the file checker could not run, so every track
-  stopped in Needs attention. Select those tracks and press **Check again**.
-- **No more duplicate downloads.** A file that could not be checked only offers Check again, a slow uploader is
-  replaced one at a time, and a track already in your folder is never downloaded again.
-- **Mac: no more Keychain prompts or sign-outs after updates.** Sign in once more after this update.
-- **Installers.** Windows gets a setup program, the Mac a disk image to drag into Applications.
-- Fix a failed download right on the Downloads page: its other files are listed beside it.
-- New rule, on by default: reject clean (censored) versions. Search again before confirming an older search.
-- Review: the lower panel always fits the window, a search bar replaces the small popup, and queuing shows a
-  popup. Report a problem always includes the technical details. New app icon.
+- **Updates install from the installer.** S2S downloads the new installer itself, checks that it is genuinely
+  from the developer, installs it and restarts. Coming from 1.1.0 or older? Install this version by hand once.
+- **Updates clean up after themselves.** The downloaded installer, temporary files and the old copy of the app
+  are removed, including anything earlier updates left behind.
+- **A tidier release page.** Only the installers are listed; checksums are in the collapsed section below.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.0/S2S-1.1.0-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.0/S2S-1.1.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.0/S2S-1.1.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.1/S2S-1.1.1-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.1/S2S-1.1.1-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.1/S2S-1.1.1-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -35,5 +30,5 @@ Developer ID signing or notarization; Windows builds are not publisher-signed. O
 
 [Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) ·
 [Report a problem](https://github.com/xanman04/stream2soulseek/issues) ·
-[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.0.7...v1.1.0)
+[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.1.0...v1.1.1)
 
