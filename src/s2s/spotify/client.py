@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from . import spotapi_setup
 from ..models import AppleTrack, Playlist
 
 _PLAYLIST_ID = re.compile(r"^[A-Za-z0-9]{10,}$")
@@ -157,6 +158,7 @@ class SpotifyClient:
                 if self._adapter is not None:
                     body = self._adapter.playlist_info(self, ident, offset, 100)
                 else:
+                    spotapi_setup.load()
                     from spotapi.playlist import PublicPlaylist
 
                     # SpotAPI wants the bare ID: it only strips ".../playlist/" links, so a
@@ -192,6 +194,7 @@ class SpotifyClient:
         self.validate_session()
 
     def _private_playlist(self) -> Any:
+        spotapi_setup.load()
         if self._login is None:
             from spotapi import Config, Login, NoopLogger
             from spotapi.http.request import TLSClient

@@ -82,7 +82,7 @@ class PlaylistPage(QWidget):
         self.playlist_count = QLabel("0 of 0 playlists")
         self.playlist_list = QListWidget()
         self.playlist_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        left = QWidget()
+        left = self.playlists_panel = QWidget()  # hidden while a pasted link's playlist is shown
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.addWidget(QLabel("Your playlists"))
@@ -126,9 +126,13 @@ class PlaylistPage(QWidget):
         # the visible indicator and proxy sort so the first click is ascending.
         header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         self.track_proxy.sort(-1)
+        self.back_btn = QPushButton("← Your playlists")  # leaves a pasted link's playlist
+        self.back_btn.setFlat(True)
+        self.back_btn.setVisible(False)
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self.back_btn, 0, Qt.AlignmentFlag.AlignLeft)
         rl.addWidget(self.track_title)
         rl.addWidget(self.track_info)
         rl.addWidget(self.track_search)
@@ -172,6 +176,8 @@ class PlaylistPage(QWidget):
         self.source_combo.currentIndexChanged.connect(self._source_changed)
         self.link_btn.clicked.connect(self.open_link)
         self.link_edit.returnPressed.connect(self.open_link)
+        self.back_btn.clicked.connect(self.leave_link)
+        self.link_edit.textChanged.connect(lambda text: None if text.strip() or not self._link_open else self.leave_link())
         self.playlist_list.currentItemChanged.connect(self._playlist_selected)
         self.playlist_search.textChanged.connect(self._filter_playlists)
         self.track_search.textChanged.connect(self._filter_tracks)
@@ -275,7 +281,7 @@ class PlaylistPage(QWidget):
                 return
         self._source_index = self.source_combo.currentIndex()
         self._source_generation += 1
-        self._link_open = False
+        self._set_link_mode(False)
         self._track_cache.clear()
         self.ctx.playlist, self.ctx.tracks = None, []
         self.ctx.reset_import()
@@ -290,7 +296,7 @@ class PlaylistPage(QWidget):
     def reset(self) -> None:
         """Forget everything shown (after sign-out)."""
         self._playlists = []
-        self._link_open = False
+        self._set_link_mode(False)
         self._link_request += 1
         self._track_cache.clear()
         self.playlist_list.clear()
@@ -458,7 +464,10 @@ class PlaylistPage(QWidget):
         self._link_request += 1
         request = self._link_request
         self.link_btn.setEnabled(False)
-        set_banner(self.link_status, "Opening playlist...", "info")
+        from ..spotify import spotapi_setup
+
+        first = "" if spotapi_setup.cached() else " The first time takes about half a minute."
+        set_banner(self.link_status, "Opening playlist..." + first, "info")
         fetch = self._public_fetch
 
         def done(payload) -> None:
@@ -477,11 +486,29 @@ class PlaylistPage(QWidget):
 
         run_async(self, lambda: fetch(ident), done, failed)
 
+    def _set_link_mode(self, on: bool) -> None:
+        """A pasted link's playlist is shown on its own: the account's playlist list steps aside."""
+        self._link_open = on
+        self.playlists_panel.setVisible(not on)
+        self.back_btn.setVisible(on and self.source_combo.count() > 0)
+
+    def leave_link(self) -> None:
+        """Back to the account's playlists (the shown playlist stays chosen until another is picked)."""
+        if not self._link_open:
+            return
+        self._set_link_mode(False)
+        self.link_edit.blockSignals(True)
+        self.link_edit.clear()
+        self.link_edit.blockSignals(False)
+        set_banner(self.link_status, "", "info")
+        if self.source_combo.count() == 0:
+            self.stack.setCurrentIndex(1)
+
     def _link_loaded(self, pl: Playlist, tracks: TrackList) -> None:
         if not self._confirm_leaving_import(pl.name or "this playlist"):
             set_banner(self.link_status, "", "info")  # Stay: the running import and its selection are untouched
             return
-        self._link_open = True
+        self._set_link_mode(True)
         self.playlist_list.blockSignals(True)
         self.playlist_list.setCurrentRow(-1)
         self.playlist_list.clearSelection()

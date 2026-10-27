@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ..models import AppleTrack, Playlist
+from . import spotapi_setup
 from .client import SpotifyClient, SpotifyError
 
 _ID = r"[A-Za-z0-9]{10,40}"
@@ -61,6 +62,7 @@ def parse_playlist_link(text: str) -> str | None:
 
 
 def _default_factory(playlist_id: str) -> Any:
+    spotapi_setup.load()
     from spotapi.http.request import TLSClient
     from spotapi.playlist import PublicPlaylist
 
@@ -91,6 +93,20 @@ def fetch_public_playlist(
     ident = parse_playlist_link(playlist_id)
     if ident is None:
         raise PlaylistLinkError(INVALID_MESSAGE)
+    try:
+        return _fetch(ident, client_factory)
+    except PlaylistPrivateError:
+        raise
+    except PublicPlaylistError:
+        # Spotify may have stopped accepting the saved query ids (it updated its web player): drop them and
+        # try once more, which reads the web player again.
+        if client_factory is None and spotapi_setup.forget():
+            return _fetch(ident, client_factory)
+        raise
+
+
+def _fetch(ident: str, client_factory: Callable[[str], Any] | None
+           ) -> tuple[Playlist, list[AppleTrack], list[str]]:
     tracks: list[AppleTrack] = []
     skipped: list[str] = []
     name = ""

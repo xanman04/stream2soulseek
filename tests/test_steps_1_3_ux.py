@@ -258,3 +258,55 @@ def test_start_button_becomes_search_again_after_results():
     page.show_results([MatchResult(ctx.tracks[0], MatchStatus.PROPOSED, _cand("a"))])
     assert page.start_btn.text() == "Search again"
     page.close()
+
+
+def test_a_pasted_link_shows_its_playlist_on_its_own(ctx, monkeypatch):
+    """The account's playlist list steps aside for a pasted link; back (or clearing the link) brings it back."""
+    page = PlaylistPage(ctx)
+    page.source_combo.addItem("Apple Music", object())  # a connected account
+    page._public_fetch = lambda ident: (Playlist(f"spotify:playlist:{ident}", "Liquid Sunday"), _tracks(), [])
+    page.link_edit.setText(PID)
+    page.link_btn.click()
+    assert page.playlists_panel.isHidden() and not page.back_btn.isHidden()
+    page.back_btn.click()
+    assert not page.playlists_panel.isHidden() and page.back_btn.isHidden() and page.link_edit.text() == ""
+    page.link_edit.setText(PID)
+    page.link_btn.click()
+    assert page.playlists_panel.isHidden()
+    page.link_edit.clear()  # the clear button in the link box does the same
+    assert not page.playlists_panel.isHidden()
+    page.close()
+
+
+def test_spotify_query_ids_are_saved_and_reused(ctx):
+    """SpotAPI reads Spotify's whole web player (~30 s) to find its query ids; S2S keeps them, and drops them
+    when Spotify no longer knows one."""
+    from types import SimpleNamespace
+
+    from s2s.spotify import spotapi_setup
+
+    downloads = []
+
+    class Base:
+        raw_hashes = "UNDEF"
+
+        def get_sha256_hash(self):
+            downloads.append(1)
+            self.raw_hashes = 'x"fetchPlaylist","query","' + "a" * 64 + '"y"libraryV3","query","' + "b" * 64 + '"'
+
+        def part_hash(self, name):
+            if self.raw_hashes == "UNDEF":
+                self.get_sha256_hash()
+            return str(self.raw_hashes).split(f'"{name}","query","')[1].split('"')[0]
+
+    fake = SimpleNamespace(BaseClient=Base, _Undefined="UNDEF")
+    spotapi_setup.forget()
+    spotapi_setup._patch(fake)
+    assert Base().part_hash("fetchPlaylist") == "a" * 64 and downloads == [1]
+    assert Base().part_hash("libraryV3") == "b" * 64 and downloads == [1]  # a new client reuses the saved ids
+    spotapi_setup._seed = None  # as after a restart: read back from the app data folder
+    assert Base().part_hash("fetchPlaylist") == "a" * 64 and downloads == [1]
+    with pytest.raises(IndexError):
+        Base().part_hash("unknownQuery")  # not in Spotify's web player either
+    assert downloads == [1, 1]  # an unknown id made it read the web player again
+    assert spotapi_setup.forget() is True and spotapi_setup.cached() is None
