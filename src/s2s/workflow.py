@@ -105,6 +105,7 @@ def configure_search_limits() -> None:
 
     _search.GATE.begin_run()
     _search.LIMITER.attach(config.app_dir() / "search-times.json")
+    _search.SHARED_CACHE.attach(config.app_dir() / "search-cache.sqlite3")
 
 
 def searched_note(tried: list[str]) -> str:

@@ -302,6 +302,7 @@ class SearchRateLimiter:
         self._lock = threading.Lock()
         self._limit = max(1, int(limit))
         self._window = max(1.0, float(window_s))
+        self._dispatch_guard = min(0.05, self._window * .02)
         self._spacing = max(0.0, float(spacing_s))
         self._repeat = max(0.0, float(repeat_s))
         self._clock = clock
@@ -314,6 +315,7 @@ class SearchRateLimiter:
         self.total_started = 0
         self.unlimited = False  # tests only
         self._demand = 0  # searches this process still expects to need (set by the running search)
+        self._queue: deque[tuple[object, str | None]] = deque()  # FIFO among requests ready to run
 
     def set_demand(self, searches: int) -> None:
         """Tell the limiter how many more searches the current run expects; it paces evenly when they do not fit."""
@@ -371,12 +373,12 @@ class SearchRateLimiter:
         os.replace(tmp, self._path)
 
     def _trim(self, now: float) -> None:
-        self._times = [t for t in self._times if t > now - self._window]
+        self._times = [t for t in self._times if t > now - self._window - self._dispatch_guard]
         horizon = now - self._repeat
         self._queries = {k: v for k, v in self._queries.items() if v > horizon}
 
     def _trim_local(self, mono_now: float) -> None:
-        while self._local and self._local[0] <= mono_now - self._window:
+        while self._local and self._local[0] <= mono_now - self._window - self._dispatch_guard:
             self._local.popleft()
 
     # -- decisions
@@ -385,9 +387,9 @@ class SearchRateLimiter:
         """Seconds until a start is allowed (0 or less = now)."""
         waits = [0.0]
         if len(self._times) >= self._limit:
-            waits.append(self._times[len(self._times) - self._limit] + self._window - now)
+            waits.append(self._times[len(self._times) - self._limit] + self._window + self._dispatch_guard - now)
         if len(self._local) >= self._limit:
-            waits.append(self._local[len(self._local) - self._limit] + self._window - mono_now)
+            waits.append(self._local[len(self._local) - self._limit] + self._window + self._dispatch_guard - mono_now)
         spacing = self._spacing
         if self._demand > self._limit - max(len(self._times), len(self._local)):
             spacing = max(spacing, self.steady_spacing_s)  # more to do than the window has left: spread out
@@ -415,21 +417,37 @@ class SearchRateLimiter:
     def acquire(self, cancel: threading.Event, query: str | None = None) -> None:
         """Block until one more search (of `query`) may start, then record it. Raises SearchCancelled."""
         key = _query_key(query) if query is not None else None
-        while True:
-            if cancel.is_set():
-                raise SearchCancelled()
+        ticket = (object(), key)
+        with self._lock:
+            self._queue.append(ticket)
+        try:
+            while True:
+                if cancel.is_set():
+                    raise SearchCancelled()
+                with self._lock:
+                    now = self._clock()
+                    # A repeated query cooling down must not block unrelated, ready queries.
+                    ready = next((item for item in self._queue if item[1] is None or self.unlimited or
+                                  now - self._queries.get(item[1], float('-inf')) >= self._repeat), self._queue[0])
+                    first = ready is ticket
+                    if first:
+                        if self.unlimited:
+                            self.total_started += 1
+                            return
+                        wait = self._try_start(key)
+                        if wait <= 0:
+                            return
+                if not first:
+                    cancel.wait(0.01)  # only the head advances the limiter/test clock
+                    continue
+                step = min(max(wait, 0.01), 0.5)
+                if self._sleep is not None:
+                    self._sleep(step)
+                else:
+                    cancel.wait(step)
+        finally:
             with self._lock:
-                if self.unlimited:
-                    self.total_started += 1
-                    return
-                wait = self._try_start(key)
-                if wait <= 0:
-                    return
-            step = min(max(wait, 0.01), 0.5)
-            if self._sleep is not None:
-                self._sleep(step)
-            else:
-                cancel.wait(step)
+                self._queue.remove(ticket)  # also release the queue when the head cancels/errors
 
     def _try_start(self, key: str | None) -> float:
         """Record a start if allowed now and return 0; else return the wait. Caller holds self._lock."""
@@ -570,6 +588,27 @@ def _path_words(filename: str) -> set[str]:
     return set(re.findall(r"\w+", filename.lower()))
 
 
+class SearchFiles(list):
+    """Files plus final backend counters, which include responses omitted by the file parser."""
+
+    def __init__(self, files, status):
+        super().__init__(files)
+        self.state = str(status.get("state") or "")
+        self.response_count = self._count(status.get("responseCount"))
+        self.file_count = self._count(status.get("fileCount"))
+        self.locked_file_count = self._count(status.get("lockedFileCount"))
+
+    @staticmethod
+    def _count(value):
+        return value if type(value) is int and value >= 0 else None
+
+    def hit_limit(self, response_limit, file_limit):
+        state = self.state.casefold()
+        return ("limit" in state or
+                (response_limit > 0 and self.response_count is not None and self.response_count >= response_limit) or
+                (file_limit > 0 and self.file_count is not None and self.file_count >= file_limit))
+
+
 class SearchCache:
     """Responses of searches already run, by normalised query text.
 
@@ -594,34 +633,49 @@ class SearchCache:
         self._ttl = ttl_s
         self._clock = clock
         self.hits = 0  # queries answered without a new search
+        self._disk = None
+
+    def attach(self, path: Path) -> None:
+        """Enable opt-in disk storage for the application's shared cache (not API/test caches)."""
+        from .cache_disk import DiskCache
+
+        with self._lock:
+            if self._disk is None or self._disk.path != path:
+                self._disk = DiskCache(path)
 
     def _expire(self) -> None:
         if self._ttl is None:
             return
         cutoff = self._clock() - self._ttl
-        for k in [k for k, e in self._entries.items() if e.files is not None and e.at < cutoff]:
+        for k in [k for k, e in self._entries.items() if e.files is not None and
+                  (e.at < cutoff or (not e.files and self._clock() - e.at > min(self._ttl, 300)))]:
             del self._entries[k]
+        completed = sorted((e.at, k) for k, e in self._entries.items() if e.files is not None)
+        for _, key in completed[:-256]:
+            del self._entries[key]
 
     def __len__(self) -> int:
         with self._lock:
             return sum(1 for e in self._entries.values() if e.files is not None)
 
-    def _derived(self, key: str) -> list[RemoteFile] | None:
+    def _derived(self, key: str):
         words = set(key.split())
         out: list[RemoteFile] = []
         seen: set[tuple[str, str, int]] = set()
+        source_times = []
         for k, e in self._entries.items():
             if e.files is None or not e.files or not e.complete or not set(k.split()) <= words:
                 continue
+            source_times.append(e.at)
             for f in e.files:
                 ident = (f.username, f.filename, f.size)
                 if ident not in seen and words <= _path_words(f.filename):
                     seen.add(ident)
                     out.append(f)
-        return out or None
+        return (out, min(source_times)) if out else None
 
     def get_or_run(self, query: str, run: Callable[[], list[RemoteFile]], cancel: threading.Event, *,
-                   response_limit: int | None = None) -> list[RemoteFile]:
+                   response_limit: int | None = None, file_limit: int | None = None) -> list[RemoteFile]:
         key = _query_key(query)
         while True:
             with self._lock:
@@ -631,15 +685,27 @@ class SearchCache:
                     self.hits += 1
                     return list(entry.files)
                 if entry is None:
-                    derived = self._derived(key)
-                    if derived is not None:
+                    saved = self._disk.get(key) if self._disk is not None else None
+                    if saved is not None and self._ttl is not None and saved[2] >= self._ttl:
+                        saved = None
+                    if saved is not None:
+                        files, complete, age = saved
                         done = self._Entry()
-                        done.files = derived
-                        done.at = self._clock()
+                        done.files, done.complete, done.at = files, complete, self._clock() - age
                         done.event.set()
                         self._entries[key] = done
                         self.hits += 1
-                        return list(derived)
+                        return list(files)
+                    derived = self._derived(key)
+                    if derived is not None:
+                        files, source_at = derived
+                        done = self._Entry()
+                        done.files = files
+                        done.at = source_at  # deriving a narrower query must not renew stale data
+                        done.event.set()
+                        self._entries[key] = done
+                        self.hits += 1
+                        return list(files)
                     entry = self._entries[key] = self._Entry()
                     owner = True
                 else:
@@ -653,9 +719,14 @@ class SearchCache:
                     entry.event.set()
                     raise
                 users = {f.username for f in files}
-                entry.complete = response_limit is not None and len(users) < response_limit
+                entry.complete = (response_limit is not None and len(users) < response_limit
+                                  and (file_limit is None or len(files) < file_limit)
+                                  and not (isinstance(files, SearchFiles) and
+                                           files.hit_limit(response_limit, file_limit or 0)))
                 entry.at = self._clock()
                 entry.files = list(files)
+                if self._disk is not None:
+                    self._disk.put(key, files, entry.complete)
                 entry.event.set()
                 return list(files)
             while not entry.event.wait(0.2):  # the same query is running on another worker
@@ -665,7 +736,7 @@ class SearchCache:
 
 LIMITER = SearchRateLimiter()
 GATE = ConnectionGate()
-SHARED_CACHE_TTL_S = 30 * 60
+SHARED_CACHE_TTL_S = 12 * 3600
 SHARED_CACHE = SearchCache(ttl_s=SHARED_CACHE_TTL_S)  # every run in this process; outlives REPEAT_COOLDOWN_S
 
 _CONNECTION_MARKERS = (
@@ -764,7 +835,7 @@ def run_search(
                 try:
                     if cache is not None:
                         found = cache.get_or_run(query, lambda: attempt(query, budget), cancel,
-                                                 response_limit=response_limit)
+                                                 response_limit=response_limit, file_limit=file_limit)
                     else:
                         found = attempt(query, budget)
                     break
@@ -866,10 +937,10 @@ def _run_one(client, query, cancel, timeout_s, response_limit, file_limit, poll_
                 break
             if clock() >= deadline:
                 client.stop_search(search_id)
-                _wait_for_final_results(client, search_id, cancel, poll_interval, sleep, clock)
+                status = _wait_for_final_results(client, search_id, cancel, poll_interval, sleep, clock)
                 break
             sleep(poll_interval)
-        return client.get_search_responses(search_id)
+        return SearchFiles(client.get_search_responses(search_id), status)
     finally:
         _quiet(client.delete_search, search_id)
 
@@ -884,7 +955,7 @@ def _wait_for_final_results(client, search_id, cancel, poll_interval, sleep, clo
         status = client.get_search(search_id)
         complete = status.get("isComplete") or "completed" in str(status.get("state") or "").lower()
         if complete and ("endedAt" not in status or status["endedAt"]):
-            return
+            return status
         if clock() >= deadline:
             raise SlskdError("slskd did not finalize the stopped search; try searching again")
         sleep(poll_interval)
