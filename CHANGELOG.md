@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Pasting a Spotify link no longer flashes a console window (the Spotify library ran `os.system("")` on load).
+- Spotify playlists open much faster: the library read Spotify's whole web player (~30 s) to find its query ids,
+  for every pasted link and every page of a signed-in playlist. The ids are now kept and reused (about 3 s), and
+  read again only when Spotify changes them. The first open says it takes about half a minute.
+- A pasted link's playlist is shown on its own: the account's playlist list steps aside, with
+  "← Your playlists" (or clearing the link) to go back.
 - Windows: a smaller install. FFmpeg is now the shared (LGPL) build, so ffmpeg and ffprobe use one set of
   libraries instead of carrying about 100 MB each (about 47 MB less installed). A large unknown installer is
   scanned by Windows before it opens, so a smaller one opens sooner.
