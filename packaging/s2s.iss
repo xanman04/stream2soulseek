@@ -1,9 +1,9 @@
 ; Windows installer for S2S (Inno Setup 6). Built by packaging/build.py, which passes:
-;   /DAppVersion=1.2.3 /DAppDir=<dist\S2S> /DOutDir=<dist> /DIconFile=<s2s.ico>
+;   /DAppVersion=1.2.3 /DAppDir=<dist\S2S> /DOutDir=<dist> /DIconFile=<s2s.ico> /DFileList=<generated .iss>
 ;
 ; Installs for the current user only (no administrator rights) into %LOCALAPPDATA%\Programs\S2S, so the in-app
-; updater can swap that folder later. The uninstaller lives in a sibling folder, because an in-app update
-; replaces the whole S2S folder; it removes the S2S folder entirely. User data (%LOCALAPPDATA%\S2S) is kept.
+; updater can replace changed files later. The uninstaller lives in a sibling folder and removes the S2S
+; installation entirely. User data (%LOCALAPPDATA%\S2S) is kept.
 
 #ifndef AppVersion
   #error AppVersion is required
@@ -39,12 +39,37 @@ RestartApplications=no
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
-[InstallDelete]
-; files of an older version that a newer one no longer ships
-Type: filesandordirs; Name: "{app}\_internal"
-
 [Files]
-Source: "{#AppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#include FileList
+
+[Code]
+var
+  CheckedFiles, CopyFiles: TStringList;
+
+function NeedsUpdate(RelativePath, ExpectedHash: String): Boolean;
+var
+  Target: String;
+begin
+  if CheckedFiles = nil then begin
+    CheckedFiles := TStringList.Create;
+    CopyFiles := TStringList.Create;
+  end;
+  if CheckedFiles.IndexOf(RelativePath) >= 0 then begin
+    Result := CopyFiles.IndexOf(RelativePath) >= 0;
+    exit;
+  end;
+  Result := True;
+  Target := AddBackslash(ExpandConstant('{app}')) + RelativePath;
+  if FileExists(Target) then begin
+    try
+      Result := CompareText(GetSHA256OfFile(Target), ExpectedHash) <> 0;
+    except
+      Log('Could not compare installed file: ' + RelativePath);
+    end;
+  end;
+  CheckedFiles.Add(RelativePath);
+  if Result then CopyFiles.Add(RelativePath);
+end;
 
 [Icons]
 Name: "{autoprograms}\S2S"; Filename: "{app}\S2S.exe"

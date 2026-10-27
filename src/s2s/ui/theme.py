@@ -132,6 +132,22 @@ def polish_table(table) -> None:
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
 
+def update_appearance() -> dict:
+    """Pass the current theme to the independent updater; no Qt imports in that helper."""
+    app = QApplication.instance()
+    if app is None:
+        return {}
+    palette = app.palette()
+    colors = dict(app.property("s2sColors") or {})
+    for key, role in (("window", "Window"), ("panel", "Base"), ("text", "WindowText"),
+                      ("muted", "PlaceholderText"), ("border", "Mid")):
+        colors[key] = palette.color(getattr(QPalette.ColorRole, role)).name()
+    colors.setdefault("primary", "#416f94")
+    colors["font"] = app.font().family()
+    colors["font_size"] = app.font().pointSizeF()
+    return colors
+
+
 def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None) -> None:
     """A quiet, consistent native-widget theme, following the current system's light/dark palette."""
     app = app or QApplication.instance()
@@ -158,6 +174,7 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText, QPalette.ColorRole.WindowText):
         palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(colors["disabled"]))
     app.setPalette(palette)
+    app.setProperty("s2sColors", colors)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
     if sys.platform == "win32":
         if "Segoe UI" in QFontDatabase.families():

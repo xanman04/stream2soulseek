@@ -289,14 +289,16 @@ def installer(kind: str, app: Path, ver: str) -> Path:
     """What people download: S2S-<ver>-windows-x64-setup.exe, or S2S-<ver>-<mac target>.dmg."""
     if kind.startswith("windows"):
         from PIL import Image
+        from inno_files import write_files
 
         icon = WORK / "s2s.ico"
         icon.parent.mkdir(parents=True, exist_ok=True)
         Image.open(ROOT / "src" / "s2s" / "ui" / "assets" / "s2s-icon.png").save(
             icon, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
         out = DIST / f"S2S-{ver}-{kind}-setup.exe"
+        file_list = write_files(app, WORK / "installer-files.iss")
         subprocess.run([find_iscc(), "/Q", f"/DAppVersion={ver}", f"/DAppDir={app}", f"/DOutDir={DIST}",
-                        f"/DIconFile={icon}", str(ROOT / "packaging" / "s2s.iss")], check=True)
+                        f"/DIconFile={icon}", f"/DFileList={file_list}", str(ROOT / "packaging" / "s2s.iss")], check=True)
     else:
         # A disk image whose window shows S2S.app next to an Applications shortcut: drag one onto the other.
         # Installing into Applications also keeps macOS from running S2S from a temporary read-only copy.

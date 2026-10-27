@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -48,6 +49,7 @@ class UpdateInfo:
     archive_url: str
     signature: str  # base64 Ed25519 signature of (archive_name, sha256), from the release text
     page_url: str
+    size_bytes: int | None = None
 
 
 SIGNATURE_BLOCK = "s2s-update-signatures"
@@ -120,8 +122,11 @@ def check_for_update(current: str, *, http_get=None) -> UpdateInfo | None:
     signed = read_signatures(body).get(name)
     if not assets.get(name) or signed is None:
         return None  # no signed installer for this computer: not an update S2S may install
+    size = next((a.get("size") for a in release.get("assets") or []
+                 if isinstance(a, dict) and a.get("name") == name), None)
+    size = size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else None
     return UpdateInfo(version, visible_notes(body), name, assets[name], signed[1],
-                      str(release.get("html_url") or RELEASES_PAGE))
+                      str(release.get("html_url") or RELEASES_PAGE), size)
 
 
 def signed_message(archive_name: str, sha256: str) -> bytes:
@@ -140,24 +145,81 @@ def verify_signature(archive_name: str, sha256: str, signature_b64: str, public_
     return verify(key, signed_message(archive_name, sha256), signature)
 
 
-def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=None) -> Path:
+def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=None, status=None) -> Path:
     """Download and verify the installer. Returns its path; raises UpdateError when it is not genuine."""
-    get = http_get or _http_get
     folder.mkdir(parents=True, exist_ok=True)
     archive = folder / info.archive_name
-    signature = info.signature
+    partial = archive.with_name(archive.name + ".part")
+    digest = hashlib.sha256()
+    received = 0
+    started = time.monotonic()
+
+    def write(response):
+        nonlocal received
+        try:
+            total = info.size_bytes or int(getattr(response, "headers", {}).get("content-length", 0))
+        except (TypeError, ValueError):
+            total = 0
+        if progress:
+            progress(0.0 if total else -1.0)
+        chunks = response.iter_bytes(256 * 1024) if hasattr(response, "iter_bytes") else (response.content,)
+        last_report = time.monotonic()
+        with partial.open("wb") as stream:
+            for chunk in chunks:
+                stream.write(chunk)
+                digest.update(chunk)
+                received += len(chunk)
+                now = time.monotonic()
+                if progress and total and (now - last_report >= 0.1 or received >= total):
+                    progress(min(received / total, 1.0))
+                    last_report = now
+        if total and received != total:
+            raise UpdateError("The update download was incomplete. Please try again.")
+
     try:
-        response = get(info.archive_url)
-        archive.write_bytes(response.content)
+        if http_get is not None:
+            write(http_get(info.archive_url))
+        else:
+            with _stream_get(info.archive_url) as response:
+                write(response)
+        if status:
+            status("Verifying the downloaded update…")
+        if not verify_signature(info.archive_name, digest.hexdigest(), info.signature):
+            raise UpdateError("The downloaded update is not signed by the S2S developer, so it was not installed.")
+        partial.replace(archive)
+    except UpdateError:
+        partial.unlink(missing_ok=True)
+        raise
     except Exception as exc:  # noqa: BLE001
+        partial.unlink(missing_ok=True)
         raise UpdateError("The update could not be downloaded. Try again later.") from exc
     if progress:
         progress(1.0)
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if not verify_signature(info.archive_name, digest, signature):
-        archive.unlink(missing_ok=True)
-        raise UpdateError("The downloaded update is not signed by the S2S developer, so it was not installed.")
+    from .applog import get
+
+    get().info("Update download: %d bytes verified in %.1f s", received, time.monotonic() - started)
     return archive
+
+
+@contextmanager
+def _stream_get(url: str):
+    """Keep the response open while downloading; never buffer an entire installer in memory."""
+    import httpx
+
+    current = url
+    with httpx.Client(timeout=60, follow_redirects=False, headers={"User-Agent": "S2S-updater"}) as client:
+        for _ in range(5):
+            parts = urlsplit(current)
+            if parts.scheme != "https" or parts.hostname not in _DOWNLOAD_HOSTS:
+                raise UpdateError("Refusing to download an update from outside GitHub.")
+            with client.stream("GET", current) as response:
+                if response.is_redirect:
+                    current = str(response.headers.get("location", ""))
+                    continue
+                response.raise_for_status()
+                yield response
+                return
+    raise UpdateError("Too many redirects while downloading the update.")
 
 
 def installed_app() -> Path | None:
@@ -267,7 +329,7 @@ def stage_update(archive: Path, app: Path) -> Path:
     return new_app
 
 
-def installer_script(app: Path, new_app: Path, pid: int) -> tuple[Path, list[str]]:
+def installer_script(app: Path, new_app: Path, pid: int, *, appearance: dict | None = None) -> tuple[Path, list[str]]:
     """Write the helper that swaps the apps after S2S quits; returns (script path, command to start it).
 
     `app` is the install target; on macOS it may not exist yet (a translocated app installs into Applications).
@@ -276,18 +338,20 @@ def installer_script(app: Path, new_app: Path, pid: int) -> tuple[Path, list[str
     backup = app.with_name(f"{app.name}.old-{int(time.time())}")
     folder = Path(tempfile.mkdtemp(prefix="s2s-installer-"))
     if sys.platform == "win32":
+        import json
+
         script = folder / "install.ps1"
         ps = lambda p: "'" + str(p).replace("'", "''") + "'"  # noqa: E731 - PowerShell single-quoted string
-        script.write_text(f"""$app = {ps(app)}; $setup = {ps(new_app)}
-for ($i = 0; $i -lt 240 -and (Get-Process -Id {pid} -ErrorAction SilentlyContinue); $i++) {{ Start-Sleep -Milliseconds 500 }}
-$p = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', ('/DIR="' + $app + '"'))
-Add-Content -LiteralPath {ps(result_file())} -Value ("installed " + $p.ExitCode) -ErrorAction SilentlyContinue
-Start-Process -FilePath (Join-Path $app 'S2S.exe')
-Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction SilentlyContinue
-exit $p.ExitCode
-""", encoding="utf-8")
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", str(script)]
+        values = {"APP": ps(app), "SETUP": ps(new_app), "PID": str(pid),
+                  "RESULT": ps(result_file()), "ACTIVE": ps(active_file()),
+                  "STYLE": ps(json.dumps(appearance or {}))}
+        template = Path(__file__).with_name("update_windows.ps1").read_text(encoding="utf-8")
+        script.write_text(re.sub(r"@@([A-Z]+)@@", lambda m: values[m[1]], template), encoding="utf-8-sig")
+        icon = Path(__file__).parent / "ui" / "assets" / "s2s-icon.png"
+        if icon.is_file():
+            shutil.copyfile(icon, folder / "icon.png")
+        cmd = ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+               "-File", str(script)]
     else:
         script = folder / "install.sh"
         q = lambda p: "'" + str(p).replace("'", "'\\''") + "'"  # noqa: E731
@@ -310,6 +374,73 @@ def result_file() -> Path:
     from . import config
 
     return config.app_dir() / "update-result.txt"
+
+
+def active_file() -> Path:
+    from . import config
+
+    return config.app_dir_path() / "update-active.json"
+
+
+def _pid_alive(pid: int) -> bool:
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return ctypes.get_last_error() == 5  # access denied: conservatively treat as running
+    try:
+        code = wintypes.DWORD()
+        return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def active_update() -> dict | None:
+    """Live helper record; stale/crashed helpers must not permanently block startup."""
+    import json
+
+    try:
+        record = json.loads(active_file().read_text(encoding="utf-8-sig"))
+        pid, started = record["pid"], record["started"]
+        if (isinstance(pid, int) and pid > 0 and isinstance(started, (int, float))
+                and 0 <= time.time() - started < 24 * 3600 and _pid_alive(pid)):
+            return record
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def prevent_launch_during_update() -> bool:
+    """Before importing Qt: explain why a packaged Windows app cannot open yet."""
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return False
+    record = active_update()
+    if not record or record.get("phase") != "installing":
+        return False
+    if os.path.normcase(str(Path(sys.executable).parent)) != os.path.normcase(str(record.get("target", ""))):
+        return False
+    import ctypes
+
+    from ctypes import wintypes
+
+    user = ctypes.windll.user32
+    user.FindWindowW.restype = wintypes.HWND
+    user.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user.SetForegroundWindow.argtypes = [wintypes.HWND]
+    window = user.FindWindowW(None, "Updating S2S")
+    if window:
+        user.ShowWindow(window, 9)  # restore the existing styled window, rather than another popup
+        user.SetForegroundWindow(window)
+    return True
 
 
 def mark_pending(version: str) -> None:
@@ -335,6 +466,8 @@ def clean_leftovers(app: Path | None = None) -> list[Path]:
     update can be in progress. Returns what was removed."""
     from . import config
 
+    if active_update():
+        return []  # never delete the installer/helper that is still running
     found = [config.app_dir() / "updates"]
     app = installed_app() if app is None else app
     if app is not None:
@@ -354,7 +487,7 @@ def clean_leftovers(app: Path | None = None) -> list[Path]:
     return removed
 
 
-def launch_installer(cmd: list[str]) -> None:
+def launch_installer(cmd: list[str]):
     """Start the helper so that it outlives S2S (S2S quits right after).
 
     Windows: a hidden console (CREATE_NO_WINDOW) in its own process group, broken away from any job S2S runs in.
@@ -366,15 +499,14 @@ def launch_installer(cmd: list[str]) -> None:
         no_window, new_group, breakaway = 0x08000000, 0x00000200, 0x01000000
         for flags in (no_window | new_group | breakaway, no_window | new_group):
             try:
-                subprocess.Popen(cmd, creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
-                return
+                return subprocess.Popen(cmd, creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
             except OSError:  # a job that forbids breaking away: start inside it (it outlives S2S all the same)
                 if not flags & breakaway:
                     raise
     else:
-        subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+        return subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
 
 
 def _http_get(url: str):
