@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.3.0 — 2026-10-27
+## 1.3.1 — 2026-10-27
+
+- Refreshed the native light and dark themes with clearer headings, more comfortable spacing, alternating
+  table rows and more consistent controls. The sidebar now includes the S2S identity, streaming-service
+  icons and a separate Soulseek connection panel. Workflow actions have a clearer footer.
+- Includes the updater and search reliability improvements below. The 1.3.0 build was cancelled before
+  publication to include this visual polish; its tag is retained.
+
+## 1.3.0 — 2026-10-27 (not released)
 
 - Windows updates keep a separate progress window open while S2S closes, installs and reopens. The window
   follows the app's theme and offers recovery actions if installation fails. Reopening S2S during installation
