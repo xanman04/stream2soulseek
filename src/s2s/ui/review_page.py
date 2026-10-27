@@ -690,13 +690,10 @@ class ReviewPage(QWidget):
         self.facts_label = QLabel("")  # uploader · quality · size · length (vs the playlist)
         self.facts_label.setWordWrap(True)
         self.facts_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.tried_label = theme.subtle(QLabel(""))
-        self.tried_label.setWordWrap(True)
-        self.tried_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.tried_label.setVisible(False)
         # search this track again with your own words: a search bar in the panel, not a popup
         self.custom_query = QLineEdit()
         self.custom_query.setClearButtonEnabled(True)
+        self.custom_query.setPlaceholderText("Search…")
         self.custom_query.setEnabled(False)
         self.custom_query.returnPressed.connect(self.search_custom)
         self.custom_btn = QPushButton("Search")
@@ -712,7 +709,6 @@ class ReviewPage(QWidget):
         left.addWidget(self.file_heading)
         left.addWidget(self.file_label)
         left.addWidget(self.facts_label)
-        left.addWidget(self.tried_label)
         left.addStretch(1)
         left.addWidget(theme.subtle(QLabel("Search Soulseek for this track with your own words:")))
         left.addLayout(search_row)
@@ -723,17 +719,20 @@ class ReviewPage(QWidget):
         self.detail.verticalHeader().setDefaultSectionSize(24)
         self.detail.horizontalHeader().setStretchLastSection(True)
         self.detail.installEventFilter(self)
-        self.show_rejected = QCheckBox("")
-        self.show_rejected.setVisible(False)
-        self.show_rejected.toggled.connect(lambda _on: self._apply_rejected_visibility())
+        # The full file name and why it does (or does not) pass the rules, for the file selected in the list.
+        self.file_detail = theme.subtle(QLabel(""))
+        self.file_detail.setWordWrap(True)
+        self.file_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.file_detail.setVisible(False)
         self.use_btn = QPushButton("Use this file")
         self.use_btn.setEnabled(False)
         alt_foot = QHBoxLayout()
-        alt_foot.addWidget(self.show_rejected, 1)
+        alt_foot.addStretch(1)
         alt_foot.addWidget(self.use_btn)
         right = QVBoxLayout()
         right.addWidget(self.alt_title)
         right.addWidget(self.detail, 1)
+        right.addWidget(self.file_detail)
         right.addLayout(alt_foot)
 
         # The details panel always fits the window: it never scrolls as a whole and cannot be dragged; only the
@@ -944,12 +943,10 @@ class ReviewPage(QWidget):
             self.facts_label.setText("")
             self.facts_label.setStyleSheet("")
             self.alt_title.setText("")
-            self.show_rejected.setVisible(False)
-            self.tried_label.setVisible(False)
+            self.file_detail.setVisible(False)
             self.custom_btn.setEnabled(False)
             self.custom_query.setEnabled(False)
             self.custom_query.clear()
-            self.custom_query.setPlaceholderText("")
             self._update_use_button()
             return
         r = self.model.rows[row]
@@ -959,17 +956,12 @@ class ReviewPage(QWidget):
         if t.apple_id in self.model.searching:
             kind, text = "info", "Searching…"
         theme.set_banner(self.why, text, kind)
-        _plain, tried = split_searched(res.note)
-        show_tried = bool(tried) and ch is None and res.status == MatchStatus.UNRESOLVED
-        self.tried_label.setText("Searched for: " + "; ".join(f"“{q}”" for q in tried) if show_tried else "")
-        self.tried_label.setVisible(show_tried)
         can_search = t.apple_id not in self.model.searching and not self._locked and not self.replacement
         self.custom_btn.setEnabled(can_search)
         self.custom_query.setEnabled(can_search)
         if self._custom_for != t.apple_id:
             self._custom_for = t.apple_id
             self.custom_query.clear()
-            self.custom_query.setPlaceholderText(self._default_custom_query(res))
 
         want = None if t.duration_ms is None else round(t.duration_ms / 1000)
         if ch is None:
@@ -993,12 +985,9 @@ class ReviewPage(QWidget):
         # alternatives
         cands = self.detail_candidates(row)
         n_ok = sum(1 for role, c in cands if role != "rejected" and is_eligible(c))
-        n_rej = len(cands) - n_ok
         others = n_ok - (1 if ch is not None else 0)
         self.alt_title.setText(f"Other files you can use instead ({others})" if others > 0
                                else "No other file passed your rules")
-        self.show_rejected.setText(f"Also show {n_rej} file{'s' if n_rej != 1 else ''} that did not pass your rules")
-        self.show_rejected.setVisible(n_rej > 0)
         self.detail.setRowCount(len(cands))
         in_use_row = -1
         for i, (role, c) in enumerate(cands):
@@ -1018,10 +1007,8 @@ class ReviewPage(QWidget):
                 if col == 0:
                     it.setData(Qt.ItemDataRole.UserRole, (row, c))
                     it.setData(ROLE_STATE, state)
-                flags = Qt.ItemFlag.ItemIsEnabled
-                if selectable:
-                    flags |= Qt.ItemFlag.ItemIsSelectable
-                it.setFlags(flags)  # rejected candidates are visible but NOT selectable
+                # Every file can be selected to inspect it; only files that pass the rules can be used.
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 if state == "rejected":
                     it.setForeground(QApplication.palette().brush(QPalette.ColorRole.PlaceholderText))
                 elif in_use:
@@ -1036,17 +1023,9 @@ class ReviewPage(QWidget):
         self.detail.setColumnWidth(1, 150)
         self.detail.setColumnWidth(2, 90)
         self.detail.setColumnWidth(3, 90)
-        self._apply_rejected_visibility()
         if in_use_row >= 0:
             self.detail.selectRow(in_use_row)
         self._update_use_button()
-
-    def _apply_rejected_visibility(self) -> None:
-        """Files that did not pass the rules stay out of the way unless asked for."""
-        show = self.show_rejected.isChecked()
-        for r in range(self.detail.rowCount()):
-            it = self.detail.item(r, 0)
-            self.detail.setRowHidden(r, it is not None and it.data(ROLE_STATE) == "rejected" and not show)
 
     def show_alternatives(self) -> None:
         """Jump to the next track that needs a look (after the current one, wrapping), and show its files."""
@@ -1073,6 +1052,13 @@ class ReviewPage(QWidget):
 
     def _update_use_button(self) -> None:
         sel = self._selected_detail_candidate()
+        if sel is None:
+            self.file_detail.setVisible(False)
+        else:
+            cand = sel[1]
+            why = "; ".join(plain_reason(x) for x in cand.reasons)
+            self.file_detail.setText(cand.file.filename + (f"\n{match_label(cand)}" if not why else f"\n{why}"))
+            self.file_detail.setVisible(True)
         ok = False
         if sel is not None and not self._locked and not self._busy and sel[0] < len(self.model.rows):
             row, cand = sel
@@ -1091,8 +1077,8 @@ class ReviewPage(QWidget):
     # ------------------------------------------------------------ custom search
 
     def ask_custom_query(self, default: str) -> str | None:
-        """The words in the search bar (its suggestion when empty). Separate method so tests can replace it."""
-        return self.custom_query.text().strip() or default
+        """The words typed in the search bar (None when it is empty). Separate method so tests can replace it."""
+        return self.custom_query.text().strip() or None
 
     def _default_custom_query(self, res: MatchResult) -> str:
         ladder = build_queries(res.track)

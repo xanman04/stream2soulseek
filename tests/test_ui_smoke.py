@@ -492,7 +492,7 @@ def test_review_defaults_and_selection_rules(env):
     assert m.counts()["checked"] == 3
 
 
-def test_rejected_candidates_not_selectable_alternatives_are(env):
+def test_rejected_candidates_can_be_inspected_but_not_used(env):
     win, store, _sec, root = env
     iid, dest, results, c = synthetic(store, root)
     rp = win.review
@@ -503,7 +503,9 @@ def test_rejected_candidates_not_selectable_alternatives_are(env):
         it = rp.detail.item(r, 0)
         roles[it.data(review_page.ROLE_STATE)] = it
     assert set(roles) >= {"in use", "option", "rejected"}
-    assert not (roles["rejected"].flags() & Qt.ItemFlag.ItemIsSelectable)
+    assert roles["rejected"].flags() & Qt.ItemFlag.ItemIsSelectable  # can be selected to inspect
+    rp.detail.selectRow(roles["rejected"].row())
+    assert not rp.use_btn.isEnabled() and not rp.file_detail.isHidden()  # shown, never usable
     assert roles["option"].flags() & Qt.ItemFlag.ItemIsSelectable
     assert rp.model.choose_candidate(0, c["rej"]) is False
     assert rp.model.rows[0].chosen == c["good"]

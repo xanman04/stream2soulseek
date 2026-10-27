@@ -138,11 +138,10 @@ def test_alternative_use_button_and_reticks(page):
     states = [page.detail.item(r, 0).data(review_page.ROLE_STATE) for r in range(page.detail.rowCount())]
     assert states == ["in use", "option", "rejected"]
     assert page.detail.item(0, 0).text() == "✓ Using"
-    assert page.detail.isRowHidden(2) and not page.show_rejected.isHidden()  # non-matching files tucked away
-    page.show_rejected.setChecked(True)
-    assert not page.detail.isRowHidden(2)
-    page.detail.selectRow(2)  # rejected rows cannot be selected
+    assert not page.detail.isRowHidden(2)  # files that did not pass the rules are always listed
+    page.detail.selectRow(2)  # and can be selected to inspect them, but never used
     assert not page.use_btn.isEnabled()
+    assert not page.file_detail.isHidden()  # its full file name and why it did not pass
     page.detail.selectRow(1)
     assert page.use_btn.isEnabled()
     page.model.rows[0].checked = False

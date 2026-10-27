@@ -11,6 +11,8 @@
   the run, so the tracks that are found complete first. The long extra search runs only when nothing usable
   was found.
 - The log records the searches per track and a summary per run, to measure these.
+- Review: files that did not pass your rules are always listed and can be selected to see their full name and
+  why they were rejected (never used). The search bar is empty ("Search…"), and the "Searched for" line is gone.
 
 ## 1.1.1 — 2026-10-27
 
