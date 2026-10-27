@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2 — Unreleased
+
+- Windows setup checks existing files in a visible preparation step instead of hashing files inside the
+  wizard's per-file selection callback. A compiled checksum worker uses Windows cryptography services;
+  files changed after comparison are checked again before being skipped.
+- Manual installers and the independent updater launch S2S directly in its installation folder.
+- Setup logs are enabled, and S2S records startup phases to help locate delays before the main window opens.
+  Cold packaged-app opening time still needs live verification.
+
 ## 1.3.1 — 2026-10-27
 
 - Refreshed the native light and dark themes with clearer headings, more comfortable spacing, alternating
