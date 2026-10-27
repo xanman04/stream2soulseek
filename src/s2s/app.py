@@ -211,7 +211,10 @@ def main() -> int:
 
     # Before Qt loads: a start that dies while loading Qt still leaves a trace (and its crash in crash.log).
     applog.setup().info("Launching S2S %s (%s)", __version__, sys.executable)
-    from PySide6.QtCore import QCoreApplication, Qt
+    import time
+
+    startup_started = time.perf_counter()
+    from PySide6.QtCore import QCoreApplication, QTimer, Qt
     from PySide6.QtWidgets import QApplication
 
     # Required by Qt WebEngine (embedded Apple sign-in) when created after QApplication.
@@ -225,6 +228,7 @@ def main() -> int:
     from .ui.theme import apply_app_style
 
     apply_app_style(app)
+    applog.get().info("Startup: theme ready at %.3f s", time.perf_counter() - startup_started)
     instance = single_instance_lock()
     if instance is None:
         from PySide6.QtWidgets import QMessageBox
@@ -238,10 +242,16 @@ def main() -> int:
     from .store import Store
     from .ui.main_window import MainWindow
 
+    applog.get().info("Startup: page modules loaded at %.3f s", time.perf_counter() - startup_started)
+
     store = Store(config.db_path())
     window = MainWindow(store, SecretStore(), config.load_settings())
+    applog.get().info("Startup: window constructed at %.3f s", time.perf_counter() - startup_started)
     applog.set_secrets(window.ctx.secret_values())
     window.show()
+    applog.get().info("Startup: window show requested at %.3f s", time.perf_counter() - startup_started)
+    QTimer.singleShot(100, lambda: applog.get().info("Startup: event loop responsive at %.3f s",
+                                                  time.perf_counter() - startup_started))
     if running_inside_packaged_app():
         from PySide6.QtWidgets import QMessageBox
 
