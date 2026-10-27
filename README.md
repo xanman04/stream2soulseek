@@ -4,12 +4,23 @@
 
 # S2S — Stream to Soulseek
 
-S2S turns streaming-service playlists into a local music library. Choose a playlist, search for its
-recordings on Soulseek, review the files found, and download only the ones you approve. Finished tracks
-are checked and copied into a single folder, ready for your music player or DJ software.
+S2S is a desktop app for Windows and macOS that turns streaming-service playlists into local music
+libraries. Choose a playlist, find its recordings on Soulseek, review the proposed files and confirm the
+downloads. Finished tracks are checked and collected into one folder for your music player or DJ software.
 
 Apple Music, Spotify and SoundCloud supply **playlist metadata**. Audio downloads come from Soulseek
 through the bundled [slskd client](https://github.com/slskd/slskd).
+
+## What S2S does
+
+- Connects Apple Music, Spotify and SoundCloud playlists to one search and download workflow.
+- Matches recording versions, remixes and audio preferences, with uncertain results flagged for review.
+- Shows alternative files and uploaders before you confirm downloads.
+- Checks completed files and collects them into a folder without artist, album or uploader subfolders.
+- Records missing and unsuccessful tracks so you can return to them later.
+- Reuses recent search candidates across app restarts and overlapping playlists.
+
+S2S does not download audio from the streaming services. No download starts until you confirm a selection.
 
 ## Download and install
 
@@ -23,40 +34,20 @@ Python, slskd and FFmpeg are included; packaged releases need no separate instal
 | Mac with Apple silicon (M1 or newer), macOS 14.4+ | `S2S-<version>-macos-arm64.dmg` |
 | Intel Mac, macOS 14.4+ | `S2S-<version>-macos-x64.dmg` |
 
-The Windows setup installs S2S for your user account (no administrator rights) with a Start menu entry and an
-uninstaller. On a Mac, open the disk image and drag S2S into Applications. Later versions install from inside
-S2S (**Help → Check for updates**), which downloads the same installer and checks its signature first.
+**Windows:** Run the installer, then open S2S from the Start menu. It installs for your user account without
+administrator rights and includes an uninstaller.
 
-On a Mac, **Apple menu → About This Mac** shows the chip or processor and macOS version.
-The macOS requirement follows the [Qt version bundled with S2S](https://doc.qt.io/qt-6/supported-platforms.html).
-Mac releases are undergoing their first live user testing; a successful build does not establish that
-real account sign-in and downloads work end to end.
+**macOS:** Open the disk image, drag S2S into Applications, and launch it from there. **Apple menu → About
+This Mac** identifies your chip and macOS version.
 
-**Windows:** Run the downloaded installer, then open S2S from the Start menu.
-The app is not publisher-signed, so Windows may show SmartScreen. If you trust the release, use
-**More info → Run anyway** where offered.
+Windows installers are not publisher-signed. Mac builds are ad hoc signed without Apple Developer ID
+signing or notarization, so operating-system security prompts are expected. See the
+[installation guide](docs/INSTALL.md) for first-launch instructions and SHA-256 verification.
 
-**macOS:** Open the disk image, drag **S2S.app** to **Applications**, and open it there. The app is ad hoc signed,
-but has no Apple Developer ID signature or notarization. If macOS blocks it, try
-**System Settings → Privacy & Security → Open Anyway** after the first launch attempt, as described in
-[Apple's instructions](https://support.apple.com/en-us/102445). The release notes include an app-specific
-Terminal fallback if this option is unavailable. Allow Keychain access when prompted to save your sessions.
-
-Each release includes a collapsed SHA-256 table. Compare the listed digest with
-`Get-FileHash <installer> -Algorithm SHA256` on Windows or `shasum -a 256 <disk-image>` on macOS.
-
-## Updates and problem reports
-
-S2S checks for updates at startup and through **Help → Check for updates**. It downloads the installer for
-your computer, verifies its signature, installs it and restarts. Settings, logins and history are kept;
-updates are not offered while downloads are running. On Windows, versions 1.3.0 and later keep an installation
-progress window visible while the app is closed. Older installations use their existing updater; versions
-1.1.2 and earlier need a manual installation of the current release.
-
-**Help → Report a problem** opens your email app with a message to the developer: your description, the S2S
-and system versions, and a recent log with logins and folder names removed. The full report is saved as a
-file to attach; nothing is sent until you press Send in your email app. S2S keeps its log in the `logs`
-folder of its data folder (below).
+Live Mac testing has covered successful sign-in, searching, reviewing selections and downloading files
+from Soulseek. Verification and copying into the final tracklist folder still need a live retest following
+recent fixes. Windows, Apple silicon and Intel Mac builds also run automated tests and packaged app/browser
+checks before publication.
 
 ## Connect your accounts
 
@@ -72,18 +63,19 @@ own website; saved sessions can be reused on later launches.
 | **Spotify** | Sign in to browse playlists, or paste a public Spotify playlist link in **Choose playlist** without signing in. |
 | **SoundCloud** | Enable web sign-in, then connect to browse playlists you own, including accessible private playlists. Liked tracks and other users' liked playlists are not included. |
 
-These integrations use unofficial website APIs and may need updates when the services change.
-An account's library access and unavailable tracks can affect the playlist data returned.
+These integrations use unofficial website APIs and may need updates when the services change. Account
+permissions, library access and unavailable tracks can affect the playlist data returned.
 
 ## From playlist to files
 
 1. **Choose playlist.** Select a source and playlist, then inspect its tracks. Filtering and sorting the
-   preview do not modify the original playlist.
+   preview do not modify the original playlist. Sortable lists cycle through ascending, descending and
+   original order when you click a column heading.
 2. **Choose tracklist folder.** Select the final folder where the verified tracks should end up.
 3. **Find on Soulseek.** Follow the search progress and review which tracks were found, flagged or unresolved.
 4. **Review & confirm.** Inspect filenames, versions, formats, quality and alternatives. Confident matches
-   are selected by default; flagged matches need your attention. Confirm the exact selection before any
-   downloads begin.
+   are selected automatically under the default rules; flagged matches need your attention. Confirm the
+   exact selection before any downloads begin.
 5. **Downloads & import.** Monitor downloads and automatic file checks. **Needs attention** explains
    failed, declined or long-waiting transfers and offers recovery actions. Replacements need your approval.
 6. **Check files.** Compare the folder against the playlist, export missing tracks, or inspect a file's
@@ -110,24 +102,61 @@ When enabled, archiving moves processed source folders into `OLD` beneath the So
 Use ordinary folders for downloads and archives; nested symbolic links and Windows junctions need further
 hardening. Failed checks and file conflicts require attention before the affected source folder is archived.
 
-### Matching and waiting uploaders
+## Matching and review
 
-Defaults prefer the exact requested recording, with an extended version of the same recording as a
-fallback. MP3 320 kbps CBR is preferred over FLAC. Radio edits, live recordings and `[Mixed]` tracks are
-excluded by default. Matching rules and format preferences can be saved as reusable layouts; different
-remixes or incompatible VIP versions remain ineligible.
+By default, S2S prefers the exact requested recording, with an extended mix of the same version as a
+fallback. Within those version preferences, MP3 320 kbps CBR is preferred over FLAC. You can change the
+accepted formats, quality preferences and extended-mix behavior, then save them as reusable **Layouts**.
 
-Searches are concurrent but paced to respect Soulseek's search limits. Large playlists take time, and
-finding a file does not guarantee that its uploader will send it. S2S does not switch uploaders without
-your approval: a transfer waiting five minutes offers **Choose another uploader…**. Only alternatives
-you select are tried; a replacement still has to represent the same recording and quality.
+Different remixes and incompatible VIP versions are rejected. A radio edit or live recording is not a
+substitute for the normal recording; when the playlist explicitly requests one, S2S searches for that
+version. DJ-mixed playlist entries are searched as the standalone song by default; Review lets you choose
+**Find the mixed version instead** when that is what you want. Clean versions are rejected by default
+unless the playlist requests a clean version.
 
-File checks inspect size, codec and bitrate. A spectrogram helps with manual quality inspection but
-cannot prove a file's encoding history.
+Uncertain matches are flagged so you can inspect the reason, compare alternatives, change the proposed
+file or leave the track unselected. Filename and metadata matching cannot prove that the audio is the
+correct recording. File checks inspect size, codec and bitrate; the spectrogram provides a further manual
+check, rather than proof of a file's encoding history.
+
+### Search speed and cached results
+
+Searches overlap, but new requests are paced to limit the risk of Soulseek rate-limit bans. Recent search
+candidates are cached locally for up to 12 hours, including across restarts, and evaluated against your
+current matching rules when reused. Ready search requests take turns so waiting tracks are not repeatedly
+overtaken by newer requests.
+
+Caching helps repeated or overlapping playlists. A fresh playlist of unrelated tracks still requires
+network searches and can take several minutes. Finding candidates does not establish that their uploaders
+are still online or willing to transfer the files.
+
+### Downloads that need attention
+
+Failed, declined and long-waiting transfers appear under **Needs attention**. A transfer waiting five
+minutes offers **Choose another uploader…**. S2S tries only the alternative files you approve; choosing
+which files are allowed remains a separate step from finding them. Approved alternatives can be tried at
+the interval you choose, which defaults to 45 seconds. Available backup counts vary by recording.
+
+## Updates and problem reports
+
+S2S checks for updates at startup and through **Help → Check for updates**. It downloads the installer for
+your computer, verifies its update signature, installs it and restarts. Settings, saved sessions and
+history are kept. Updates are not offered while downloads are running.
+
+On Windows, updates started from **1.3.1 or later** show download progress and keep a separate installation
+window open while S2S closes and reopens. The installer preserves unchanged runtime files. Updating from
+1.2.0 still uses its older updater; install the current release manually to avoid that older experience.
+Versions 1.1.2 and earlier need a manual installation.
+
+**Help → Report a problem** prepares a message in your email app with your description, app/system
+versions and a recent log with recognized account details and folder paths removed. A report file is saved
+for attachment; nothing is sent until you send the email. You can also open a
+[GitHub issue](https://github.com/xanman04/stream2soulseek/issues). Review reports and screenshots before
+sharing them, and never attach credentials or the application's data folder.
 
 ## Privacy and local data
 
-Settings and import history stay in your user data folder:
+Settings, import history, logs and cached search metadata stay in your user data folder:
 
 - **Windows:** `%LOCALAPPDATA%\S2S`; credentials use Windows DPAPI protection.
 - **macOS:** `~/Library/Application Support/S2S`; credentials use the login Keychain.
@@ -166,12 +195,16 @@ To build a standalone app on its target operating system:
 <venv-python> packaging/build.py
 ```
 
-The build downloads checksum-pinned tools, packages the app and licence notices, runs a bundled-component
-self-test, and creates a ZIP plus its SHA-256 file in `dist/`. macOS apps must be built on a Mac.
+The build downloads checksum-pinned tools, packages the app and licence notices, runs component and offline
+browser checks, and rejects private runtime-state files from the bundle. It creates a Windows `.exe`
+installer or macOS `.dmg`, plus a build-time `.sha256` file, in `dist/`. Windows builds also need
+[Inno Setup 6](https://jrsoftware.org/isinfo.php); macOS apps must be built on a Mac.
 The [release workflow](.github/workflows/release.yml) requires tests and builds on Windows, Apple silicon
-and Intel Mac, then checks the complete asset set and checksums before publishing a matching version tag.
-A manual workflow run builds artifacts without publishing a release. Live account and transfer testing
-remain separate from these automated checks.
+and Intel Mac. Pushing a matching `v*` version tag triggers the workflow, which verifies all three installers
+and their checksums before signing them for the in-app updater and publishing the release. The release
+page contains the three installers and a checksum table; GitHub adds its source archives separately.
+A manual workflow run builds artifacts without publishing. Live account and transfer testing remain
+separate from these automated checks.
 
 See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
 [release process](docs/RELEASING.md) for version history and maintenance details.
