@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.2 — 2026-10-27
 
 - Faster searching without more searches: every file found in a run is offered to every track, and when a
   track is found S2S asks up to three of its uploaders (in the background, never holding up a search) for that
