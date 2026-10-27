@@ -10,7 +10,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QStackedWidget,
+                               QWidget)
 
 from .. import workflow
 from ..models import Playlist, Settings, TransferState
@@ -18,6 +19,7 @@ from ..queue_recovery import approve_backups
 from ..secretstore import SecretStore
 from ..slskd.service import SlskdService
 from ..store import Store
+from . import theme
 from .context import AppContext
 from .destination_page import DestinationPage
 from .history_dialog import HistoryDialog
@@ -94,6 +96,10 @@ class MainWindow(QMainWindow):
         h.addWidget(self.stack, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage("Local app. Nothing is downloaded without your explicit confirmation.")
+        from .. import __version__
+
+        self.version_label = theme.subtle(QLabel(f"S2S {__version__}"))  # which version this is, at a glance
+        self.statusBar().addPermanentWidget(self.version_label)
         # Once the embedded Apple web view has been shown, Windows composition can leave a hidden page's
         # pixels behind a page that does not paint its own background. Make every stacked page opaque.
         for stack in self.findChildren(QStackedWidget):
@@ -313,6 +319,7 @@ class MainWindow(QMainWindow):
         if self._downloads_running_in_last_import():
             self.resume_last_import()
         if getattr(sys, "frozen", False):  # only the packaged app updates itself; source runs use git
+            self._report_failed_update()
             run_async(self, updater_cleanup, lambda removed: None, lambda exc: None)  # leftovers of past updates
             QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
 
@@ -325,7 +332,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
-    def check_for_updates(self, *, manual: bool) -> None:
+    def check_for_updates(self, *, manual: bool, retries: int = 0) -> None:
         """Look for a newer signed release (in the background). Automatic checks stay silent when nothing is new."""
         from .. import __version__, updater
 
@@ -340,8 +347,13 @@ class MainWindow(QMainWindow):
             self._offer_update(info)
 
         def failed(exc) -> None:
+            from ..applog import get
+
+            get().info("Update check failed: %s", exc)
             if manual:
                 show_error(self, "Check for updates", str(exc))
+            elif retries < 3 and isinstance(exc, updater.UpdateError):  # offline or rate limited: try again later
+                QTimer.singleShot(30 * 60 * 1000, lambda: self.check_for_updates(manual=False, retries=retries + 1))
 
         run_async(self, work, done, failed)
 
@@ -362,6 +374,21 @@ class MainWindow(QMainWindow):
         dialog.quit_requested.connect(self._quit_for_update)
         dialog.exec()
         dialog.deleteLater()
+
+    def _report_failed_update(self) -> None:
+        """S2S quit to install an update but is still the old version: say so (the offer follows as usual)."""
+        from .. import __version__, updater
+        from ..applog import get
+
+        try:
+            missed = updater.failed_update(__version__)
+        except Exception:  # noqa: BLE001
+            return
+        if missed:
+            get().info("The update to %s did not install", missed)
+            QMessageBox.warning(self, "Update not installed",
+                                f"S2S {missed} did not install, so you still have {__version__}. "
+                                "S2S will offer it again; you can also download it from the release page.")
 
     def _quit_for_update(self) -> None:
         from ..applog import get

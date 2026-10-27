@@ -247,3 +247,52 @@ def test_update_popup_lists_only_change_headlines():
     dialog = UpdateDialog(info, target=Path("S2S"), busy_reason="Finish or cancel the running downloads first.")
     assert not dialog.update_btn.isEnabled()
     dialog.deleteLater()
+
+
+def test_the_windows_helper_is_not_started_detached(monkeypatch):
+    """PowerShell started with DETACHED_PROCESS has no console and exits without running the script: no in-app
+    update up to 1.1.2 installed on Windows."""
+    import subprocess
+
+    started = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(kw["creationflags"]))
+    updater.launch_installer(["powershell", "-File", "x.ps1"])
+    assert started and not started[0] & 0x00000008 and started[0] & 0x08000000  # no DETACHED, CREATE_NO_WINDOW
+
+
+def test_an_update_that_did_not_install_is_reported_once():
+    from s2s import config  # noqa: F401  (S2S_HOME points at a test folder)
+
+    updater.mark_pending("1.1.3")
+    assert updater.failed_update("1.1.2") == "1.1.3"  # still the old version: it did not install
+    assert updater.failed_update("1.1.2") is None  # reported once
+    updater.mark_pending("1.1.3")
+    updater.result_file().write_text("pending 1.1.3\ninstalled 0\n", encoding="utf-8")
+    assert updater.failed_update("1.1.3") is None  # installed and running the new version
+
+
+def test_a_rate_limited_check_says_so(monkeypatch):
+    class Response:
+        status_code = 403
+        is_redirect = False
+        headers = {"x-ratelimit-remaining": "0"}
+
+    class Client:
+        def __init__(self, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url):
+            return Response()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    with pytest.raises(updater.UpdateError, match="limiting update checks"):
+        updater._http_get(updater.LATEST_API)

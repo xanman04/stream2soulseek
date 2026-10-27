@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fixed in-app updates on Windows: the helper that installs the update after S2S closes was started without a
+  console, so PowerShell exited without running it; S2S closed and nothing was installed. 1.1.1 and 1.1.2 still
+  have that fault: install this version by hand once.
+- When an update does not install, the next start says so (and the update is offered again).
+- An update check that GitHub rate-limits says so, and the automatic check tries again later; failures are logged.
+- The version is shown in the bottom-right corner of the window.
+
 ## 1.1.2 — 2026-10-27
 
 - Faster searching without more searches: every file found in a run is offered to every track, and when a

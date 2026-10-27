@@ -281,6 +281,7 @@ def installer_script(app: Path, new_app: Path, pid: int) -> tuple[Path, list[str
         script.write_text(f"""$app = {ps(app)}; $setup = {ps(new_app)}
 for ($i = 0; $i -lt 240 -and (Get-Process -Id {pid} -ErrorAction SilentlyContinue); $i++) {{ Start-Sleep -Milliseconds 500 }}
 $p = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', ('/DIR="' + $app + '"'))
+Add-Content -LiteralPath {ps(result_file())} -Value ("installed " + $p.ExitCode) -ErrorAction SilentlyContinue
 Start-Process -FilePath (Join-Path $app 'S2S.exe')
 Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -295,12 +296,37 @@ i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 240 ]; do sleep 0.5; i=$((i+1))
 if [ -e {q(app)} ]; then mv {q(app)} {q(backup)} || {{ open {q(app)}; exit 1; }}; fi
 if ! mv {q(new_app)} {q(app)}; then [ -e {q(backup)} ] && mv {q(backup)} {q(app)}; open {q(app)}; exit 1; fi
 xattr -dr com.apple.quarantine {q(app)} 2>/dev/null
+echo "installed 0" >> {q(result_file())}
 open {q(app)}
 rm -rf {q(backup)} {q(new_app.parent)} {q(folder)}
 """, encoding="utf-8")
         script.chmod(0o755)
         cmd = ["/bin/sh", str(script)]
     return script, cmd
+
+
+def result_file() -> Path:
+    """Written before S2S quits to install ("pending <version>"); the helper adds "installed <code>" after."""
+    from . import config
+
+    return config.app_dir() / "update-result.txt"
+
+
+def mark_pending(version: str) -> None:
+    result_file().write_text(f"pending {version}\n", encoding="utf-8")
+
+
+def failed_update(current: str) -> str | None:
+    """At start: the version an update was meant to install when S2S is still older than it (the update did not
+    install), else None. The record is removed either way."""
+    path = result_file()
+    try:
+        text = path.read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    path.unlink(missing_ok=True)
+    pending = text[1] if len(text) >= 2 and text[0] == "pending" else None
+    return pending if pending and is_newer(pending, current) else None
 
 
 def clean_leftovers(app: Path | None = None) -> list[Path]:
@@ -329,10 +355,22 @@ def clean_leftovers(app: Path | None = None) -> list[Path]:
 
 
 def launch_installer(cmd: list[str]) -> None:
-    """Start the helper detached from S2S (S2S quits right after)."""
+    """Start the helper so that it outlives S2S (S2S quits right after).
+
+    Windows: a hidden console (CREATE_NO_WINDOW) in its own process group, broken away from any job S2S runs in.
+    Not DETACHED_PROCESS: PowerShell started without a console exits at once without running the script (the
+    reason no in-app update up to 1.1.2 installed on Windows).
+    """
     if sys.platform == "win32":
-        subprocess.Popen(cmd, creationflags=_NO_WINDOW | 0x00000008,  # DETACHED_PROCESS
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        new_group, breakaway = 0x00000200, 0x01000000  # CREATE_NEW_PROCESS_GROUP, CREATE_BREAKAWAY_FROM_JOB
+        for flags in (_NO_WINDOW | new_group | breakaway, _NO_WINDOW | new_group):
+            try:
+                subprocess.Popen(cmd, creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                return
+            except OSError:  # a job that forbids breaking away: start inside it (it outlives S2S all the same)
+                if not flags & breakaway:
+                    raise
     else:
         subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
@@ -354,6 +392,8 @@ def _http_get(url: str):
             if response.is_redirect:
                 current = str(response.headers.get("location", ""))
                 continue
+            if response.status_code in (403, 429) and response.headers.get("x-ratelimit-remaining") == "0":
+                raise UpdateError("GitHub is limiting update checks from this network for a while. Try again later.")
             response.raise_for_status()
             return response
     raise UpdateError("Too many redirects while downloading the update.")
