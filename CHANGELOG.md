@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.3 — 2026-10-27
 
 - Fixed in-app updates on Windows: the helper that installs the update after S2S closes was started without a
   console, so PowerShell exited without running it; S2S closed and nothing was installed. 1.1.1 and 1.1.2 still
