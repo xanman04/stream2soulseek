@@ -15,7 +15,7 @@ from ..spotify.public import PublicPlaylistError, fetch_public_playlist, parse_p
 from .context import AppContext
 from .theme import polish_table, set_banner, subtle
 from .tracks_model import C_ALBUM, C_ARTIST, C_DUR, C_POS, C_TITLE, TrackFilterProxy, TrackModel
-from .util import fold, show_error
+from .util import ThreeStepSort, fold, show_error
 from .workers import run_async
 
 
@@ -120,12 +120,7 @@ class PlaylistPage(QWidget):
         for col in (C_POS, C_DUR):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.track_table.setTextElideMode(Qt.TextElideMode.ElideRight)
-        header.setSortIndicatorClearable(True)  # same column cycles asc, desc, then Apple order
-        self.track_table.setSortingEnabled(True)
-        # QTableView starts with column 0 selected as the sort column. Clear both
-        # the visible indicator and proxy sort so the first click is ascending.
-        header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
-        self.track_proxy.sort(-1)
+        self.track_sort = ThreeStepSort(self.track_table, self.track_proxy)  # asc, desc, then playlist order
         self.back_btn = QPushButton("← Your playlists")  # leaves a pasted link's playlist
         self.back_btn.setFlat(True)
         self.back_btn.setVisible(False)

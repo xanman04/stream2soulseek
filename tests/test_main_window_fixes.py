@@ -205,7 +205,7 @@ def test_flagged_track_has_visible_alternatives_control(win, tmp_path):
     result = replace(result, best=replace(result.best, flagged=True))
     page = win.review
     page.set_results([result], str(tmp_path))
-    page.alternatives_btn.click()
+    page.view.setCurrentIndex(page.proxy.index(0, 0))
     assert page.detail.rowCount() == 2
     assert page.alt_title.text() == "Other files you can use instead (1)"
     page.detail.selectRow(1)

@@ -478,7 +478,7 @@ def test_rejected_primary_does_not_hide_eligible_fallback(env):
     client.get_search_responses = responses
     res, _ = run(env, client, [track])
     assert res[0].best.file.filename == right.filename
-    assert len(client.texts) == 3  # stops once something usable is in hand (past the first three rungs)
+    assert len(client.texts) == 2  # stops at the first good file
     assert any(c.file.filename == wrong.filename for c in res[0].rejected)
 
 
@@ -493,9 +493,9 @@ def test_all_rejected_queries_remain_unresolved(env):
 
 @pytest.mark.parametrize("users,enough,backups", [
     (["u1", "u2", "u3", "u4", "u5", "u6"], True, 5),
-    (["u1", "u2", "u3"], True, 2),  # a match plus two backups: no more searches needed
-    (["u1", "u1", "u1", "u1", "u1", "u1"], False, 0),  # usable, so no long search (only when nothing usable)
-    (["u1", "u2"], False, 1),
+    (["u1", "u2", "u3"], True, 2),
+    (["u1", "u1", "u1", "u1", "u1", "u1"], True, 0),  # one good file is enough to stop searching
+    (["u1", "u2"], True, 1),
 ])
 def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, enough, backups):
     # A folder difference creates distinct remote files without changing recording identity.
@@ -625,3 +625,24 @@ def test_a_folder_listing_serves_other_tracks_of_the_same_artist(env, monkeypatc
     res, _ = run(env, Client(), album)
     assert searches == ["a0"]  # track two needed no search of its own
     assert all(r.best is not None for r in res)
+
+
+def test_a_dj_mixed_entry_can_be_searched_as_the_mix_or_the_song(env):
+    """A "Song - Mixed" playlist entry is looked for as the song itself; in Review it can be switched to the mix
+    (filed under the mixed name) and back."""
+    entry = AppleTrack("mix", "Song - Mixed", "Artist", duration_ms=97_000, position=0)
+    env.store.save_tracks(env.iid, [entry])
+    song = good_file(user="s", path=r"Music\Artist - Song.mp3")
+    mix = RemoteFile("m", r"Music\Artist - Song (Mixed).mp3", 3_000_000, "mp3", 320, False, length_s=97)
+    client = FakeSlskd({"artist song": [song, mix]})
+    res, _ = run(env, client, [entry])
+    assert res[0].track.name == "Song - Mixed" and res[0].best.file.username == "s"  # the song itself
+    assert workflow.mixed_entry(env.store, env.iid, "mix") == entry
+    as_mix = workflow.search_track_version(env.store, client, env.iid, "mix", env.settings, mixed=True)
+    assert as_mix.best.file.username == "m" and workflow.MIX_CHOSEN in as_mix.note
+    stored = {r.track.apple_id: r for r in env.store.load_match_results(env.iid)}
+    assert stored["mix"].best.file.username == "m"  # the choice is kept with the track
+    back = workflow.search_track_version(env.store, client, env.iid, "mix", env.settings, mixed=False)
+    assert back.best.file.username == "s" and workflow.MIX_CHOSEN not in back.note
+    assert env.store.load_tracks(env.iid)[0] == entry  # the playlist entry itself never changes
+    assert workflow.mixed_entry(env.store, env.iid, "plain") is None

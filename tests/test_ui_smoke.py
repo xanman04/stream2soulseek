@@ -360,11 +360,13 @@ def test_clicking_header_toggles_sort_and_shows_indicator(env):
     page._show_tracks(Playlist("p", "P"), _tracks_for_sorting())
     hdr = page.track_table.horizontalHeader()
     assert hdr.sortIndicatorSection() == -1 and _column(page, 0)[:2] == ["1", "2"]  # Apple order by default
-    hdr.setSortIndicator(4, Qt.SortOrder.AscendingOrder)  # what a header click does
+    hdr.sectionClicked.emit(4)  # a header click
     assert _column(page, 4)[0] == "0:09"
-    hdr.setSortIndicator(4, Qt.SortOrder.DescendingOrder)  # clicking again reverses
+    hdr.sectionClicked.emit(4)  # clicking again reverses
     assert _column(page, 4)[0] == "60:00"
     assert hdr.sortIndicatorSection() == 4 and hdr.isSortIndicatorShown()
+    hdr.sectionClicked.emit(4)  # a third click: Apple order again
+    assert hdr.sortIndicatorSection() == -1 and _column(page, 0)[:2] == ["1", "2"]
 
 
 def test_sorting_and_filtering_do_not_change_what_is_searched(env):

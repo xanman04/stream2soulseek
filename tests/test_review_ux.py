@@ -79,7 +79,7 @@ def test_summary_chips_and_row_text(page):
     assert page.chip_ready.text() == "2 ready"
     assert page.chip_check.text() == "1 to check"
     assert page.chip_missing.text() == "2 not found"
-    assert page.chip_skipped.text() == "1 skipped"
+    assert page.chip_skipped.text() == "1 already in your folder"
     assert page.chip_selected.text() == "2 selected"
     assert page.confirm_btn.text() == "Confirm selection (2)"
     px = page.proxy
@@ -109,16 +109,6 @@ def test_filters_and_selection_mapping(page):
     assert page.proxy.setData(page.proxy.index(0, review_page.C_USE), Qt.CheckState.Checked,
                               Qt.ItemDataRole.CheckStateRole)
     assert page.model.rows[1].checked and page.model.counts()["checked"] == 3
-
-
-def test_bulk_actions(page):
-    assert page.select_ready_btn.isEnabled()
-    page.model.rows[0].checked = False
-    page.model.rows[1].checked = True  # deliberately ticked flagged row
-    page.select_ready_btn.click()
-    assert page.model.rows[0].checked and page.model.rows[1].checked  # flagged tick untouched
-    page.untick_check_btn.click()
-    assert not page.model.rows[1].checked and page.model.rows[0].checked
 
 
 def test_details_panel_shows_both_sides_and_reasons(page):
@@ -172,19 +162,12 @@ def test_keyboard_space_toggles_and_enter_moves_to_alternatives(page):
     assert page.detail.selectionModel().selectedRows()[0].row() == 1  # first different eligible file
 
 
-def test_next_to_check_jumps_to_flagged_row(page):
-    page.view.setCurrentIndex(page.proxy.index(0, 0))
-    page.alternatives_btn.click()
-    assert page._current_row() == 1
-
-
 def test_locked_banner_and_downloads_signal(ctx):
     p = ReviewPage(ctx)
     p.set_results(results(), "D:\\lib", locked=True)
     assert p.banner.isHidden() and p.banner_btn.isHidden()  # no notice line and no second button
     got = []
     p.downloads_requested.connect(lambda: got.append(1))
-    assert not p.select_ready_btn.isEnabled()
     assert p.confirm_btn.text() == "Selection confirmed" and not p.confirm_btn.isEnabled()
 
 
@@ -222,3 +205,18 @@ def test_confirmation_lists_only_the_ticked_files(page):
     dlg = ConfirmDialog(page.summary_entries(), "D:\\lib")
     buttons = [b.text() for b in dlg.findChildren(QPushButton)]
     assert "Continue" in buttons and "Back to review" in buttons
+
+
+def test_tick_box_header_ticks_all_or_none_and_columns_sort_in_three_steps(page):
+    hh = page.view.horizontalHeader()
+    hh.sectionClicked.emit(review_page.C_USE)  # Gmail-style: some were ticked, so all are now
+    selectable = [r for r in page.model.rows if r.selectable]
+    assert all(r.checked for r in selectable) and page.model.tick_state() == "all"
+    assert hh.sortIndicatorSection() == -1  # the tick-box column never sorts
+    hh.sectionClicked.emit(review_page.C_USE)
+    assert not any(r.checked for r in selectable) and page.model.tick_state() == "none"
+    assert page.model.headerData(review_page.C_USE, Qt.Orientation.Horizontal) == "☐"
+    for expected in ((review_page.C_TRACK, Qt.SortOrder.AscendingOrder),
+                     (review_page.C_TRACK, Qt.SortOrder.DescendingOrder), (-1, Qt.SortOrder.AscendingOrder)):
+        hh.sectionClicked.emit(review_page.C_TRACK)
+        assert (hh.sortIndicatorSection(), hh.sortIndicatorOrder()) == expected  # asc, desc, then off

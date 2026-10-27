@@ -419,8 +419,14 @@ def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str],
 
 def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None,
           declined_peers: Mapping[str, str] | None = None) -> MatchResult:
+    """Rank `files` for the recording the playlist entry stands for (see searchable_track); the result keeps the
+    entry exactly as it is in the playlist."""
     policy = policy or MatchPolicy()
-    track = searchable_track(track, policy)
+    return replace(_match(searchable_track(track, policy), files, policy, declined_peers), track=track)
+
+
+def _match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy,
+           declined_peers: Mapping[str, str] | None) -> MatchResult:
 
     seen: set[tuple[str, str, int]] = set()
     evaluated: list[tuple[Candidate, int]] = []
