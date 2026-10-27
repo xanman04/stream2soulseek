@@ -1,18 +1,17 @@
 ## What's changed
 
-- **Faster searching from shared results.** Every file found is checked against the whole playlist, and S2S
-  looks in the uploader's album folder for other tracks by the same artist, so some tracks need no search.
-- **Found tracks finish first.** Tracks with nothing found yet do their extra searches at the end.
-- **Inspect files that did not pass your rules.** They are always listed in Review; select one to see why.
-- **A plain search bar** in Review, without the list of earlier searches.
+- **In-app updates now install on Windows.** In 1.1.1 and 1.1.2 S2S closed but the update never ran. Install
+  this version by hand once; later updates install from inside S2S.
+- **A failed update is reported.** If an update does not install, the next start says so and offers it again.
+- **The version is shown** in the bottom-right corner of the window.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.2/S2S-1.1.2-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.2/S2S-1.1.2-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.2/S2S-1.1.2-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.3/S2S-1.1.3-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.3/S2S-1.1.3-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.3/S2S-1.1.3-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -30,5 +29,5 @@ Developer ID signing or notarization; Windows builds are not publisher-signed. O
 
 [Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) ·
 [Report a problem](https://github.com/xanman04/stream2soulseek/issues) ·
-[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.1.1...v1.1.2)
+[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.1.2...v1.1.3)
 
