@@ -32,25 +32,26 @@ The macOS requirement follows the [Qt version bundled with S2S](https://doc.qt.i
 Mac releases are undergoing their first live user testing; a successful build does not establish that
 real account sign-in and downloads work end to end.
 
-**Windows:** Extract the complete archive and open `S2S/S2S.exe`. Keep the entire extracted folder together.
+**Windows:** Run the downloaded installer, then open S2S from the Start menu.
 The app is not publisher-signed, so Windows may show SmartScreen. If you trust the release, use
 **More info → Run anyway** where offered.
 
-**macOS:** Extract the archive, move **S2S.app** to **Applications**, and open it. The app is ad hoc signed,
+**macOS:** Open the disk image, drag **S2S.app** to **Applications**, and open it there. The app is ad hoc signed,
 but has no Apple Developer ID signature or notarization. If macOS blocks it, try
 **System Settings → Privacy & Security → Open Anyway** after the first launch attempt, as described in
 [Apple's instructions](https://support.apple.com/en-us/102445). The release notes include an app-specific
 Terminal fallback if this option is unavailable. Allow Keychain access when prompted to save your sessions.
 
-Each archive has a matching `.sha256` file. Compare its digest with `Get-FileHash <archive> -Algorithm SHA256`
-on Windows or `shasum -a 256 <archive>` on macOS to check the download's integrity.
+Each release includes a collapsed SHA-256 table. Compare the listed digest with
+`Get-FileHash <installer> -Algorithm SHA256` on Windows or `shasum -a 256 <disk-image>` on macOS.
 
 ## Updates and problem reports
 
-From version 1.0.5, S2S updates itself: at start it checks the latest release (also **Help → Check for
-updates**), and **Update now** downloads the archive for your computer, checks that it is signed with the
-developer's update key, installs it and restarts. Settings, logins and history are kept. Updates are not
-offered while downloads are running. Earlier versions need one manual download of 1.0.5.
+S2S checks for updates at startup and through **Help → Check for updates**. It downloads the installer for
+your computer, verifies its signature, installs it and restarts. Settings, logins and history are kept;
+updates are not offered while downloads are running. On Windows, versions 1.3.0 and later keep an installation
+progress window visible while the app is closed. Older installations use their existing updater; versions
+1.1.2 and earlier need a manual installation of the current release.
 
 **Help → Report a problem** opens your email app with a message to the developer: your description, the S2S
 and system versions, and a recent log with logins and folder names removed. The full report is saved as a

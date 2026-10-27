@@ -1,22 +1,23 @@
 ## What's changed
 
-- **Faster searching.** A track stops searching at its first good file; other uploaders it finds stay as backups.
-- **Nothing is skipped.** A DJ-mixed track is looked for as the song itself, with "Find the mixed version
-  instead" in Review when the mix is what you want. Tracks already in your folder say so.
-- **Spotify links open in seconds.** No more flashing window, and your other playlists step aside while it is open.
-- **A smaller Windows install** that starts S2S when the installer finishes.
-- Review: a cleaner details panel, a tick-box header that ticks all or none, and three-click sorting (ascending,
-  descending, off) everywhere. The bulk buttons are gone.
-- Settings: the version rules now offer only the choices that matter (clean versions, DJ-mixed tracks).
-- From 1.1.4 this update installs from inside S2S. From older versions, install it by hand once.
+- **Clearer Windows updates.** Download progress and a separate installation window keep you informed while
+  S2S closes and reopens. The window follows your app theme and provides recovery actions if an update fails.
+- **Less installation work.** The Windows installer keeps unchanged runtime files in place.
+- **Reusable search results.** Candidates are cached locally for up to 12 hours across restarts, helping
+  repeated or overlapping searches. Matching rules and download confirmation remain in effect.
+- **Fairer searching.** Waiting tracks take turns, and capped responses are handled more conservatively when
+  reusing results. Search frequency is unchanged; fresh playlists of unrelated tracks still take time.
+
+**Updating from 1.2.0:** that version's updater still handles this installation. The new Windows progress
+window applies to future updates started from 1.3.0. You can install 1.3.0 manually using the links below.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.2.0/S2S-1.2.0-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.2.0/S2S-1.2.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.2.0/S2S-1.2.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.0/S2S-1.3.0-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.0/S2S-1.3.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.0/S2S-1.3.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -34,5 +35,5 @@ Developer ID signing or notarization; Windows builds are not publisher-signed. O
 
 [Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) ·
 [Report a problem](https://github.com/xanman04/stream2soulseek/issues) ·
-[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.1.4...v1.2.0)
+[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.2.0...v1.3.0)
 
