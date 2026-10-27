@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.1.4 — 2026-10-27
 
 - A failed automatic update check is retried every 30 minutes while S2S is open (was: three times), so a
   temporary failure never hides an update. The popup appears at every start until S2S is up to date.
+- 1.1.3 was never released (a test failed on the Mac build machines); its changes are below.
 
-## 1.1.3 — 2026-10-27
+## 1.1.3 — 2026-10-27 (not released)
 
 - Fixed in-app updates on Windows: the helper that installs the update after S2S closes was started without a
   console, so PowerShell exited without running it; S2S closed and nothing was installed. 1.1.1 and 1.1.2 still
