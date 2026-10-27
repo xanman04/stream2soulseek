@@ -122,7 +122,13 @@ public static class S2SUpdateFrame {
     # Files are complete now; allow the new app through its startup guard.
     @{pid=$PID; target=$app; started=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); phase='complete'} |
         ConvertTo-Json -Compress | Set-Content -LiteralPath $active -Encoding UTF8
-    $restarted = Start-Process -FilePath (Join-Path $app 'S2S.exe') -WorkingDirectory $app -PassThru
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = Join-Path $app 'S2S.exe'
+    $startInfo.WorkingDirectory = $app
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    Trace 'Starting S2S directly'
+    $restarted = [Diagnostics.Process]::Start($startInfo)
     Trace 'Restart requested'
     $opening = [Diagnostics.Stopwatch]::StartNew()
     while (-not $restarted.HasExited -and $opening.Elapsed.TotalSeconds -lt 30) {
