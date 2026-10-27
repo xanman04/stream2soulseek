@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — 2026-10-27
 
 - Faster searching: a track stops searching at its first good file (exact version, preferred format); the other
   uploaders that search returns stay as backups. A 43-track run took 61 searches before, about 45 now.
