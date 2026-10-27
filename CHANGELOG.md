@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Faster searching: a track stops searching at its first good file (exact version, preferred format); the other
+  uploaders that search returns stay as backups. A 43-track run took 61 searches before, about 45 now.
+- Review: a DJ-mixed playlist entry shows that S2S looks for the song itself, with "Find the mixed version
+  instead" (and back) for when the mix is what you want; the choice is kept and the file is named to match.
+- Review: the "Next to check", "Select all ready" and "Untick all needing a look" buttons are gone. The tick-box
+  column header ticks every downloadable track or none, like Gmail, and never sorts.
+- Every sortable list sorts in three clicks, like Rekordbox: ascending, descending, then back to playlist order.
+- Review details: the track title is larger with the artist beneath it, and "Check before downloading" lists one
+  issue per line with its detail (such as the bracketed text) always on the next line.
 - No track is skipped because of its label any more ("Skipped" read as "will not be included"). A DJ-mixed
   playlist entry ("Song - Mixed", often a short excerpt) is searched as the song itself and filed under the
   song's name; a radio-edit or live entry is searched as that version. Only tracks already in your folder are

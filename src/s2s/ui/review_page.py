@@ -28,7 +28,7 @@ from ..queue_recovery import proposed_backups
 from ..slskd.search import build_queries
 from . import theme
 from .context import AppContext
-from .util import SORT_ROLE, fmt_duration_ms, fmt_mib, fmt_seconds, fold, item, make_table, show_error
+from .util import SORT_ROLE, ThreeStepSort, fmt_duration_ms, fmt_mib, fmt_seconds, fold, item, make_table, show_error
 from .workers import run_async
 
 COLUMNS = ["✓", "#", "Track", "Match", "Quality", "Length", "Source"]
@@ -93,6 +93,14 @@ def plain_reason(text: str) -> str:
     if t.startswith("extended mix of the same version"):
         return "extended mix of the same version (the exact version was not found)"
     return t
+
+
+def _issue_lines(text: str) -> list[str]:
+    """One issue for the explanation box: "Label:" on one line and its detail (a name, a bracket, a path) on the
+    next, the same way every time."""
+    text = text[:1].upper() + text[1:]
+    head, sep, detail = text.partition(": ")
+    return [head + ":", detail.strip()] if sep and detail.strip() else [text]
 
 
 def _flag_reasons(c: Candidate) -> list[str]:
@@ -184,7 +192,7 @@ class ReviewRow:
 
 
 class ReviewModel(QAbstractTableModel):
-    checks_changed = Signal()
+    checks_changed = Signal()  # also redraws the tick-box header (see ReviewPage)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -271,11 +279,17 @@ class ReviewModel(QAbstractTableModel):
             self.checks_changed.emit()
         return changed
 
-    def select_ready(self) -> int:
-        return self.set_checked_where(True, lambda r: not r.needs_look)
+    def toggle_all(self) -> int:
+        """The tick-box header, like Gmail: tick every track that can be downloaded, or untick all when all are."""
+        selectable = [r for r in self.rows if r.selectable]
+        every = bool(selectable) and all(r.checked for r in selectable)
+        return self.set_checked_where(not every, lambda r: True)
 
-    def untick_needing_a_look(self) -> int:
-        return self.set_checked_where(False, lambda r: r.needs_look)
+    def tick_state(self) -> str:
+        """'all', 'none' or 'some' of the downloadable tracks ticked (drawn in the tick-box header)."""
+        selectable = [r for r in self.rows if r.selectable]
+        ticked = sum(1 for r in selectable if r.checked)
+        return "none" if not ticked else "all" if ticked == len(selectable) else "some"
 
     def checked_rows(self) -> list[ReviewRow]:
         return [r for r in self.rows if r.checked and r.selectable]
@@ -316,6 +330,8 @@ class ReviewModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
         if orientation == Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
+                if section == C_USE:
+                    return {"all": "☑", "none": "☐", "some": "⊟"}[self.tick_state()]
                 return COLUMNS[section]
         return None
 
@@ -601,9 +617,10 @@ class ReviewPage(QWidget):
         self.view = QTableView()
         theme.polish_table(self.view)
         self.view.setModel(self.proxy)
-        self.view.setSortingEnabled(True)
+
         hh = self.view.horizontalHeader()
-        hh.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)  # playlist order
+        # a column cycles ascending -> descending -> playlist order; the tick-box header ticks all or none (Gmail)
+        self.sort = ThreeStepSort(self.view, self.proxy, skip=(C_USE,), on_skip=lambda _c: self._tick_all())
         self.view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.view.verticalHeader().setVisible(False)
@@ -666,21 +683,18 @@ class ReviewPage(QWidget):
         tools.addLayout(segment)
         self.filter_all, self.filter_check, self.filter_missing = (self.filter_buttons[m] for m in FILTERS)
         tools.addStretch(1)
-        self.alternatives_btn = QPushButton("Next to check")
-        self.alternatives_btn.clicked.connect(self.show_alternatives)
-        self.select_ready_btn = QPushButton("Select all ready")
-        self.select_ready_btn.clicked.connect(self.model.select_ready)
-        self.untick_check_btn = QPushButton("Untick all needing a look")
-        self.untick_check_btn.clicked.connect(self.model.untick_needing_a_look)
-        for b in (self.alternatives_btn, self.select_ready_btn, self.untick_check_btn):
-            tools.addWidget(b)
 
         # ---- details panel: what will be downloaded (left), the other files for the track (right)
+        # the track: its title large and bold, the artist on its own line beneath, so it stands apart from the text
         self.detail_title = QLabel("Select a track to see its details.")
         self.detail_title.setWordWrap(True)
         tf = self.detail_title.font()
         tf.setBold(True)
+        tf.setPointSizeF(tf.pointSizeF() * 1.3)
         self.detail_title.setFont(tf)
+        self.detail_artist = theme.subtle(QLabel(""))
+        self.detail_artist.setWordWrap(True)
+        self.detail_artist.setVisible(False)
         self.why = theme.banner("", "info")
         self.why.setVisible(False)
         self.file_heading = theme.subtle(QLabel("Will download"))
@@ -704,11 +718,21 @@ class ReviewPage(QWidget):
         search_row.addWidget(self.custom_btn)
         left = QVBoxLayout()
         left.addWidget(self.detail_title)
+        left.addWidget(self.detail_artist)
+        left.addSpacing(6)
         left.addWidget(self.why)
         left.addSpacing(4)
         left.addWidget(self.file_heading)
         left.addWidget(self.file_label)
         left.addWidget(self.facts_label)
+        self.version_note = theme.subtle(QLabel(""))  # a DJ-mixed playlist entry: the song itself, or the mix
+        self.version_note.setWordWrap(True)
+        self.version_btn = QPushButton("")
+        self.version_btn.clicked.connect(self.switch_version)
+        for w in (self.version_note, self.version_btn):
+            w.setVisible(False)
+        left.addWidget(self.version_note)
+        left.addWidget(self.version_btn, 0, Qt.AlignmentFlag.AlignLeft)
         left.addStretch(1)
         left.addWidget(theme.subtle(QLabel("Search Soulseek for this track with your own words:")))
         left.addLayout(search_row)
@@ -766,6 +790,8 @@ class ReviewPage(QWidget):
         lay.addLayout(foot)
 
         self.model.checks_changed.connect(self._update_footer)
+        self.model.checks_changed.connect(
+            lambda: self.model.headerDataChanged.emit(Qt.Orientation.Horizontal, C_USE, C_USE))
         self.view.selectionModel().currentRowChanged.connect(
             lambda cur, _prev: self._show_detail(self._source_row(cur)))
         self.detail.itemSelectionChanged.connect(self._update_use_button)
@@ -774,6 +800,12 @@ class ReviewPage(QWidget):
         self.confirm_btn.clicked.connect(self.confirm_download)
         self._show_detail(-1)
         self._update_footer()
+
+    # ------------------------------------------------------------ header
+
+    def _tick_all(self) -> None:
+        if not self._locked and not self._busy:
+            self.model.toggle_all()
 
     # ------------------------------------------------------------ keyboard
 
@@ -924,11 +956,12 @@ class ReviewPage(QWidget):
             return "muted", skipped_label(res.note) + "."
         if c is None:
             return "error", "Not found. " + not_found_detail(res.note)
-        extra = f" A similar file is already in the folder: {', '.join(r.existing[:2])}." if r.existing else ""
+        extra = ("\nA similar file is already in the folder:\n" + ", ".join(r.existing[:2])) if r.existing else ""
         if c.flagged:
-            flags = _flag_reasons(c)
-            body = "; ".join(flags) if flags else "this file needs a closer look"
-            return "warn", f"Check before downloading: {body[:1].upper() + body[1:]}." + extra
+            lines = ["Check before downloading:"]
+            for flag in _flag_reasons(c) or ["this file needs a closer look"]:
+                lines += _issue_lines(flag)
+            return "warn", "\n".join(lines) + extra
         if c.tier == Tier.EXACT:
             return "ok", "Exact match for the requested version." + extra
         return "ok", "Extended mix of the same version: the exact version was not available." + extra
@@ -937,6 +970,7 @@ class ReviewPage(QWidget):
         self.detail.setRowCount(0)
         if row < 0 or row >= len(self.model.rows):
             self.detail_title.setText("Select a track to see its details.")
+            self.detail_artist.setVisible(False)
             theme.set_banner(self.why, "", "info")
             self.file_heading.setVisible(False)
             self.file_label.setText("")
@@ -945,19 +979,37 @@ class ReviewPage(QWidget):
             self.alt_title.setText("")
             self.file_detail.setVisible(False)
             self.custom_btn.setEnabled(False)
+            self.version_note.setVisible(False)
+            self.version_btn.setVisible(False)
             self.custom_query.setEnabled(False)
             self.custom_query.clear()
             self._update_use_button()
             return
         r = self.model.rows[row]
         res, t, ch = r.result, r.result.track, r.chosen
-        self.detail_title.setText(f"{t.name} — {t.artist}")
+        self.detail_title.setText(t.name)
+        self.detail_artist.setText(t.artist)
+        self.detail_artist.setVisible(bool(t.artist))
         kind, text = self._explain(r)
         if t.apple_id in self.model.searching:
             kind, text = "info", "Searching…"
         theme.set_banner(self.why, text, kind)
         can_search = t.apple_id not in self.model.searching and not self._locked and not self.replacement
         self.custom_btn.setEnabled(can_search)
+        original = (workflow.mixed_entry(self.ctx.store, self.ctx.import_id, t.apple_id)
+                    if self.ctx.import_id else None)
+        if original is not None:
+            if workflow.MIX_CHOSEN in res.note:
+                self.version_note.setText("In your playlist this track comes from a DJ mix. S2S is looking for the "
+                                          "mixed version, as you chose.")
+                self.version_btn.setText("Find the song itself instead")
+            else:
+                self.version_note.setText("In your playlist this track comes from a DJ mix, so S2S looks for the "
+                                          "song itself.")
+                self.version_btn.setText("Find the mixed version instead")
+            self.version_btn.setEnabled(can_search)
+        self.version_note.setVisible(original is not None)
+        self.version_btn.setVisible(original is not None)
         self.custom_query.setEnabled(can_search)
         if self._custom_for != t.apple_id:
             self._custom_for = t.apple_id
@@ -1027,22 +1079,6 @@ class ReviewPage(QWidget):
             self.detail.selectRow(in_use_row)
         self._update_use_button()
 
-    def show_alternatives(self) -> None:
-        """Jump to the next track that needs a look (after the current one, wrapping), and show its files."""
-        n = self.proxy.rowCount()
-        if not n:
-            return
-        cur = self.view.currentIndex().row() if self.view.currentIndex().isValid() else -1
-        order = [(cur + 1 + k) % n for k in range(n)] if cur >= 0 else list(range(n))
-        target = next((i for i in order
-                       if self.model.rows[self.proxy.mapToSource(self.proxy.index(i, 0)).row()].needs_look), None)
-        if target is None:
-            target = max(cur, 0)
-        self.view.setCurrentIndex(self.proxy.index(target, C_TRACK))
-        self.view.scrollTo(self.proxy.index(target, C_TRACK))
-        self._show_detail(self._current_row())
-        self.view.setFocus()
-
     def _selected_detail_candidate(self) -> tuple[int, Candidate] | None:
         rows = self.detail.selectionModel().selectedRows()
         if not rows:
@@ -1088,26 +1124,52 @@ class ReviewPage(QWidget):
     def search_custom(self) -> None:
         """Search the selected track with the user's own words; results join the track's files. Never queues."""
         row = self._current_row()
-        if row < 0 or row >= len(self.model.rows):
+        if not self._can_search_row(row):
             return
         res = self.model.rows[row].result
         track = res.track
+        query = self.ask_custom_query(self._default_custom_query(res))
+        query = " ".join((query or "").split())
+        import_id = self.ctx.import_id
+        if not query or import_id is None:
+            return
+        self._search_one(row, lambda client: workflow.search_track_custom(
+            self.ctx.store, client, import_id, track, query, self.ctx.settings))
+
+    def _can_search_row(self, row: int) -> bool:
+        if row < 0 or row >= len(self.model.rows):
+            return False
         if self._locked:
             self._flash("Downloads were already queued for this review, so it cannot be changed. "
                         "Start a new search to look again.", "warn")
-            return
+            return False
         if self.replacement:
             self._flash("This review only offers other sources for failed downloads; searching again is not "
                         "available here.", "warn")
-            return
-        if self._busy or track.apple_id in self.model.searching:
+            return False
+        if self._busy or self.model.rows[row].result.track.apple_id in self.model.searching:
             self._flash("Please wait until the current action finishes.", "info")
+            return False
+        return True
+
+    def switch_version(self) -> None:
+        """A DJ-mixed playlist entry: search it as the mix instead of the song itself, or back again."""
+        row = self._current_row()
+        if not self._can_search_row(row) or self.ctx.import_id is None:
             return
-        query = self.ask_custom_query(self._default_custom_query(res))
-        query = " ".join((query or "").split())
+        track = self.model.rows[row].result.track
+        import_id, store, settings = self.ctx.import_id, self.ctx.store, self.ctx.settings
+        original = workflow.mixed_entry(store, import_id, track.apple_id)
+        if original is None:
+            return
+        want_mix = workflow.MIX_CHOSEN not in self.model.rows[row].result.note  # switch to the other version
+        self._search_one(row, lambda client: workflow.search_track_version(
+            store, client, import_id, track.apple_id, settings, mixed=want_mix))
+
+    def _search_one(self, row: int, search) -> None:
+        """Run one track's search off the UI thread and put its result in the row. Never queues."""
+        track = self.model.rows[row].result.track
         import_id, generation = self.ctx.import_id, self._load_generation
-        if not query or import_id is None:
-            return
         self._notice = None
         self._refresh_banner()
         self.model.searching.add(track.apple_id)
@@ -1115,9 +1177,7 @@ class ReviewPage(QWidget):
         self._show_detail(row)
 
         def work():
-            client = self.ctx.slskd_client()
-            return workflow.search_track_custom(self.ctx.store, client, import_id, track, query,
-                                                self.ctx.settings)
+            return search(self.ctx.slskd_client())
 
         def finish() -> int:
             self.model.searching.discard(track.apple_id)
@@ -1189,16 +1249,12 @@ class ReviewPage(QWidget):
         theme.set_stat(self.chip_ready, f"{c['ready']} ready", zero(c["ready"], "ok"))
         theme.set_stat(self.chip_check, f"{c['flagged']} to check", zero(c["flagged"], "warn"))
         theme.set_stat(self.chip_missing, f"{c['unresolved']} not found", zero(c["unresolved"], "error"))
-        theme.set_stat(self.chip_skipped, f"{c['skipped']} skipped", "muted")
+        theme.set_stat(self.chip_skipped, f"{c['skipped']} already in your folder", "muted")
         self.chip_skipped.setVisible(c["skipped"] > 0)
         theme.set_stat(self.chip_selected, f"{n} selected", zero(n, "info"))
         self.confirm_btn.setText("Selection confirmed" if self._locked else f"Confirm selection ({n})")
         stale = self.rules_stale()
         self.confirm_btn.setEnabled(n > 0 and not self._locked and not self._busy and not stale)
-        free = not self._locked and not self._busy
-        self.alternatives_btn.setEnabled(c["flagged"] > 0 and not self._busy)
-        self.select_ready_btn.setEnabled(free and c["ready"] > 0)
-        self.untick_check_btn.setEnabled(free and c["flagged"] > 0)
         for b in self.filter_buttons.values():
             b.setEnabled(not self._busy)
         self.filter_check.setText(f"Needs a look ({c['flagged']})" if c["flagged"] else "Needs a look")

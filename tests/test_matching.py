@@ -383,7 +383,7 @@ def test_labelled_requests_are_searched_not_skipped():
     edit or live entry is looked for as that version."""
     r = match(T("Song [Mixed]"), [F(P("Song [Mixed]")), F(P("Song"))])
     assert r.status == MatchStatus.PROPOSED and r.best.file.filename.endswith("Song.mp3")
-    assert r.track.name == "Song"  # filed under the song's own name
+    assert r.track.name == "Song [Mixed]"  # the result keeps the playlist entry as it is
     r = match(T("Song (Radio Edit)"), [F(P("Song (Radio Edit)"))])
     assert r.status == MatchStatus.PROPOSED
 

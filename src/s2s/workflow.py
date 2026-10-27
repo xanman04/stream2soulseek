@@ -26,6 +26,7 @@ from .models import (
     ImportOutcome,
     ImportResult,
     MatchResult,
+    MatchPolicy,
     MatchStatus,
     RemoteFile,
     Settings,
@@ -41,15 +42,16 @@ from .queue_recovery import effective_item, pool_for_track
 ALREADY_IMPORTED = "already imported"
 NOT_SEARCHED = "not searched (search was cancelled before this track)"
 QUICK_SEARCH_S = 8
-# Searches are the scarce resource (Soulseek allows about 8 a minute), so a track stops searching once it has a
-# good match plus a couple of backups instead of chasing five; "Find another source" covers the rare rest.
-TARGET_SOURCES = 3  # primary plus two independent backup uploaders in the preferred format
+# Searches are the scarce resource (about 8 a minute), so a track stops searching at its first good file (exact
+# version, preferred format). The other uploaders that same search returns stay as backups; chasing more cost about
+# a third more searches (a 43-track run: 61 searches instead of ~45). "Find another source" covers the rare rest.
+TARGET_SOURCES = 1  # uploaders with the exact version in the preferred format before a track stops searching
 MIN_SOURCES = 2  # primary plus one backup
 # Folder listings (a request to the uploader, not a server search) that let one search serve a whole album.
 # Every track first gets this many query rungs; the rest of the ladder (and the long search) for tracks still
 # without a usable file run after all other tracks, so the found tracks finish first.
 FIRST_PASS_RUNGS = 3
-FOLDER_LOOKUPS_PER_TRACK = 3  # as many uploaders as a track must have to skip its own search (TARGET_SOURCES)
+FOLDER_LOOKUPS_PER_TRACK = 2  # one is enough to spare a waiting track its search; two in case one is offline
 MAX_FOLDER_LOOKUPS = 200  # per search run
 FOLDER_LOOKUP_TIMEOUT_S = 6  # a slow peer is given up on rather than waited for
 FOLDER_WORKERS = 4  # listings run beside the searches, never in a search slot
@@ -300,8 +302,7 @@ def search_and_match(
         if t.apple_id in done_ids:
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IMPORTED))
         else:
-            # A DJ-mixed entry is searched as the song itself (never skipped for its label).
-            todo.append(searchable_track(t, settings.match_policy))
+            todo.append(t)  # a DJ-mixed entry is searched as the song itself (never skipped for its label)
     waiting.update((t.apple_id, t) for t in todo)
 
     def work(track: AppleTrack, later: _Deferred | None = None) -> MatchResult | _Deferred | None:
@@ -327,10 +328,11 @@ def search_and_match(
 
             def with_pool(found):
                 seen = {(f.username, f.filename, f.size) for f in found}
-                return list(found) + [f for f in pool.files_for(track) if (f.username, f.filename, f.size) not in seen]
+                return list(found) + [f for f in pool.files_for(wanted) if (f.username, f.filename, f.size) not in seen]
 
-            ladder = build_queries(track)
-            pooled = pool.files_for(track)
+            wanted = searchable_track(track, settings.match_policy)  # a DJ-mixed entry: the song itself
+            ladder = build_queries(wanted)
+            pooled = pool.files_for(wanted)
             earlier = list(later.files) if later else []
             if pooled and _source_count(ranked(with_pool(earlier)), preferred=True) >= TARGET_SOURCES:
                 # Other tracks' searches and folder listings already hold what a search of its own must find.
@@ -339,7 +341,7 @@ def search_and_match(
                 files = with_pool(earlier)
             else:
                 files = earlier + run_search(
-                    client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
+                    client, wanted, cancel=cancel, timeout_s=settings.search_timeout_s,
                     response_limit=settings.response_limit, file_limit=settings.file_limit,
                     has_eligible=lambda found: _source_count(ranked(with_pool(earlier + found)),
                                                              preferred=True) >= TARGET_SOURCES,
@@ -439,6 +441,68 @@ def search_and_match(
     return results
 
 
+MIX_CHOSEN = "looking for the DJ-mixed version (chosen in Review)"
+
+
+def policy_for(note: str, policy: MatchPolicy) -> MatchPolicy:
+    """The rules for one track: a DJ-mixed entry whose mix was chosen in Review is matched as the mix."""
+    return replace(policy, exclude_mixed=False) if MIX_CHOSEN in (note or "") else policy
+
+
+def mixed_entry(store: Store, import_id: str, apple_id: str) -> AppleTrack | None:
+    """The playlist entry as it is in the playlist when it is a DJ-mixed one ("Song - Mixed" or on a mixed album),
+    else None."""
+    original = next((t for t in store.load_tracks(import_id) if t.apple_id == apple_id), None)
+    if original is None:
+        return None
+    demixed = searchable_track(original, MatchPolicy(exclude_mixed=True))
+    return original if demixed != original else None
+
+
+def search_track_version(
+    store: Store,
+    client,
+    import_id: str,
+    apple_id: str,
+    settings: Settings,
+    *,
+    mixed: bool,
+    cancel: threading.Event | None = None,
+) -> MatchResult:
+    """Search ONE DJ-mixed playlist entry again, as the mix itself (`mixed`) or as the song. Replaces the stored
+    result (files found before are kept as candidates). Never enqueues anything."""
+    original = mixed_entry(store, import_id, apple_id)
+    if original is None:
+        raise ValueError("not a DJ-mixed track")
+    cancel = cancel or threading.Event()
+    configure_search_limits()
+    policy = replace(settings.match_policy, exclude_mixed=not mixed)
+    track = searchable_track(original, policy)  # the mix: as in the playlist; the song: label and excerpt dropped
+    peers = declined_peer_reasons(store)
+
+    def ranked(found):
+        return match(track, found, policy, peers)
+
+    found = run_search(
+        client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
+        response_limit=settings.response_limit, file_limit=settings.file_limit,
+        has_eligible=lambda f: _source_count(ranked(f), preferred=True) >= TARGET_SOURCES,
+        fast_timeout_s=QUICK_SEARCH_S, has_usable=lambda f: _source_count(ranked(f)) >= 1,
+        queries=build_queries(track)[:FIRST_PASS_RUNGS], check_empty=True, cache=_search.SHARED_CACHE,
+    )
+    old = next((r for r in store.load_match_results(import_id) if r.track.apple_id == apple_id), None)
+    files = list(found)
+    if old is not None:
+        files += [c.file for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected)]
+    result = match(original, files, policy, peers)  # stored under the playlist entry as it is
+    notes = [result.note, MIX_CHOSEN if mixed else ""]
+    if result.best is not None:
+        notes.append(f"{backup_source_count(result)} other uploaders have it")
+    result = replace(result, note="; ".join(x for x in notes if x))
+    store.save_match_results(import_id, [result])
+    return result
+
+
 def search_track_custom(
     store: Store,
     client,
@@ -474,7 +538,10 @@ def search_track_custom(
         previous = searched_queries(old.note)
         for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected):
             files.append(c.file)
-    result = match(track, files, settings.match_policy, declined_peer_reasons(store))
+    chosen = old.note if old is not None and MIX_CHOSEN in old.note else ""
+    result = match(track, files, policy_for(chosen, settings.match_policy), declined_peer_reasons(store))
+    if chosen:
+        result = replace(result, note="; ".join(x for x in (result.note, MIX_CHOSEN) if x))
     tried = previous + [query] if previous else [query]
     if result.best is not None:
         backups = backup_source_count(result)
@@ -651,8 +718,11 @@ def import_completed(
         raise ValueError("unknown approval")
     if not settings.slskd_downloads_dir.strip():
         raise ValueError("The slskd downloads folder is not set. Open Settings and choose it.")
-    # the searched recording: a DJ-mixed entry is filed under the song's own name, not "... - Mixed"
-    tracks = {t.apple_id: searchable_track(t, settings.match_policy) for t in store.load_tracks(approval.import_id)}
+    # named after the recording that was looked for: a DJ-mixed entry under the song's own name, unless the mix
+    # was chosen in Review
+    notes = {r.track.apple_id: r.note for r in store.load_match_results(approval.import_id)}
+    tracks = {t.apple_id: searchable_track(t, policy_for(notes.get(t.apple_id, ""), settings.match_policy))
+              for t in store.load_tracks(approval.import_id)}
     already = {
         r.apple_id for r in store.import_results(approval.import_id)
         if r.outcome in (ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT)
