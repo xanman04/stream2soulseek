@@ -121,9 +121,48 @@ def test_installer_manifest_keeps_empty_directories_and_escapes_paths(tmp_path):
     file.write_bytes(b"runtime")
     text = module.write_files(app, tmp_path / "files.iss").read_text(encoding="utf-8-sig")
     assert '[Dirs]' in text and 'empty"' in text
-    assert "O''Brien {test}" in text and "O'Brien {{test}" in text
-    assert hashlib.sha256(b"runtime").hexdigest() in text
-    assert 'Check: "NeedsUpdate(' in text
+    assert "O'Brien {{test}" in text
+    manifest = json.loads((tmp_path / 's2s-runtime-hashes.json').read_text())
+    assert manifest == [{"path": "O'Brien {test}\\a;file.dll", "size": 7,
+                         "sha256": hashlib.sha256(b"runtime").hexdigest()}]
+    assert 'Check: "NeedsUpdate(0,' in text and '#define RuntimeFileCount 1' in text
+
+
+@pytest.mark.skipif(__import__('os').name != 'nt', reason='Windows checksum helper')
+def test_accelerated_comparison_preserves_only_identical_files(tmp_path):
+    import importlib.util
+    import subprocess
+
+    app = tmp_path / "runtime O'Brien"
+    app.mkdir()
+    entries = []
+    for name, expected, actual in [
+        ('same.dll', b'abc', b'abc'), ('changed.dll', b'abc', b'xyz'),
+        ('missing.dll', b'abc', None), ('size.dll', b'abc', b'a'),
+        ('braces {test}; café.dll', b'unchanged', b'unchanged'),
+    ]:
+        entries.append({'path': name, 'size': len(expected), 'sha256': hashlib.sha256(expected).hexdigest()})
+        if actual is not None:
+            (app / name).write_bytes(actual)
+    manifest = tmp_path / 'hashes.json'
+    manifest.write_text(json.dumps(entries, ensure_ascii=True), encoding='utf-8')
+    result = tmp_path / 'unchanged.txt'
+    spec = importlib.util.spec_from_file_location('inno_comparer', Path(__file__).resolve().parents[1] /
+                                               'packaging' / 'inno_files.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    worker = module.build_comparer(tmp_path / 's2s-runtime-compare.exe')
+    command = [str(worker), str(app), str(manifest), str(result)]
+    run = subprocess.run(command, capture_output=True, timeout=30)
+    assert run.returncode == 0, run.stderr.decode(errors='replace')
+    records = [line.split('|') for line in result.read_text().splitlines()]
+    assert [row[0] for row in records] == ['0', '4']
+    assert all(len(row) == 5 and all(value.isdigit() for value in row) for row in records)
+    assert b'PROGRESS 5' in run.stdout
+    result.unlink()
+    manifest.write_text('not json', encoding='utf-8')
+    run = subprocess.run(command, capture_output=True, timeout=30)
+    assert run.returncode != 0 and not result.exists() and not result.with_suffix('.txt.part').exists()
 
 
 def test_update_theme_snapshot_follows_both_app_palettes():
