@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 — 2026-10-27
 
 - Release pages list only the three installers. The in-app updater downloads the installer itself (Windows: runs
   the setup silently into the same folder; Mac: copies S2S out of the disk image) after checking its signature,
