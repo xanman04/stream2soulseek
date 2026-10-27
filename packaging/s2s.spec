@@ -17,7 +17,7 @@ for package in ("spotapi", "curl_cffi"):
     datas += d
     binaries += b
     hidden += h
-datas += collect_data_files("s2s", includes=["ui/assets/*.png", "ui/assets/logos/*"])
+datas += collect_data_files("s2s", includes=["ui/assets/*.png", "ui/assets/logos/*", "update_windows.ps1"])
 
 a = Analysis(  # noqa: F821
     [str(ROOT / "packaging" / "s2s_entry.py")],

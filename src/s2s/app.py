@@ -197,6 +197,10 @@ def self_test(report_path: str) -> int:
 
 
 def main() -> int:
+    from .updater import prevent_launch_during_update
+
+    if prevent_launch_during_update():
+        return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "--browser-smoke-test":
         from .browser_smoke import run
 
