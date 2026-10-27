@@ -212,3 +212,17 @@ def test_is_connected(app, expected):
 def test_context_manager():
     with SlskdClient("http://127.0.0.1:5030", KEY, transport=httpx.MockTransport(ok({}))) as c:
         assert c.application() == {}
+
+
+def test_folder_listing_asks_the_peer_and_returns_downloadable_paths():
+    payload = [{"name": r"Music\Band\Album", "fileCount": 2, "files": [
+        {"filename": "01 Band - One.mp3", "size": 9000000, "extension": "mp3", "bitRate": 320, "length": 200},
+        {"filename": "02 Band - Two.flac", "size": 30000000, "extension": "", "bitDepth": 16},
+    ]}]
+    c, reqs = make(ok(payload))
+    files = c.get_directory("some user", r"Music\Band\Album", timeout_s=6)
+    req = reqs[0]
+    assert req.method == "POST" and req.url.raw_path == b"/api/v0/users/some%20user/directory"
+    assert json.loads(req.content) == {"directory": r"Music\Band\Album"}
+    assert [f.filename for f in files] == [r"Music\Band\Album\01 Band - One.mp3", r"Music\Band\Album\02 Band - Two.flac"]
+    assert files[0].username == "some user" and files[0].bitrate == 320 and files[1].extension == "flac"

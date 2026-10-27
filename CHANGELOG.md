@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Faster searching without more searches: every file found in a run is offered to every track, and when a
+  track is found S2S asks up to three of its uploaders (in the background, never holding up a search) for that
+  folder if another waiting track is by the same artist. A track whose three uploaders are already found this
+  way needs no search of its own. Folder requests go to the uploader, not the Soulseek server, so they do not
+  count against the search limit.
+- Tracks with nothing found after their first three searches finish their remaining searches at the end of
+  the run, so the tracks that are found complete first. The long extra search runs only when nothing usable
+  was found.
+- The log records the searches per track and a summary per run, to measure these.
+
 ## 1.1.1 — 2026-10-27
 
 - Release pages list only the three installers. The in-app updater downloads the installer itself (Windows: runs
