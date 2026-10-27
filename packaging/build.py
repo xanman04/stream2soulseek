@@ -42,9 +42,11 @@ SLSKD = {
 }
 _RIEDL = "https://ffmpeg.martin-riedl.de/download/macos"
 FFMPEG = {
-    "windows-x64": [("https://github.com/GyanD/codexffmpeg/releases/download/2026-10-22-git-bf0e831606/"
-                     "ffmpeg-2026-10-22-git-bf0e831606-essentials_build.zip",
-                     "07de5469e123c02e06959cbf7cc9e405c29f0530abde67f0721fe57dfe5e1fb4")],
+    # Shared build: ffmpeg.exe and ffprobe.exe use one set of DLLs instead of carrying ~100 MB each, which keeps
+    # the installer small (a large unknown installer is scanned for seconds before Windows opens it). LGPL variant.
+    "windows-x64": [("https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-26-14-25/"
+                     "ffmpeg-n9.0.2-36-g6882969ce9-win64-lgpl-shared-9.0.zip",
+                     "6be6e82a5cdc08aa173cf0a7b746682b4f16492d79473dc09d7c41be834e507b")],
     "macos-arm64": [(f"{_RIEDL}/arm64/1789931890_9.0.2/ffmpeg.zip",
                      "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924"),
                     (f"{_RIEDL}/arm64/1789931890_9.0.2/ffprobe.zip",
@@ -130,6 +132,15 @@ def prepare_tools(kind: str) -> Path:
         if found is None:
             raise SystemExit(f"{filename} not found in the FFmpeg archives")
         shutil.copy2(found, tools / filename)
+    if kind.startswith("windows"):  # the shared libraries ffmpeg.exe and ffprobe.exe load from their own folder
+        dlls = sorted(next(staging.rglob("ffprobe.exe")).parent.glob("*.dll"))
+        if not dlls:
+            raise SystemExit("the FFmpeg DLLs were not found in the FFmpeg archive")
+        for dll in dlls:
+            shutil.copy2(dll, tools / dll.name)
+        notice = next(staging.rglob("LICENSE.txt"), None)  # the build's own licence (LGPL) for licenses/ffmpeg
+        if notice is not None:
+            shutil.copy2(notice, WORK / "ffmpeg-LICENSE.txt")
     if not kind.startswith("windows"):
         for p in [tools / "ffmpeg", tools / "ffprobe", tools / "slskd" / "slskd"]:
             make_executable(p)
@@ -145,6 +156,9 @@ def prepare_licenses() -> Path:
     shutil.copy2(ROOT / "packaging" / "licenses" / "LGPL-3.0.txt", lic / "LGPL-3.0.txt")
     shutil.copy2(ROOT / "packaging" / "THIRD_PARTY_NOTICES.md", lic / "THIRD_PARTY_NOTICES.md")
     shutil.copy2(ROOT / "src" / "s2s" / "ui" / "assets" / "logos" / "NOTICE.md", lic / "logos-NOTICE.md")
+    if (WORK / "ffmpeg-LICENSE.txt").is_file():  # Windows: the shared FFmpeg build's licence
+        (lic / "ffmpeg").mkdir()
+        shutil.copy2(WORK / "ffmpeg-LICENSE.txt", lic / "ffmpeg" / "LICENSE.txt")
     for rel, url in TEXTS.items():
         (lic / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(fetch(url), lic / rel)

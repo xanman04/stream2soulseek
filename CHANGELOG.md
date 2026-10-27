@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Windows: a smaller install. FFmpeg is now the shared (LGPL) build, so ffmpeg and ffprobe use one set of
+  libraries instead of carrying about 100 MB each (about 47 MB less installed). A large unknown installer is
+  scanned by Windows before it opens, so a smaller one opens sooner.
+- Windows: "Launch S2S" at the end of the installer opens S2S the way a double-click does (it did not always
+  open it). S2S logs each launch before Qt loads, so a start that fails early leaves a trace.
+
 ## 1.1.4 — 2026-10-27
 
 - A failed automatic update check is retried every 30 minutes while S2S is open (was: three times), so a

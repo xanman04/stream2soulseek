@@ -203,6 +203,10 @@ def main() -> int:
         return run(sys.argv[2])
     if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
         return self_test(sys.argv[2])
+    from . import __version__, applog
+
+    # Before Qt loads: a start that dies while loading Qt still leaves a trace (and its crash in crash.log).
+    applog.setup().info("Launching S2S %s (%s)", __version__, sys.executable)
     from PySide6.QtCore import QCoreApplication, Qt
     from PySide6.QtWidgets import QApplication
 
@@ -211,7 +215,6 @@ def main() -> int:
     # Keep the web view's native window from turning every sibling widget native (repaint artifacts).
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
     app = QApplication.instance() or QApplication(sys.argv)
-    from . import applog
     from .feedback import system_summary
 
     applog.setup().info("Started %s", system_summary())

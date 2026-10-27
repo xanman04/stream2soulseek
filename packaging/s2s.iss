@@ -51,7 +51,8 @@ Name: "{autoprograms}\S2S"; Filename: "{app}\S2S.exe"
 Name: "{autodesktop}\S2S"; Filename: "{app}\S2S.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\S2S.exe"; Description: "{cm:LaunchProgram,S2S}"; Flags: nowait postinstall skipifsilent
+; Opened the way a double-click opens it (shellexec), in its own folder, not as a child of the installer.
+Filename: "{app}\S2S.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,S2S}"; Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
