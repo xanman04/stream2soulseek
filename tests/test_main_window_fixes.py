@@ -418,3 +418,9 @@ def test_keep_downloading_changes_nothing(win, monkeypatch):
 def test_app_opens_on_step_one_without_running_downloads(win):
     win.startup()
     assert win.stack.currentIndex() == 1 and not hasattr(win.playlists, "resume_btn")
+
+
+def test_the_version_is_shown_in_the_corner(win):
+    from s2s import __version__
+
+    assert win.version_label.text() == f"S2S {__version__}"

@@ -119,6 +119,7 @@ class UpdateDialog(QDialog):
             return cmd
 
         def done(cmd) -> None:
+            updater.mark_pending(info.version)  # so the next start can tell when it did not install
             updater.launch_installer(cmd)
             self._say("Restarting…")
             self.quit_requested.emit()
