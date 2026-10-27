@@ -24,8 +24,8 @@ Python, slskd and FFmpeg are included. The **Source code** archives are for deve
 ## Installation
 
 **Mac:** Open the disk image, drag S2S onto Applications, and open it from Applications. **Windows:** Run the
-installer; S2S is added to the Start menu. Already have S2S 1.0.6 or later? Use **Help > Check for updates**
-instead. See the [installation guide](https://github.com/xanman04/stream2soulseek/blob/main/docs/INSTALL.md)
+installer; S2S is added to the Start menu. Later versions install from inside S2S (**Help > Check for
+updates**). See the [installation guide](https://github.com/xanman04/stream2soulseek/blob/main/docs/INSTALL.md)
 for first-launch security prompts, checksum checks and account setup.
 
 ## Known limitations
