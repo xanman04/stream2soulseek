@@ -362,8 +362,9 @@ def launch_installer(cmd: list[str]) -> None:
     reason no in-app update up to 1.1.2 installed on Windows).
     """
     if sys.platform == "win32":
-        new_group, breakaway = 0x00000200, 0x01000000  # CREATE_NEW_PROCESS_GROUP, CREATE_BREAKAWAY_FROM_JOB
-        for flags in (_NO_WINDOW | new_group | breakaway, _NO_WINDOW | new_group):
+        # CREATE_NO_WINDOW, CREATE_NEW_PROCESS_GROUP, CREATE_BREAKAWAY_FROM_JOB (literal values: _NO_WINDOW is 0 off Windows)
+        no_window, new_group, breakaway = 0x08000000, 0x00000200, 0x01000000
+        for flags in (no_window | new_group | breakaway, no_window | new_group):
             try:
                 subprocess.Popen(cmd, creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
