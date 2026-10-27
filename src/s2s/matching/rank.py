@@ -25,6 +25,7 @@ from .versions import (
     tokenise,
     version_words,
     promo_text_present,
+    label_exclusion,
 )
 
 MAX_REJECTED = 50
@@ -56,6 +57,26 @@ def request_exclusion(track: AppleTrack, policy: MatchPolicy | None = None) -> s
     if "mixed" in on and track.album and parse_title(track.album).excluded == "mixed":
         return "mixed"
     return None
+
+
+def searchable_track(track: AppleTrack, policy: MatchPolicy | None = None) -> AppleTrack:
+    """The recording to look for. Nothing is skipped because of how the playlist labels it.
+
+    A DJ-mixed entry ("Song - Mixed", or a track on a mixed album) stands for the song itself: with mixed tracks
+    rejected, the label, the album and the excerpt's length are dropped so the unmixed song is searched (mixed
+    files stay rejected). A radio-edit or live entry is searched as that version (see _evaluate).
+    """
+    if "mixed" not in (policy or MatchPolicy()).excluded_labels():
+        return track
+    base, labels = tokenise(track.name)
+    if parse_title(track.name).excluded == "mixed":
+        kept = [lab for lab, _br in labels if label_exclusion(lab) != "mixed"]
+        name = " ".join([base.strip(), *(f"({lab})" for lab in kept)]).strip() or track.name
+    elif track.album and parse_title(track.album).excluded == "mixed":
+        name = track.name
+    else:
+        return track
+    return replace(track, name=name, album=None, duration_ms=None)
 
 
 # ------------------------------------------------------------------ helpers
@@ -196,8 +217,8 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     skip = set(artists) | {full_artist, req.base}
     skip.discard("")
     ex = fp.excluded or scan_exclusion(strip_track_number(stem), skip) or scan_exclusion(stem, skip)
-    if ex == "clean" and req.excluded == "clean":
-        ex = None  # the playlist asked for the clean version
+    if ex and ex == req.excluded:
+        ex = None  # the playlist asked for that version (a radio edit, a live recording, a clean version)
     if ex not in on:
         ex = None  # that label is allowed by the user's rules; version comparison below still applies
     if ex:
@@ -399,9 +420,7 @@ def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str],
 def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None,
           declined_peers: Mapping[str, str] | None = None) -> MatchResult:
     policy = policy or MatchPolicy()
-    ex = request_exclusion(track, policy)
-    if ex:
-        return MatchResult(track, MatchStatus.SKIPPED, None, note=f"requested track is excluded ({ex}); not searched")
+    track = searchable_track(track, policy)
 
     seen: set[tuple[str, str, int]] = set()
     evaluated: list[tuple[Candidate, int]] = []

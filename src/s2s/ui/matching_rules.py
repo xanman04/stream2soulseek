@@ -16,13 +16,15 @@ from PySide6.QtWidgets import (
 from .. import layouts as lay_mod
 from ..matching.formats import NAMES
 from ..models import DEFAULT_MIN_KBPS, FORMAT_KINDS, LOSSY_KINDS, FormatRule, MatchPolicy
+from . import theme
 
 EXCLUSION_HELP = (
-    "Switching a rejection off does not make a different recording acceptable. It only stops the label "
-    "from rejecting a file: a radio edit, live recording or mixed track is then used only when the track "
-    "you asked for carries that same label. A live or radio version of a normal studio track is still "
-    "a different version and is still rejected."
+    "S2S always looks for the version in your playlist: a radio edit or live recording is never used for the "
+    "normal track, and a radio edit or live track in your playlist is looked for as that version."
 )
+CLEAN_HELP = "Clean versions are still used when the track in your playlist is itself the clean version."
+MIXED_HELP = ("For a track taken from a DJ mix (for example \"Song - Mixed\", often only a short excerpt), S2S "
+              "looks for the song itself; mixed files are never used. Turn this off to look for the mix instead.")
 NEVER_NOTE = "A different remix or remixer, a different version, and a VIP mismatch are never accepted."
 
 
@@ -99,18 +101,18 @@ class MatchingRulesWidget(QWidget):
         vl.addWidget(self.tier_first)
         vl.addWidget(QLabel(NEVER_NOTE))
 
-        # ---- exclusions
-        self.ex_radio = QCheckBox("Reject radio edits")
-        self.ex_live = QCheckBox("Reject live recordings")
-        self.ex_mixed = QCheckBox("Reject [Mixed] / DJ-mixed tracks")
+        # ---- labelled versions: only the choices that change anything
         self.ex_clean = QCheckBox("Reject clean (censored) versions")
-        ebox = QGroupBox("Rejections")
+        self.ex_mixed = QCheckBox("For DJ-mixed tracks in your playlist, find the song itself")
+        ebox = QGroupBox("Clean and DJ-mixed versions")
         el = QVBoxLayout(ebox)
-        for w in (self.ex_radio, self.ex_live, self.ex_mixed, self.ex_clean):
-            el.addWidget(w)
-        help_ = QLabel(EXCLUSION_HELP)
-        help_.setWordWrap(True)
-        el.addWidget(help_)
+        for w, text in ((self.ex_clean, CLEAN_HELP), (self.ex_mixed, MIXED_HELP), (None, EXCLUSION_HELP)):
+            if w is not None:
+                el.addWidget(w)
+            note = theme.subtle(QLabel(text))
+            note.setWordWrap(True)
+            note.setContentsMargins(22 if w is not None else 0, 0, 0, 6)
+            el.addWidget(note)
 
         # ---- review behaviour
         self.tolerance = QSpinBox()
@@ -272,8 +274,6 @@ class MatchingRulesWidget(QWidget):
         self._refresh_detail()
         (self.mode_exact if p.version_mode == "exact_only" else self.mode_ext).setChecked(True)
         self.tier_first.setChecked(p.tier_before_format)
-        self.ex_radio.setChecked(p.exclude_radio_edits)
-        self.ex_live.setChecked(p.exclude_live)
         self.ex_mixed.setChecked(p.exclude_mixed)
         self.ex_clean.setChecked(p.exclude_clean)
         self.tolerance.setValue(p.duration_tolerance_s)
@@ -303,7 +303,8 @@ class MatchingRulesWidget(QWidget):
             formats=rules,
             version_mode="exact_only" if self.mode_exact.isChecked() else "exact_then_extended",
             tier_before_format=self.tier_first.isChecked(),
-            exclude_radio_edits=self.ex_radio.isChecked(), exclude_live=self.ex_live.isChecked(),
+            # radio edits and live recordings are always matched to the version asked for (no choice)
+            exclude_radio_edits=True, exclude_live=True,
             exclude_mixed=self.ex_mixed.isChecked(), exclude_clean=self.ex_clean.isChecked(),
             duration_tolerance_s=self.tolerance.value(),
             skip_flagged_by_default=self.skip_flagged.isChecked(),

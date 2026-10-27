@@ -105,7 +105,9 @@ def verify_downloaded(ext: str, codec: str, kbps: int | None, policy: MatchPolic
 def describe_policy(policy: MatchPolicy) -> str:
     """One line for the Search page."""
     vers = "exact version only" if policy.version_mode == "exact_only" else "exact or extended"
-    rej = [n for n, on in (("radio edits", policy.exclude_radio_edits), ("live", policy.exclude_live),
-                           ("mixed", policy.exclude_mixed), ("clean", policy.exclude_clean)) if on]
-    return f"Accepting: {accepted_text(policy)} · {vers} · " + (
-        "rejecting " + ", ".join(rej) if rej else "no label exclusions")
+    parts = [f"Accepting: {accepted_text(policy)}", vers]
+    if policy.exclude_clean:
+        parts.append("no clean versions")
+    if policy.exclude_mixed:
+        parts.append("DJ-mixed tracks: the song itself")
+    return " · ".join(parts)

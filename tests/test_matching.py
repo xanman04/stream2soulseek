@@ -378,11 +378,14 @@ def test_request_exclusion(name, album, expected):
     assert request_exclusion(T(name, album=album)) == expected
 
 
-def test_match_skips_excluded_request():
-    r = match(T("Song [Mixed]"), [F(P("Song [Mixed]"))])
-    assert r.status == MatchStatus.SKIPPED and r.best is None and r.note
+def test_labelled_requests_are_searched_not_skipped():
+    """"Skipped" made users think the song would be left out. A DJ-mixed entry stands for the song itself; a radio
+    edit or live entry is looked for as that version."""
+    r = match(T("Song [Mixed]"), [F(P("Song [Mixed]")), F(P("Song"))])
+    assert r.status == MatchStatus.PROPOSED and r.best.file.filename.endswith("Song.mp3")
+    assert r.track.name == "Song"  # filed under the song's own name
     r = match(T("Song (Radio Edit)"), [F(P("Song (Radio Edit)"))])
-    assert r.status == MatchStatus.SKIPPED
+    assert r.status == MatchStatus.PROPOSED
 
 
 # ------------------------------------------------------------------ match(): selection
