@@ -1,11 +1,13 @@
-"""Check GitHub Releases for a newer S2S, download it, verify its signature, and swap it in.
+"""Check GitHub Releases for a newer S2S, download its installer, verify its signature, and install it.
 
-Flow: `check_for_update()` reads the latest release; `download_update()` fetches this platform's archive and its
-`.sig`, and refuses it unless the Ed25519 signature (made by the release build with the private key, see
-update_key.py) matches; `stage_update()` unpacks it next to the app's real location (`install_target()`: on macOS
-an app opened from where it was downloaded runs from a read-only "translocated" copy, so the original location, or
-else the Applications folder, is used instead); `launch_installer()` starts a small
-helper that waits for S2S to quit, swaps the folders (keeping the old one until the new one is in place) and
+A release has only the installers people download: S2S-<ver>-windows-x64-setup.exe and S2S-<ver>-macos-<arch>.dmg.
+Their Ed25519 signatures (made by the release build with the private key, see update_key.py) and SHA-256 digests
+travel in a hidden comment in the release text (`signature_block()`), so the release page lists nothing else.
+
+Flow: `check_for_update()` reads the latest release; `download_update()` fetches this platform's installer and
+refuses it unless its signature matches; `stage_update()` prepares it (macOS: copies S2S.app out of the disk image
+next to the app's real location, see `install_target()`); `launch_installer()` starts a small helper that waits for
+S2S to quit, then runs the setup silently into the same folder (Windows) or swaps the app bundles (macOS), and
 starts the new version. User data lives in the app data folder, so it is untouched.
 """
 
@@ -15,12 +17,12 @@ import base64
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -41,11 +43,40 @@ class UpdateError(Exception):
 @dataclass(frozen=True)
 class UpdateInfo:
     version: str
-    notes: str
-    archive_name: str
+    notes: str  # release text without the hidden signature block
+    archive_name: str  # the installer's file name
     archive_url: str
-    signature_url: str
+    signature: str  # base64 Ed25519 signature of (archive_name, sha256), from the release text
     page_url: str
+
+
+SIGNATURE_BLOCK = "s2s-update-signatures"
+_BLOCK_RE = re.compile(r"<!--\s*" + SIGNATURE_BLOCK + r"\s*\n(.*?)-->", re.S)
+
+
+def installer_name(version: str, target: str) -> str:
+    return f"S2S-{version}-{target}-setup.exe" if target.startswith("windows") else f"S2S-{version}-{target}.dmg"
+
+
+def signature_block(entries: dict[str, tuple[str, str]]) -> str:
+    """The hidden comment appended to the release text: one line per installer, "<name> <sha256> <signature>"."""
+    lines = "\n".join(f"{name} {digest} {sig}" for name, (digest, sig) in sorted(entries.items()))
+    return f"\n\n<!-- {SIGNATURE_BLOCK}\n{lines}\n-->\n"
+
+
+def read_signatures(body: str) -> dict[str, tuple[str, str]]:
+    """{installer name: (sha256, signature)} from the release text; {} when there is no block."""
+    match = _BLOCK_RE.search(body or "")
+    out: dict[str, tuple[str, str]] = {}
+    for line in (match.group(1) if match else "").splitlines():
+        parts = line.split()
+        if len(parts) == 3:
+            out[parts[0]] = (parts[1].lower(), parts[2])
+    return out
+
+
+def visible_notes(body: str) -> str:
+    return _BLOCK_RE.sub("", body or "").rstrip()
 
 
 def platform_target() -> str | None:
@@ -84,10 +115,12 @@ def check_for_update(current: str, *, http_get=None) -> UpdateInfo | None:
     if not version or not is_newer(version, current):
         return None
     assets = {a.get("name"): a.get("browser_download_url") for a in release.get("assets") or [] if isinstance(a, dict)}
-    name = f"S2S-{version}-{target}.zip"
-    if not assets.get(name) or not assets.get(name + ".sig"):
-        return None  # no signed archive for this computer: not an update S2S may install
-    return UpdateInfo(version, str(release.get("body") or ""), name, assets[name], assets[name + ".sig"],
+    body = str(release.get("body") or "")
+    name = installer_name(version, target)
+    signed = read_signatures(body).get(name)
+    if not assets.get(name) or signed is None:
+        return None  # no signed installer for this computer: not an update S2S may install
+    return UpdateInfo(version, visible_notes(body), name, assets[name], signed[1],
                       str(release.get("html_url") or RELEASES_PAGE))
 
 
@@ -108,12 +141,12 @@ def verify_signature(archive_name: str, sha256: str, signature_b64: str, public_
 
 
 def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=None) -> Path:
-    """Download and verify the archive. Returns its path; raises UpdateError when it is not genuine."""
+    """Download and verify the installer. Returns its path; raises UpdateError when it is not genuine."""
     get = http_get or _http_get
     folder.mkdir(parents=True, exist_ok=True)
     archive = folder / info.archive_name
+    signature = info.signature
     try:
-        signature = get(info.signature_url).text
         response = get(info.archive_url)
         archive.write_bytes(response.content)
     except Exception as exc:  # noqa: BLE001
@@ -211,21 +244,26 @@ def can_install(target: Path | None) -> bool:
 
 
 def stage_update(archive: Path, app: Path) -> Path:
-    """Unpack the verified archive next to the install target (same disk, so the swap is a rename)."""
+    """Prepare the verified installer. Windows: the setup program itself (run by the helper). macOS: S2S.app copied
+    out of the disk image next to the install target (same disk, so the swap is a rename)."""
+    if sys.platform != "darwin":
+        return archive
     staging = Path(tempfile.mkdtemp(prefix=".s2s-update-", dir=app.parent))
-    if sys.platform == "darwin":  # ditto keeps the bundle's symlinks, permissions and signatures
-        subprocess.run(["ditto", "-x", "-k", str(archive), str(staging)], check=True)
-    else:
-        with zipfile.ZipFile(archive) as z:
-            for member in z.namelist():
-                target = (staging / member).resolve()
-                if not str(target).startswith(str(staging.resolve())):
-                    raise UpdateError("The update archive contains an unsafe path.")
-            z.extractall(staging)
+    mount = Path(tempfile.mkdtemp(prefix="s2s-dmg-"))
+    try:
+        subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", str(mount),
+                        str(archive)], check=True, capture_output=True)
+        try:  # ditto keeps the bundle's symlinks, permissions and signatures
+            subprocess.run(["ditto", str(mount / app.name), str(staging / app.name)], check=True, capture_output=True)
+        finally:
+            subprocess.run(["hdiutil", "detach", str(mount), "-force"], capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise UpdateError("The update could not be unpacked.") from exc
     new_app = staging / app.name
     if not new_app.exists():
         shutil.rmtree(staging, ignore_errors=True)
-        raise UpdateError("The update archive does not contain S2S.")
+        raise UpdateError("The update does not contain S2S.")
     return new_app
 
 
@@ -233,24 +271,20 @@ def installer_script(app: Path, new_app: Path, pid: int) -> tuple[Path, list[str
     """Write the helper that swaps the apps after S2S quits; returns (script path, command to start it).
 
     `app` is the install target; on macOS it may not exist yet (a translocated app installs into Applications).
+    Windows: `new_app` is the verified setup program, run silently into `app` (the folder S2S runs from).
     """
     backup = app.with_name(f"{app.name}.old-{int(time.time())}")
     folder = Path(tempfile.mkdtemp(prefix="s2s-installer-"))
     if sys.platform == "win32":
         script = folder / "install.ps1"
         ps = lambda p: "'" + str(p).replace("'", "''") + "'"  # noqa: E731 - PowerShell single-quoted string
-        script.write_text(f"""$ErrorActionPreference = 'Stop'
-$app = {ps(app)}; $new = {ps(new_app)}; $backup = {ps(backup)}
+        script.write_text(f"""$app = {ps(app)}; $setup = {ps(new_app)}
 for ($i = 0; $i -lt 240 -and (Get-Process -Id {pid} -ErrorAction SilentlyContinue); $i++) {{ Start-Sleep -Milliseconds 500 }}
-$moved = $false
-for ($i = 0; $i -lt 60 -and -not $moved; $i++) {{
-  try {{ Move-Item -LiteralPath $app -Destination $backup; $moved = $true }} catch {{ Start-Sleep -Milliseconds 500 }}
-}}
-if (-not $moved) {{ Start-Process -FilePath (Join-Path $app 'S2S.exe'); exit 1 }}
-try {{ Move-Item -LiteralPath $new -Destination $app }} catch {{ Move-Item -LiteralPath $backup -Destination $app; Start-Process -FilePath (Join-Path $app 'S2S.exe'); exit 1 }}
+$p = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', ('/DIR="' + $app + '"'))
 Start-Process -FilePath (Join-Path $app 'S2S.exe')
-Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Split-Path $new) -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction SilentlyContinue
+exit $p.ExitCode
 """, encoding="utf-8")
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", str(script)]
     else:
@@ -262,11 +296,36 @@ if [ -e {q(app)} ]; then mv {q(app)} {q(backup)} || {{ open {q(app)}; exit 1; }}
 if ! mv {q(new_app)} {q(app)}; then [ -e {q(backup)} ] && mv {q(backup)} {q(app)}; open {q(app)}; exit 1; fi
 xattr -dr com.apple.quarantine {q(app)} 2>/dev/null
 open {q(app)}
-rm -rf {q(backup)} {q(new_app.parent)}
+rm -rf {q(backup)} {q(new_app.parent)} {q(folder)}
 """, encoding="utf-8")
         script.chmod(0o755)
         cmd = ["/bin/sh", str(script)]
     return script, cmd
+
+
+def clean_leftovers(app: Path | None = None) -> list[Path]:
+    """Remove what an update may have left behind (one that was interrupted, or one from S2S 1.0.x): downloaded
+    installers, staging folders, the previous app kept as a backup, and helper scripts. Run at start, when no
+    update can be in progress. Returns what was removed."""
+    from . import config
+
+    found = [config.app_dir() / "updates"]
+    app = installed_app() if app is None else app
+    if app is not None:
+        found += [*app.parent.glob(".s2s-update-*"), *app.parent.glob(f"{app.name}.old-*")]
+    tmp = Path(tempfile.gettempdir())
+    found += [*tmp.glob("s2s-installer-*"), *tmp.glob("s2s-dmg-*")]
+    removed = []
+    for path in found:
+        if not path.exists():
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+        if not path.exists():
+            removed.append(path)
+    return removed
 
 
 def launch_installer(cmd: list[str]) -> None:

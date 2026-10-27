@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
 import sys
-import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,11 +47,12 @@ def test_version_comparison(candidate, current, newer):
 
 def release(version="1.0.4", *, signed=True, target=None, draft=False):
     target = target or updater.platform_target()
-    name = f"S2S-{version}-{target}.zip"
+    name = updater.installer_name(version, target)
     assets = [{"name": name, "browser_download_url": f"https://github.com/x/{name}"}]
+    body = "## What's changed\n\n- **Fixes.**"
     if signed:
-        assets.append({"name": name + ".sig", "browser_download_url": f"https://github.com/x/{name}.sig"})
-    return {"tag_name": f"v{version}", "draft": draft, "prerelease": False, "body": "Fixes", "assets": assets,
+        body += updater.signature_block({name: ("ab" * 32, "c2ln")})
+    return {"tag_name": f"v{version}", "draft": draft, "prerelease": False, "body": body, "assets": assets,
             "html_url": "https://github.com/x/releases/tag/v" + version}
 
 
@@ -64,7 +63,8 @@ def getter(payload):
 @pytest.mark.skipif(updater.platform_target() is None, reason="updates exist for Windows and macOS only")
 def test_a_newer_signed_release_is_offered_and_others_are_not():
     info = updater.check_for_update("1.0.3", http_get=getter(release()))
-    assert info.version == "1.0.4" and info.archive_name.endswith(f"{updater.platform_target()}.zip")
+    assert info.version == "1.0.4" and info.archive_name == updater.installer_name("1.0.4", updater.platform_target())
+    assert info.signature == "c2ln" and "s2s-update-signatures" not in info.notes  # the block stays hidden
     assert updater.check_for_update("1.0.4", http_get=getter(release())) is None  # not newer
     assert updater.check_for_update("1.0.3", http_get=getter(release(signed=False))) is None  # unsigned
     assert updater.check_for_update("1.0.3", http_get=getter(release(draft=True))) is None
@@ -81,17 +81,24 @@ def test_an_offline_check_is_a_plain_error():
 
 
 def test_a_genuine_update_downloads_and_a_tampered_one_is_refused(tmp_path, keypair):
-    data = b"PK fake archive"
-    name = "S2S-1.0.4-windows-x64.zip"
-    info = updater.UpdateInfo("1.0.4", "", name, "https://github.com/a.zip", "https://github.com/a.zip.sig", "")
-    good = {info.archive_url: data, info.signature_url: sign(keypair, name, data)}
-    get = lambda url: SimpleNamespace(content=good[url], text=good[url] if isinstance(good[url], str) else "")  # noqa: E731
+    data = b"fake installer"
+    name = "S2S-1.0.4-windows-x64-setup.exe"
+    info = updater.UpdateInfo("1.0.4", "", name, "https://github.com/a.exe", sign(keypair, name, data), "")
+    get = lambda url: SimpleNamespace(content=data)  # noqa: E731
     assert updater.download_update(info, tmp_path, http_get=get).read_bytes() == data
-    bad = dict(good, **{info.archive_url: data + b"tampered"})
-    get = lambda url: SimpleNamespace(content=bad[url], text=bad[url] if isinstance(bad[url], str) else "")  # noqa: E731
+    get = lambda url: SimpleNamespace(content=data + b"tampered")  # noqa: E731
     with pytest.raises(updater.UpdateError, match="not signed"):
         updater.download_update(info, tmp_path / "2", http_get=get)
     assert not (tmp_path / "2" / name).exists()  # a refused download is deleted
+
+
+def test_the_signature_block_round_trips_and_only_installers_are_offered():
+    entries = {"S2S-1.1.1-macos-arm64.dmg": ("ab" * 32, "c2ln"), "S2S-1.1.1-windows-x64-setup.exe": ("cd" * 32, "eA==")}
+    body = "Notes" + updater.signature_block(entries)
+    assert updater.read_signatures(body) == entries
+    assert updater.visible_notes(body) == "Notes"
+    assert updater.read_signatures("no block") == {}
+    assert updater.installer_name("1.1.1", "macos-x64") == "S2S-1.1.1-macos-x64.dmg"
 
 
 def test_a_signature_for_another_file_is_refused(keypair):
@@ -103,38 +110,53 @@ def test_a_signature_for_another_file_is_refused(keypair):
     assert not updater.verify_signature("S2S-1.0.4-macos-arm64.zip", digest, "not base64!")
 
 
-def test_staging_unpacks_next_to_the_app_and_refuses_unsafe_paths(tmp_path):
-    if sys.platform == "darwin":
-        pytest.skip("macOS unpacks with ditto")
-    app = tmp_path / "S2S"
-    app.mkdir()
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("S2S/S2S.exe", b"exe")
-    archive = tmp_path / "u.zip"
-    archive.write_bytes(buf.getvalue())
-    new = updater.stage_update(archive, app)
-    assert new.name == "S2S" and new.parent.parent == tmp_path and (new / "S2S.exe").read_bytes() == b"exe"
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("../evil.txt", b"x")
-    archive.write_bytes(buf.getvalue())
-    with pytest.raises(updater.UpdateError, match="unsafe"):
-        updater.stage_update(archive, app)
+def test_on_windows_the_verified_setup_itself_is_what_gets_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    setup = tmp_path / "S2S-1.0.4-windows-x64-setup.exe"
+    setup.write_bytes(b"setup")
+    assert updater.stage_update(setup, tmp_path / "S2S") == setup
 
 
-def test_the_installer_waits_swaps_keeps_a_backup_and_restarts(tmp_path):
+def test_the_helper_waits_installs_restarts_and_cleans_up(tmp_path):
     app = tmp_path / "O'Brien" / ("S2S.app" if sys.platform == "darwin" else "S2S")
-    new = tmp_path / "staging" / app.name
+    new = tmp_path / "staging" / (app.name if sys.platform == "darwin" else "S2S-1.0.4-windows-x64-setup.exe")
     script, cmd = updater.installer_script(app, new, 4242)
     text = script.read_text(encoding="utf-8")
-    assert "4242" in text and ".old-" in text
+    assert "4242" in text
     if sys.platform == "win32":
         assert cmd[:2] == ["powershell", "-NoProfile"] and "Hidden" in cmd
         assert "O''Brien" in text  # quotes are escaped for PowerShell
-        assert "S2S.exe" in text
+        assert "/VERYSILENT" in text and "/DIR=" in text and "S2S.exe" in text
+        assert "Remove-Item -LiteralPath $setup" in text and "$PSScriptRoot" in text  # no installer or script left
     else:
-        assert cmd[0] == "/bin/sh" and "open " in text
+        assert cmd[0] == "/bin/sh" and "open " in text and ".old-" in text
+        assert f"rm -rf" in text and str(script.parent) in text  # backup, staging and the script itself
+
+
+def test_leftovers_of_earlier_updates_are_removed(tmp_path, monkeypatch):
+    import tempfile
+
+    from s2s import config
+
+    app = tmp_path / "Apps" / "S2S"
+    app.mkdir(parents=True)
+    (app / "S2S.exe").write_bytes(b"keep")
+    old = app.parent / "S2S.old-1700000000"  # the previous version a 1.0.x update kept
+    old.mkdir()
+    staging = app.parent / ".s2s-update-abc"
+    staging.mkdir()
+    updates = config.app_dir() / "updates"
+    updates.mkdir()
+    (updates / "S2S-1.0.4-windows-x64-setup.exe").write_bytes(b"x")
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    (temp / "s2s-installer-xyz").mkdir()
+    (temp / "unrelated").mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp))
+    removed = updater.clean_leftovers(app)
+    assert not old.exists() and not staging.exists() and not updates.exists()
+    assert not (temp / "s2s-installer-xyz").exists() and (temp / "unrelated").exists()
+    assert (app / "S2S.exe").exists() and len(removed) == 4
 
 
 def test_running_from_source_cannot_update_itself(monkeypatch):
@@ -150,7 +172,7 @@ def test_downloads_only_come_from_github(monkeypatch):
 
 
 def test_release_signing_script_round_trip(tmp_path, monkeypatch):
-    """packaging/sign_release.py signs with the private key; the app's verifier accepts it (same key pair)."""
+    """packaging/sign_release.py signs with the private key into the release text; the app accepts it."""
     import importlib.util
 
     key = Ed25519PrivateKey.generate()
@@ -158,7 +180,9 @@ def test_release_signing_script_round_trip(tmp_path, monkeypatch):
                             serialization.NoEncryption())
     pub = base64.b64encode(key.public_key().public_bytes(serialization.Encoding.Raw,
                                                          serialization.PublicFormat.Raw)).decode()
-    (tmp_path / "S2S-1.0.4-windows-x64.zip").write_bytes(b"zip")
+    (tmp_path / "S2S-1.0.4-windows-x64-setup.exe").write_bytes(b"setup")
+    notes = tmp_path / "notes.md"
+    notes.write_text("## What's changed\n", encoding="utf-8")
     monkeypatch.setenv("S2S_UPDATE_SIGNING_KEY", base64.b64encode(raw).decode())
     monkeypatch.setattr("s2s.update_key.PUBLIC_KEY_B64", pub)
     real = updater.verify_signature
@@ -167,10 +191,11 @@ def test_release_signing_script_round_trip(tmp_path, monkeypatch):
                                                   / "sign_release.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setattr(sys, "argv", ["sign_release.py", str(tmp_path)])
+    monkeypatch.setattr(sys, "argv", ["sign_release.py", str(tmp_path), str(notes)])
     module.main()
-    sig = (tmp_path / "S2S-1.0.4-windows-x64.zip.sig").read_text(encoding="utf-8")
-    assert real("S2S-1.0.4-windows-x64.zip", hashlib.sha256(b"zip").hexdigest(), sig, pub)
+    digest, sig = updater.read_signatures(notes.read_text(encoding="utf-8"))["S2S-1.0.4-windows-x64-setup.exe"]
+    assert digest == hashlib.sha256(b"setup").hexdigest()
+    assert real("S2S-1.0.4-windows-x64-setup.exe", digest, sig, pub)
 
 
 def test_a_translocated_mac_app_installs_to_its_real_location(tmp_path, monkeypatch):

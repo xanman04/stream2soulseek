@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Release pages list only the three installers. The in-app updater downloads the installer itself (Windows: runs
+  the setup silently into the same folder; Mac: copies S2S out of the disk image) after checking its signature,
+  which now travels in a hidden part of the release text. Checksums are in a collapsed section of the text.
+  Versions up to 1.1.0 cannot see these releases: install the next version by hand once.
+- Updates clean up after themselves: the downloaded installer, temporary folders, the previous app copy and the
+  helper script are removed, and S2S removes anything an interrupted update left behind when it starts.
+
 ## 1.1.0 — 2026-10-26
 
 - Fixed every download failing its check on a Mac ("ffprobe failed"): S2S saved the path of the ffprobe inside
