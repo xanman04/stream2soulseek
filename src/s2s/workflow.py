@@ -16,8 +16,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import archive, organize
+from . import applog, archive, organize
 from .matching import match, penalise_peers, request_exclusion
+from .matching.versions import normalise, parse_title
 from .models import (
     AppleTrack,
     ArchiveResult,
@@ -26,13 +27,14 @@ from .models import (
     ImportResult,
     MatchResult,
     MatchStatus,
+    RemoteFile,
     Settings,
     Tier,
     TransferState,
 )
 from .rejections import DeclinedTransfer, RejectionKind, classify, declined_transfers, pending_declined, peer_reason
 from .slskd import search as _search
-from .slskd.search import SearchCancelled, SearchInterrupted, run_search
+from .slskd.search import SearchCancelled, SearchInterrupted, build_queries, run_search
 from .store import Store
 from .queue_recovery import effective_item, pool_for_track
 
@@ -42,7 +44,15 @@ QUICK_SEARCH_S = 8
 # Searches are the scarce resource (Soulseek allows about 8 a minute), so a track stops searching once it has a
 # good match plus a couple of backups instead of chasing five; "Find another source" covers the rare rest.
 TARGET_SOURCES = 3  # primary plus two independent backup uploaders in the preferred format
-MIN_SOURCES = 2  # primary plus one backup before avoiding a deeper search
+MIN_SOURCES = 2  # primary plus one backup
+# Folder listings (a request to the uploader, not a server search) that let one search serve a whole album.
+# Every track first gets this many query rungs; the rest of the ladder (and the long search) for tracks still
+# without a usable file run after all other tracks, so the found tracks finish first.
+FIRST_PASS_RUNGS = 3
+FOLDER_LOOKUPS_PER_TRACK = 3  # as many uploaders as a track must have to skip its own search (TARGET_SOURCES)
+MAX_FOLDER_LOOKUPS = 200  # per search run
+FOLDER_LOOKUP_TIMEOUT_S = 6  # a slow peer is given up on rather than waited for
+FOLDER_WORKERS = 4  # listings run beside the searches, never in a search slot
 
 _SECRETISH = re.compile(r"(?i)\bbearer\s+\S+|[A-Za-z0-9_\-]{32,}(?:\.[A-Za-z0-9_\-]{8,}){0,2}")
 
@@ -132,6 +142,65 @@ def backup_source_count(result: MatchResult) -> int:
                 if not c.flagged and c.file.username.casefold() != primary})
 
 
+@dataclass
+class _Deferred:
+    """A track with nothing usable after the first pass, finished in the second (see search_and_match)."""
+
+    track: AppleTrack
+    files: list[RemoteFile]
+    tried: list[str]
+    warnings: list[str]
+
+
+class SharedResults:
+    """Every file found during one search run, so each search (and each folder listing) serves every track.
+
+    Soulseek answers a search only with files whose path contains all the searched words, so another playlist
+    track rarely shows up in a search for a different one; a folder listing of the uploader's album folder does
+    hold it. `files_for(track)` returns the pooled files whose path holds every word of the track's base title;
+    the normal matcher then decides, so nothing is accepted that a search of its own would not accept.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._files: list[tuple[RemoteFile, frozenset[str]]] = []
+        self._seen: set[tuple[str, str, int]] = set()
+        self._folders: set[tuple[str, str]] = set()
+
+    def add(self, files: Iterable[RemoteFile]) -> None:
+        with self._lock:
+            for f in files:
+                key = (f.username, f.filename, f.size)
+                if key not in self._seen:
+                    self._seen.add(key)
+                    self._files.append((f, frozenset(normalise(f.filename).split())))
+
+    def files_for(self, track: AppleTrack) -> list[RemoteFile]:
+        words = set(parse_title(track.name).base.split())
+        if not words:
+            return []
+        with self._lock:
+            return [f for f, have in self._files if words <= have]
+
+    def claim_folder(self, username: str, folder: str) -> bool:
+        """True the first time a folder is asked for in this run (each folder is listed once)."""
+        key = (username.casefold(), folder.casefold())
+        with self._lock:
+            if key in self._folders or len(self._folders) >= MAX_FOLDER_LOOKUPS:
+                return False
+            self._folders.add(key)
+            return True
+
+
+def _folder_of(filename: str) -> str:
+    return re.split(r"[\\/](?=[^\\/]*$)", filename)[0] if re.search(r"[\\/]", filename) else ""
+
+
+def _artist_words(track: AppleTrack) -> set[str]:
+    first = re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b|\band\b)\s*", track.artist or "", maxsplit=1, flags=re.I)[0]
+    return set(normalise(first).split())
+
+
 def search_and_match(
     store: Store,
     client,
@@ -162,6 +231,11 @@ def search_and_match(
 
     started_before = _search.LIMITER.total_started
     searched = 0  # tracks finished by an actual search (not skipped)
+    pool = SharedResults()  # every file found in this run, offered to every track
+    waiting: dict[str, AppleTrack] = {}  # tracks not finished yet (folder listings are fetched for them)
+    waiting_lock = threading.Lock()
+    stats = {"searches_skipped": 0, "folders_listed": 0, "from_other_tracks": 0, "deferred": 0}
+    log = applog.get()
 
     def update_demand(remaining: int) -> None:
         """Expected further searches, so the limiter can spread a big run evenly (see slskd/search.py)."""
@@ -176,6 +250,49 @@ def search_and_match(
         done += 1
         progress(done, total, res)
 
+    folder_ex = ThreadPoolExecutor(max_workers=FOLDER_WORKERS, thread_name_prefix="folders")
+
+    def list_folders(track: AppleTrack, result: MatchResult) -> None:
+        """In the background, ask the uploaders of this track's match for that folder when a track still waiting
+        is by the same artist (an album or artist folder usually holds it). A folder listing is a request to the
+        peer, not a server search, so it costs no search. Nothing waits for it: a waiting track uses what has
+        arrived by the time its own turn comes, and searches as usual otherwise."""
+        get_directory = getattr(client, "get_directory", None)
+        if get_directory is None or result.best is None:
+            return
+        uploaders: dict[str, RemoteFile] = {}
+        for cand in [result.best, *result.alternatives]:
+            f = cand.file
+            if cand.flagged or f.has_free_slot is False or f.username.casefold() in uploaders:
+                continue  # a peer without a free slot tends to answer slowly
+            uploaders[f.username.casefold()] = f
+            if len(uploaders) >= FOLDER_LOOKUPS_PER_TRACK:
+                break
+
+        def still_useful(f: RemoteFile) -> bool:
+            path_words = set(normalise(f.filename).split())
+            with waiting_lock:
+                return any(w.apple_id != track.apple_id and _artist_words(w) and _artist_words(w) <= path_words
+                           for w in waiting.values())
+
+        def fetch(f: RemoteFile) -> None:
+            folder = _folder_of(f.filename)
+            if cancel.is_set() or not folder or not still_useful(f) or not pool.claim_folder(f.username, folder):
+                return
+            try:
+                listed = get_directory(f.username, folder, timeout_s=FOLDER_LOOKUP_TIMEOUT_S)
+            except Exception:  # noqa: BLE001 - an offline or slow peer only means no extra files
+                return
+            stats["folders_listed"] += 1
+            pool.add(listed)
+
+        for f in uploaders.values():
+            if still_useful(f):
+                try:
+                    folder_ex.submit(fetch, f)
+                except RuntimeError:  # the run is over
+                    return
+
     todo: list[AppleTrack] = []
     for t in tracks:
         if cancel.is_set():
@@ -186,13 +303,17 @@ def search_and_match(
             finish(match(t, [], settings.match_policy, declined_peers))
         else:
             todo.append(t)
+    waiting.update((t.apple_id, t) for t in todo)
 
-    def work(track: AppleTrack) -> MatchResult | None:
+    def work(track: AppleTrack, later: _Deferred | None = None) -> MatchResult | _Deferred | None:
+        """One track. First pass (`later` None): the first rungs of the query ladder. A track with nothing usable
+        after them is returned as _Deferred and finished in the second pass, after every other track, with the
+        rest of the ladder and the long search: the same searches, but found tracks finish first."""
         if cancel.is_set():
             return None
         try:
-            warnings: list[str] = []
-            tried: list[str] = []
+            warnings: list[str] = later.warnings if later else []
+            tried: list[str] = later.tried if later else []
             interrupted: list[SearchInterrupted] = []
 
             def on_warning(exc):
@@ -205,20 +326,44 @@ def search_and_match(
             def ranked(found):
                 return match(track, found, settings.match_policy, declined_peers)
 
-            files = run_search(
-                client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
-                response_limit=settings.response_limit, file_limit=settings.file_limit,
-                has_eligible=lambda found: _source_count(ranked(found), preferred=True) >= TARGET_SOURCES,
-                fast_timeout_s=QUICK_SEARCH_S,
-                has_usable=lambda found: _source_count(ranked(found)) >= 1,
-                tried=tried,
-                needs_deep_search=lambda found: (
-                    _source_count(ranked(found)) < MIN_SOURCES
-                    or _source_count(ranked(found), preferred=True) == 0
-                ),
-                on_warning=on_warning,
-                check_empty=True, cache=cache,
-            )
+            def with_pool(found):
+                seen = {(f.username, f.filename, f.size) for f in found}
+                return list(found) + [f for f in pool.files_for(track) if (f.username, f.filename, f.size) not in seen]
+
+            ladder = build_queries(track)
+            pooled = pool.files_for(track)
+            earlier = list(later.files) if later else []
+            if pooled and _source_count(ranked(with_pool(earlier)), preferred=True) >= TARGET_SOURCES:
+                # Other tracks' searches and folder listings already hold what a search of its own must find.
+                stats["searches_skipped"] += 1
+                stats["from_other_tracks"] += 1
+                files = with_pool(earlier)
+            else:
+                files = earlier + run_search(
+                    client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
+                    response_limit=settings.response_limit, file_limit=settings.file_limit,
+                    has_eligible=lambda found: _source_count(ranked(with_pool(earlier + found)),
+                                                             preferred=True) >= TARGET_SOURCES,
+                    fast_timeout_s=QUICK_SEARCH_S,
+                    has_usable=lambda found: _source_count(ranked(with_pool(earlier + found))) >= 1,
+                    tried=tried,
+                    queries=ladder[FIRST_PASS_RUNGS:] if later else ladder[:FIRST_PASS_RUNGS],
+                    # The long, full-budget search only when nothing usable was found at all, and only at the end.
+                    needs_deep_search=(lambda found: _source_count(ranked(with_pool(earlier + found))) == 0)
+                    if later else None,
+                    on_warning=on_warning,
+                    check_empty=True, cache=cache,
+                )
+                pool.add(files)
+                if (later is None and not interrupted and not cancel.is_set()
+                        and _source_count(ranked(with_pool(files))) == 0
+                        and len(ladder) > FIRST_PASS_RUNGS):
+                    stats["deferred"] += 1
+                    return _Deferred(track, files, tried, warnings)
+                own = {(f.username, f.filename, f.size) for f in files}
+                files = with_pool(files)
+                if any((f.username, f.filename, f.size) not in own for f in files):
+                    stats["from_other_tracks"] += 1
         except SearchCancelled:
             return None
         except SearchInterrupted:
@@ -227,6 +372,13 @@ def search_and_match(
             return _unresolved(track, f"search failed: {type(exc).__name__}: {scrub(exc)}")
         try:
             result = ranked(files)
+            log.info("Search %s/%s: %d search%s%s", track.position + 1 if track.position is not None else "?",
+                     total, len(tried), "" if len(tried) == 1 else "es",
+                     "" if tried else " (found in other tracks' results)")
+            try:
+                list_folders(track, result)
+            except Exception:  # noqa: BLE001 - extra files are a bonus; never fail the track over them
+                pass
             if result.best is not None:
                 backups = backup_source_count(result)
                 summary = f"{backups} other uploaders have it"
@@ -248,23 +400,42 @@ def search_and_match(
         ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="search")
         remaining = len(todo)
         update_demand(remaining)
-        try:
-            futures = [ex.submit(work, t) for t in todo]
+        deferred: list[_Deferred] = []
+
+        def run_pass(jobs) -> None:
+            nonlocal remaining, searched
+            futures = [ex.submit(work, *job) for job in jobs]
             for fut in as_completed(futures):
                 if fut.cancelled():
                     continue
                 res = fut.result()
-                remaining -= 1
-                if res is not None:
+                if isinstance(res, _Deferred):
+                    deferred.append(res)  # still waiting: its remaining searches run after every other track
+                elif res is not None:
+                    remaining -= 1
+                    with waiting_lock:
+                        waiting.pop(res.track.apple_id, None)
                     searched += 1
                     update_demand(remaining)
                     finish(res)
                 if cancel.is_set():
                     for f in futures:
                         f.cancel()
+
+        try:
+            run_pass([(t,) for t in todo])
+            if deferred and not cancel.is_set():
+                later = sorted(deferred, key=lambda d: (d.track.position if d.track.position is not None else 0))
+                deferred = []
+                run_pass([(d.track, d) for d in later])
         finally:
             _search.LIMITER.set_demand(0)
             ex.shutdown(wait=True, cancel_futures=True)
+            folder_ex.shutdown(wait=False, cancel_futures=True)  # the run never waits for a folder listing
+        log.info("Search run: %d tracks, %d searches sent, %d tracks found in other tracks' results "
+                 "(%d without a search of their own), %d folders listed, %d tracks searched again at the end",
+                 len(todo), _search.LIMITER.total_started - started_before, stats["from_other_tracks"],
+                 stats["searches_skipped"], stats["folders_listed"], stats["deferred"])
     results.sort(key=lambda r: (r.track.position, r.track.apple_id))
     return results
 

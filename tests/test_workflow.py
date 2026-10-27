@@ -491,22 +491,26 @@ def test_all_rejected_queries_remain_unresolved(env):
     assert res[0].note.startswith("1 files, none eligible; Not found after 4 searches:")
 
 
-@pytest.mark.parametrize("users,enough,needs_deep,backups", [
-    (["u1", "u2", "u3", "u4", "u5", "u6"], True, False, 5),
-    (["u1", "u2", "u3"], True, False, 2),  # a match plus two backups: no more searches needed
-    (["u1", "u1", "u1", "u1", "u1", "u1"], False, True, 0),
-    (["u1", "u2"], False, False, 1),
+@pytest.mark.parametrize("users,enough,backups", [
+    (["u1", "u2", "u3", "u4", "u5", "u6"], True, 5),
+    (["u1", "u2", "u3"], True, 2),  # a match plus two backups: no more searches needed
+    (["u1", "u1", "u1", "u1", "u1", "u1"], False, 0),  # usable, so no long search (only when nothing usable)
+    (["u1", "u2"], False, 1),
 ])
-def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, enough, needs_deep, backups):
+def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, enough, backups):
     # A folder difference creates distinct remote files without changing recording identity.
     files = [good_file(user=u, path=rf"folder{i}\Artist - Song.mp3") for i, u in enumerate(users)]
+    calls = []
     def search(client, track, **kw):
+        calls.append(kw)
         assert kw["fast_timeout_s"] == 8
         assert kw["has_eligible"](files) is enough
-        assert kw["needs_deep_search"](files) is needs_deep
+        assert kw["needs_deep_search"] is None  # never in the first pass
+        assert kw["queries"] == workflow.build_queries(track)[:workflow.FIRST_PASS_RUNGS]
         return files
     monkeypatch.setattr(workflow, "run_search", search)
     res, _ = run(env, FakeSlskd(), [AppleTrack("one", "Song", "Artist")])
+    assert len(calls) == 1  # something usable: the track is finished in the first pass
     assert workflow.backup_source_count(res[0]) == backups
     assert f"{backups} other uploaders have it" in res[0].note
     stored = env.store.load_match_results(env.iid)[0]
@@ -516,12 +520,16 @@ def test_search_targets_independent_backup_uploaders(env, monkeypatch, users, en
 
 def test_wrong_remixes_never_satisfy_backup_target(env, monkeypatch):
     files = [good_file(user=f"peer{i}", path=r"Artist - Song (Other Remix).mp3") for i in range(10)]
+    calls = []
     def search(client, track, **kw):
+        calls.append(kw)
         assert not kw["has_eligible"](files)
-        assert kw["needs_deep_search"](files)
+        if len(calls) == 2:  # nothing usable: the rest of the ladder and the long search, at the end
+            assert kw["needs_deep_search"](files)
         return files
     monkeypatch.setattr(workflow, "run_search", search)
     res, _ = run(env, FakeSlskd(), [AppleTrack("remix", "Song (Bob Remix)", "Artist")])
+    assert len(calls) == 2 and "search failed" not in res[0].note
     assert res[0].best is None
     assert workflow.backup_source_count(res[0]) == 0
 
@@ -565,3 +573,55 @@ def test_a_file_that_failed_its_check_can_get_another_source(env):
     res = plan.results[0]
     assert res.best is not None and res.best.file.username == "other"
     assert all(c.file.username != "u" for c in res.alternatives)
+
+
+
+def test_tracks_with_nothing_found_finish_after_every_found_track(env, monkeypatch):
+    """The rest of the query ladder for a track with nothing usable runs after all other tracks, so the found
+    tracks complete first; the number of searches is unchanged."""
+    order = []
+    def search(client, track, **kw):
+        order.append((track.apple_id, "late" if kw["needs_deep_search"] else "first"))
+        if track.apple_id == "missing":
+            return []
+        return [good_file(user=f"u{i}", path=rf"f{i}\{track.artist} - {track.name}.mp3") for i in range(3)]
+    monkeypatch.setattr(workflow, "run_search", search)
+    monkeypatch.setattr(workflow, "FIRST_PASS_RUNGS", 1)
+    tracks = [AppleTrack("missing", "Nowhere Song", "Nobody", position=0)] + [
+        AppleTrack(f"t{i}", f"Song {i}", "Artist", position=i + 1) for i in range(4)]
+    res, events = run(env, FakeSlskd(), tracks)
+    finished = [r.track.apple_id for _done, _total, r in events]
+    assert order[-1] == ("missing", "late") and ("missing", "first") in order
+    assert finished[-1] == "missing" and len(finished) == 5
+
+
+def test_a_folder_listing_serves_other_tracks_of_the_same_artist(env, monkeypatch):
+    """One search plus the uploaders' album folder can find the other playlist tracks from that album."""
+    album = [AppleTrack(f"a{i}", f"Track {name}", "Band", position=i) for i, name in enumerate(["One", "Two"])]
+    def folder(user):
+        return [good_file(user=user, path=rf"Music\Band\Album\Band - Track {n}.mp3") for n in ("One", "Two")]
+    searches = []
+
+    class Client(FakeSlskd):
+        def get_directory(self, username, directory, *, timeout_s):
+            assert directory == r"Music\Band\Album" and timeout_s <= 6
+            return folder(username)
+
+    def search(client, track, **kw):
+        searches.append(track.apple_id)
+        return [f for u in ("u1", "u2", "u3") for f in folder(u) if track.name in f.filename]
+    monkeypatch.setattr(workflow, "run_search", search)
+    monkeypatch.setattr(workflow, "PARALLEL_SEARCHES", 1)  # one at a time: the folder arrives before track 2
+    import time as _time
+    real = workflow.SharedResults.files_for
+    def patient(self, track):
+        for _ in range(50):  # the folder listing runs in the background; give it a moment in the test
+            found = real(self, track)
+            if found or track.apple_id == "a0":
+                return found
+            _time.sleep(0.02)
+        return real(self, track)
+    monkeypatch.setattr(workflow.SharedResults, "files_for", patient)
+    res, _ = run(env, Client(), album)
+    assert searches == ["a0"]  # track two needed no search of its own
+    assert all(r.best is not None for r in res)

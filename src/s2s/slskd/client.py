@@ -211,6 +211,38 @@ class SlskdClient:
                 )
         return out
 
+    def get_directory(self, username: str, directory: str, *, timeout_s: float = 20.0) -> list[RemoteFile]:
+        """The files in ONE folder of a peer's shares (POST /users/{user}/directory).
+
+        This asks the peer directly; it is not a server search, so it does not count against the search limit.
+        The peer lists bare file names; they are joined to `directory` so they can be downloaded as found.
+        """
+        data = self._request("POST", f"/users/{_q(username)}/directory", json={"directory": directory},
+                             timeout=timeout_s)
+        dirs = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+        out: list[RemoteFile] = []
+        for d in dirs:
+            if not isinstance(d, dict):
+                continue
+            folder = str(d.get("name") or directory)
+            for f in d.get("files") or []:
+                if not isinstance(f, dict) or not f.get("filename"):
+                    continue
+                name = str(f["filename"])
+                filename = name if ("\\" in name or "/" in name) else folder.rstrip("\\/") + "\\" + name
+                out.append(RemoteFile(
+                    username=username,
+                    filename=filename,
+                    size=_opt_int(f.get("size")) or 0,
+                    extension=_extension(f.get("extension"), filename),
+                    bitrate=_opt_int(f.get("bitRate")),
+                    is_vbr=_opt_bool(f.get("isVariableBitRate")),
+                    sample_rate=_opt_int(f.get("sampleRate")),
+                    bit_depth=_opt_int(f.get("bitDepth")),
+                    length_s=_opt_int(f.get("length")),
+                ))
+        return out
+
     def stop_search(self, search_id: str) -> None:
         self._request("PUT", f"/searches/{_q(_check_search_id(search_id))}")
 
