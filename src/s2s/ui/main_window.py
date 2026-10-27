@@ -332,7 +332,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
-    def check_for_updates(self, *, manual: bool, retries: int = 0) -> None:
+    def check_for_updates(self, *, manual: bool) -> None:
         """Look for a newer signed release (in the background). Automatic checks stay silent when nothing is new."""
         from .. import __version__, updater
 
@@ -352,8 +352,8 @@ class MainWindow(QMainWindow):
             get().info("Update check failed: %s", exc)
             if manual:
                 show_error(self, "Check for updates", str(exc))
-            elif retries < 3 and isinstance(exc, updater.UpdateError):  # offline or rate limited: try again later
-                QTimer.singleShot(30 * 60 * 1000, lambda: self.check_for_updates(manual=False, retries=retries + 1))
+            elif isinstance(exc, updater.UpdateError):  # offline or rate limited: keep trying while S2S is open
+                QTimer.singleShot(30 * 60 * 1000, lambda: self.check_for_updates(manual=False))
 
         run_async(self, work, done, failed)
 

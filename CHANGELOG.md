@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- A failed automatic update check is retried every 30 minutes while S2S is open (was: three times), so a
+  temporary failure never hides an update. The popup appears at every start until S2S is up to date.
+
 ## 1.1.3 — 2026-10-27
 
 - Fixed in-app updates on Windows: the helper that installs the update after S2S closes was started without a
