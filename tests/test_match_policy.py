@@ -254,8 +254,8 @@ def test_clean_versions_are_rejected_unless_the_playlist_asks_for_clean():
     from s2s.models import AppleTrack, MatchPolicy, RemoteFile, Tier
 
     track = AppleTrack("t", "Bad Habits", "Ed Sheeran", duration_ms=231000)
-    clean = RemoteFile("u", "Music\Ed Sheeran - Bad Habits (Clean).mp3", 9_000_000, "mp3", 320, False, length_s=231)
-    normal = RemoteFile("u", "Music\Ed Sheeran - Bad Habits.mp3", 9_000_000, "mp3", 320, False, length_s=231)
+    clean = RemoteFile("u", r"Music\Ed Sheeran - Bad Habits (Clean).mp3", 9_000_000, "mp3", 320, False, length_s=231)
+    normal = RemoteFile("u", r"Music\Ed Sheeran - Bad Habits.mp3", 9_000_000, "mp3", 320, False, length_s=231)
     cand, _ = _evaluate(track, clean, MatchPolicy())
     assert cand.tier == Tier.REJECTED and any("clean" in r for r in cand.reasons)
     assert _evaluate(track, normal, MatchPolicy())[0].tier == Tier.EXACT
@@ -263,6 +263,6 @@ def test_clean_versions_are_rejected_unless_the_playlist_asks_for_clean():
     asked_clean = AppleTrack("t", "Bad Habits (Clean)", "Ed Sheeran", duration_ms=231000)
     assert _evaluate(asked_clean, clean, MatchPolicy())[0].tier == Tier.EXACT
     title = AppleTrack("t", "Clean", "Taylor Swift", duration_ms=271000)  # a song called Clean is not a label
-    song = RemoteFile("u", "Music\Taylor Swift - Clean.mp3", 9_000_000, "mp3", 320, False, length_s=271)
+    song = RemoteFile("u", r"Music\Taylor Swift - Clean.mp3", 9_000_000, "mp3", 320, False, length_s=271)
     assert _evaluate(title, song, MatchPolicy())[0].tier == Tier.EXACT
     assert MatchPolicy.from_dict(MatchPolicy(exclude_clean=False).to_dict()).exclude_clean is False
