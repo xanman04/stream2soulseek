@@ -73,7 +73,7 @@ def test_segments_distinguish_found_flagged_unresolved_error_and_pending(qapp):
     assert page.track_bar._states == ["found", "problem", "problem", "problem", "skipped", "pending"]
     assert page.track_bar._kinds[1] == "check" and page.track_bar.toolTip() == ""  # no hover texts
     page._finished(("import", results, True, page.ctx.settings.match_policy.fingerprint()))
-    assert [c.text() for c in page._chips if not c.isHidden()] == ["1 found", "1 to check", "1 not found", "1 failed", "1 skipped"]
+    assert [c.text() for c in page._chips if not c.isHidden()] == ["1 found", "1 to check", "1 not found", "1 failed", "1 already in your folder"]
     page.close()
 
 

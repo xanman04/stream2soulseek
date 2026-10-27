@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- No track is skipped because of its label any more ("Skipped" read as "will not be included"). A DJ-mixed
+  playlist entry ("Song - Mixed", often a short excerpt) is searched as the song itself and filed under the
+  song's name; a radio-edit or live entry is searched as that version. Only tracks already in your folder are
+  not searched, shown as "Already in your folder".
+- Settings, matching rules: the section now offers only the choices that change anything ("Reject clean
+  versions", "For DJ-mixed tracks in your playlist, find the song itself") and says plainly that S2S always
+  looks for the version in your playlist; the radio-edit and live switches had no effect and are gone.
 - Pasting a Spotify link no longer flashes a console window (the Spotify library ran `os.system("")` on load).
 - Spotify playlists open much faster: the library read Spotify's whole web player (~30 s) to find its query ids,
   for every pasted link and every page of a signed-in playlist. The ids are now kept and reused (about 3 s), and

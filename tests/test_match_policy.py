@@ -46,7 +46,7 @@ def test_defaults_are_the_owners_rules():
 
 def test_default_summary_line():
     assert describe_policy(MatchPolicy()) == (
-        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 rejecting radio edits, live, mixed, clean")
+        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 no clean versions · DJ-mixed tracks: the song itself")
 
 
 # ------------------------------------------------------------------ version mode
@@ -133,13 +133,16 @@ def test_exclusion_off_only_helps_when_the_request_has_the_same_label(label, tog
     c = evaluate(T("Song"), F(f"Song ({label})"), off)
     assert c.tier == REJ
     assert any(r.startswith("different version") for r in c.reasons)
-    # a request carrying the label is searched and matches only the same label
+    # a request carrying the label is never skipped: with the label allowed it matches only the same label
     req = T(f"Song ({label})")
-    assert request_exclusion(req) is not None  # default: skipped
-    assert request_exclusion(req, off) is None
-    assert match(req, [F("Song")], MatchPolicy()).status == MatchStatus.SKIPPED
+    assert request_exclusion(req) is not None and request_exclusion(req, off) is None
     r = match(req, [F(f"Song ({label})"), F("Song")], off)
     assert r.status == MatchStatus.PROPOSED and r.best.file.filename.endswith(f"Song ({label}).mp3")
+    # with the default rules too: a radio edit or live entry is searched as that version; a DJ-mixed entry is
+    # searched as the song itself (mixed files stay rejected)
+    r = match(req, [F(f"Song ({label})"), F("Song")], MatchPolicy())
+    want = "Song.mp3" if toggle == "exclude_mixed" else f"Song ({label}).mp3"
+    assert r.status == MatchStatus.PROPOSED and r.best.file.filename.endswith(want)
 
 
 def test_exclusions_stay_on_by_default_for_all_files():

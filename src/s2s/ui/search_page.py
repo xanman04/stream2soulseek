@@ -41,8 +41,8 @@ class _Progress(QObject):
 
 def classify(res: MatchResult) -> tuple[str, str, str]:
     """(kind, plain-English result, tooltip detail) for one match result. kind is a theme.tint kind."""
-    if res.status == MatchStatus.SKIPPED:
-        return "muted", "Skipped", res.note or "This track is excluded by your matching rules."
+    if res.status == MatchStatus.SKIPPED:  # only tracks already in the tracklist folder are not searched
+        return "muted", "Already in your folder", res.note or "Already in your tracklist folder."
     if res.status == MatchStatus.PROPOSED and res.best is not None:
         best = res.best
         detail = f"{best.file.username}: {best.file.filename}"
@@ -382,7 +382,7 @@ class SearchPage(QWidget):
         n = self._counts()
         spec = [(self.chip_found, n["ok"], "found", "ok"), (self.chip_check, n["warn"], "to check", "warn"),
                 (self.chip_missing, n["missing"], "not found", "error"),
-                (self.chip_failed, n["failed"], "failed", "error"), (self.chip_skipped, n["skipped"], "skipped", "muted")]
+                (self.chip_failed, n["failed"], "failed", "error"), (self.chip_skipped, n["skipped"], "already in your folder", "muted")]
         any_result = bool(self._shown)
         for lab, count, word, kind in spec:
             set_chip(lab, f"{count} {word}", kind)

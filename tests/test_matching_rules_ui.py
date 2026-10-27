@@ -63,13 +63,13 @@ def test_dialog_edits_persist_and_restore_defaults(ctx):
     r.formats.item(2).setCheckState(Qt.CheckState.Checked)  # wav (third row, unchecked before)
     r.mode_exact.setChecked(True)
     r.tier_first.setChecked(False)
-    r.ex_live.setChecked(False)
+    r.ex_clean.setChecked(False)
     r.tolerance.setValue(40)
     r.skip_flagged.setChecked(False)
     dlg.save()
     p = saved(ctx)
     assert [x.kind for x in p.formats] == ["flac", "mp3", "wav"]
-    assert p.version_mode == "exact_only" and not p.tier_before_format and not p.exclude_live
+    assert p.version_mode == "exact_only" and not p.tier_before_format and not p.exclude_clean
     assert p.exclude_radio_edits and p.exclude_mixed and p.duration_tolerance_s == 40 and not p.skip_flagged_by_default
 
     dlg2 = SettingsDialog(ctx)  # reopened: shows what was saved
@@ -109,7 +109,7 @@ def test_dialog_refuses_to_save_with_no_file_type(ctx, monkeypatch):
 def test_search_page_summary_and_stale_note(ctx):
     page = SearchPage(ctx)
     assert page.rules_label.text() == (
-        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 rejecting radio edits, live, mixed, clean")
+        "Accepting: MP3 320 CBR, FLAC \u00b7 exact or extended \u00b7 no clean versions · DJ-mixed tracks: the song itself")
     t = AppleTrack("i.1", "Song", "Artist")
     ctx.results = [MatchResult(t, MatchStatus.UNRESOLVED, None)]
     ctx.results_policy = ctx.settings.match_policy.fingerprint()

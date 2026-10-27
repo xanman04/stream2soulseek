@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import applog, archive, organize
-from .matching import match, penalise_peers, request_exclusion
+from .matching import match, penalise_peers, searchable_track
 from .matching.versions import normalise, parse_title
 from .models import (
     AppleTrack,
@@ -299,10 +299,9 @@ def search_and_match(
             break
         if t.apple_id in done_ids:
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IMPORTED))
-        elif request_exclusion(t, settings.match_policy):
-            finish(match(t, [], settings.match_policy, declined_peers))
         else:
-            todo.append(t)
+            # A DJ-mixed entry is searched as the song itself (never skipped for its label).
+            todo.append(searchable_track(t, settings.match_policy))
     waiting.update((t.apple_id, t) for t in todo)
 
     def work(track: AppleTrack, later: _Deferred | None = None) -> MatchResult | _Deferred | None:
@@ -652,7 +651,8 @@ def import_completed(
         raise ValueError("unknown approval")
     if not settings.slskd_downloads_dir.strip():
         raise ValueError("The slskd downloads folder is not set. Open Settings and choose it.")
-    tracks = {t.apple_id: t for t in store.load_tracks(approval.import_id)}
+    # the searched recording: a DJ-mixed entry is filed under the song's own name, not "... - Mixed"
+    tracks = {t.apple_id: searchable_track(t, settings.match_policy) for t in store.load_tracks(approval.import_id)}
     already = {
         r.apple_id for r in store.import_results(approval.import_id)
         if r.outcome in (ImportOutcome.COPIED, ImportOutcome.ALREADY_PRESENT)

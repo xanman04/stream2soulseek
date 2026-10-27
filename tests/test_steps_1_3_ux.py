@@ -206,7 +206,7 @@ def test_classify_uses_plain_words():
     chk = MatchResult(t, MatchStatus.PROPOSED, _cand("a", flagged=True, reasons=("duration differs",)))
     assert classify(chk)[:2] == ("warn", "Check needed: duration differs")
     assert classify(MatchResult(t, MatchStatus.UNRESOLVED, None))[1] == "Not found"
-    assert classify(MatchResult(t, MatchStatus.SKIPPED, None, note="x"))[1] == "Skipped"
+    assert classify(MatchResult(t, MatchStatus.SKIPPED, None, note="x"))[1] == "Already in your folder"
     for r in (ex, chk):
         assert not any(w in classify(r)[1].lower() for w in ("proposed", "unresolved", "backup"))
 

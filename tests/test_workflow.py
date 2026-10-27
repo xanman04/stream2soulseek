@@ -458,12 +458,12 @@ def test_process_requires_downloads_dir(env):
 
 
 @pytest.mark.parametrize("title", ["Song (Radio Edit)", "Song (Live)", "Song [Mixed]"])
-def test_excluded_requests_skip_network(env, title):
+def test_labelled_requests_are_searched(env, title):
     client = FakeSlskd()
-    res, events = run(env, client, [AppleTrack("excluded", title, "Artist")])
-    assert res[0].status == MatchStatus.SKIPPED
-    assert "excluded" in res[0].note
-    assert client.calls == []
+    res, events = run(env, client, [AppleTrack("labelled", title, "Artist")])
+    assert res[0].status != MatchStatus.SKIPPED and client.calls  # searched, never skipped
+    queries = " ".join(client.texts)
+    assert ("mixed" not in queries.lower()) if "Mixed" in title else True  # a DJ-mixed entry: the song itself
     assert len(events) == 1
 
 

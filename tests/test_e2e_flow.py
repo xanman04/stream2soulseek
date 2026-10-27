@@ -674,7 +674,7 @@ def test_restart_resumes_downloads_and_rerun_skips_what_is_already_imported(app_
         c = win2.review.model.counts()
         assert (c["skipped"], c["flagged"], c["unresolved"], c["checked"]) == (8, 1, 1, 0)
         assert not win2.review.confirm_btn.isEnabled()
-        assert win2.search.chip_skipped.text() == "8 skipped"
+        assert win2.search.chip_skipped.text() == "8 already in your folder"
     finally:
         win2.transfers.stop()
         win2.close()
