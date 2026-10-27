@@ -35,6 +35,7 @@ Compression=lzma2/max
 SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
+SetupLogging=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -43,32 +44,110 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 #include FileList
 
 [Code]
-var
-  CheckedFiles, CopyFiles: TStringList;
+type
+  TProgramFileInfo = record
+    Attributes: Cardinal;
+    Creation, Access, LastWrite: TFileTime;
+    Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow: Cardinal;
+  end;
 
-function NeedsUpdate(RelativePath, ExpectedHash: String): Boolean;
+function GetProgramFileInfo(Handle: THandle; var Info: TProgramFileInfo): Boolean;
+  external 'GetFileInformationByHandle@kernel32.dll stdcall';
+
 var
-  Target: String;
+  ComparedFiles: TArrayOfString;
+  ComparisonPage: TOutputProgressWizardPage;
+  ComparedDir: String;
+
+procedure InitializeWizard;
 begin
-  if CheckedFiles = nil then begin
-    CheckedFiles := TStringList.Create;
-    CopyFiles := TStringList.Create;
-  end;
-  if CheckedFiles.IndexOf(RelativePath) >= 0 then begin
-    Result := CopyFiles.IndexOf(RelativePath) >= 0;
-    exit;
-  end;
-  Result := True;
-  Target := AddBackslash(ExpandConstant('{app}')) + RelativePath;
-  if FileExists(Target) then begin
+  SetArrayLength(ComparedFiles, {#RuntimeFileCount});
+  ComparisonPage := CreateOutputProgressPage('Checking installed files',
+    'Preparing the S2S installation');
+end;
+
+procedure ComparisonProgress(const S: String; const Error, FirstLine: Boolean);
+begin
+  if not Error and (Pos('PROGRESS ', S) = 1) then
+    ComparisonPage.SetProgress(StrToIntDef(Copy(S, 10, Length(S)), 0), {#RuntimeFileCount});
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  AppDir, ResultsFile, Params, Line: String;
+  ExitCode, I, Index, Separator: Integer;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  AppDir := ExpandConstant('{app}');
+  if ComparedDir = AppDir then exit;
+  for I := 0 to GetArrayLength(ComparedFiles) - 1 do ComparedFiles[I] := '';
+  ComparedDir := AppDir;
+  if not FileExists(AddBackslash(AppDir) + 'S2S.exe') then exit;
+  ComparisonPage.SetText('Checking which program files need updating...', '');
+  ComparisonPage.SetProgress(0, {#RuntimeFileCount});
+  ComparisonPage.Show;
+  try
     try
-      Result := CompareText(GetSHA256OfFile(Target), ExpectedHash) <> 0;
+      ExtractTemporaryFile('s2s-runtime-hashes.json');
+      ExtractTemporaryFile('s2s-runtime-compare.exe');
+      ResultsFile := ExpandConstant('{tmp}\s2s-unchanged.txt');
+      DeleteFile(ResultsFile);
+      Params := AddQuotes(AppDir) + ' ' +
+        AddQuotes(ExpandConstant('{tmp}\s2s-runtime-hashes.json')) + ' ' + AddQuotes(ResultsFile);
+      Log('Starting program-file comparison');
+      if ExecAndLogOutput(ExpandConstant('{tmp}\s2s-runtime-compare.exe'),
+        Params, '', SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode, @ComparisonProgress) and
+        (ExitCode = 0) and FileExists(ResultsFile) then begin
+        Log('Comparison helper finished');
+        if not LoadStringsFromFile(ResultsFile, Lines) then RaiseException('Missing comparison results');
+        for I := 0 to GetArrayLength(Lines) - 1 do begin
+          Line := Lines[I];
+          Separator := Pos('|', Line);
+          Index := StrToIntDef(Copy(Line, 1, Separator - 1), -1);
+          if (Index < 0) or (Index >= {#RuntimeFileCount}) then
+            RaiseException('Invalid comparison results');
+          ComparedFiles[Index] := Copy(Line, Separator + 1, Length(Line));
+        end;
+        Log('Unchanged program files: ' + IntToStr(GetArrayLength(Lines)));
+      end else
+        Log('File comparison unavailable; installing all program files');
     except
-      Log('Could not compare installed file: ' + RelativePath);
+      for I := 0 to GetArrayLength(ComparedFiles) - 1 do ComparedFiles[I] := '';
+      Log('File comparison failed; installing all program files');
     end;
+  finally
+    ComparisonPage.Hide;
   end;
-  CheckedFiles.Add(RelativePath);
-  if Result then CopyFiles.Add(RelativePath);
+end;
+
+function NeedsUpdate(FileIndex: Integer; RelativePath: String): Boolean;
+var
+  Info: TProgramFileInfo;
+  Stream: TFileStream;
+  Mark: String;
+begin
+  { Early wizard sizing checks stay cheap. Hashes are computed once during PrepareToInstall. }
+  Result := True;
+  if GetArrayLength(ComparedFiles) <> {#RuntimeFileCount} then exit;
+  if ComparedDir <> ExpandConstant('{app}') then exit;
+  if ComparedFiles[FileIndex] = '' then exit;
+  { A file changed after hashing must be copied, even if it was initially identical. }
+  try
+    Stream := TFileStream.Create(AddBackslash(ExpandConstant('{app}')) + RelativePath,
+                                fmOpenRead or fmShareDenyWrite);
+    try
+      if GetProgramFileInfo(Stream.Handle, Info) then begin
+        Mark := IntToStr(Info.SizeHigh) + '|' + IntToStr(Info.SizeLow) + '|' +
+          IntToStr(Info.LastWrite.dwHighDateTime) + '|' + IntToStr(Info.LastWrite.dwLowDateTime);
+        Result := Mark <> ComparedFiles[FileIndex];
+      end;
+    finally
+      Stream.Free;
+    end;
+  except
+    Result := True;
+  end;
 end;
 
 [Icons]
@@ -76,8 +155,8 @@ Name: "{autoprograms}\S2S"; Filename: "{app}\S2S.exe"
 Name: "{autodesktop}\S2S"; Filename: "{app}\S2S.exe"; Tasks: desktopicon
 
 [Run]
-; Opened the way a double-click opens it (shellexec), in its own folder, not as a child of the installer.
-Filename: "{app}\S2S.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,S2S}"; Flags: nowait postinstall skipifsilent shellexec
+; Launch this executable directly in its own folder; no shell file-association lookup is needed.
+Filename: "{app}\S2S.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,S2S}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
