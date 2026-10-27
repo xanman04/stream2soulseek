@@ -1,18 +1,18 @@
 ## What's changed
 
-- **Updates install from the installer.** S2S downloads the new installer itself, checks that it is genuinely
-  from the developer, installs it and restarts. Coming from 1.1.0 or older? Install this version by hand once.
-- **Updates clean up after themselves.** The downloaded installer, temporary files and the old copy of the app
-  are removed, including anything earlier updates left behind.
-- **A tidier release page.** Only the installers are listed; checksums are in the collapsed section below.
+- **Faster searching from shared results.** Every file found is checked against the whole playlist, and S2S
+  looks in the uploader's album folder for other tracks by the same artist, so some tracks need no search.
+- **Found tracks finish first.** Tracks with nothing found yet do their extra searches at the end.
+- **Inspect files that did not pass your rules.** They are always listed in Review; select one to see why.
+- **A plain search bar** in Review, without the list of earlier searches.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.1/S2S-1.1.1-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.1/S2S-1.1.1-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.1/S2S-1.1.1-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.2/S2S-1.1.2-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.2/S2S-1.1.2-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.1.2/S2S-1.1.2-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -30,5 +30,5 @@ Developer ID signing or notarization; Windows builds are not publisher-signed. O
 
 [Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) ·
 [Report a problem](https://github.com/xanman04/stream2soulseek/issues) ·
-[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.1.0...v1.1.1)
+[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.1.1...v1.1.2)
 
