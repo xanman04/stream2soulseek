@@ -197,7 +197,7 @@ def test_main_window_source_routing_and_token_redaction(tmp_path, _qt_applicatio
         window._auth_failed("SoundCloud")
         assert window.stack.currentWidget() is window.soundcloud_service
         assert load_session(secrets) is None
-        assert window.sidebar.services.item(2).text() == "SoundCloud: not signed in"
+        assert window.sidebar.services.item(2).text() == "SoundCloud: Not signed in"
         assert SOUNDCLOUD_KEY in window._service_pages
     finally:
         window.close()

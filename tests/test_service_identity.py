@@ -53,7 +53,7 @@ def test_account_identity_is_plain_text_and_updates_after_sign_out(tmp_path):
 def test_service_messages_remain_visible_and_cannot_render_markup():
     label = ServiceStatus("Spotify")
     try:
-        label.setText("Spotify: signed in")
+        label.setText("Spotify: Signed in")
         assert label.isHidden()
         label.setText("Could not store the session. Try again.")
         assert not label.isHidden()

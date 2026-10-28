@@ -62,7 +62,7 @@ class ServicePage(QWidget):
         return self.source.is_connected()
 
     def state_text(self) -> str:
-        return "Apple Music: signed in" if self.is_connected() else "Apple Music: not signed in"
+        return "Apple Music: Signed in" if self.is_connected() else "Apple Music: Not signed in"
 
     def refresh_state(self) -> None:
         connected = self.is_connected()

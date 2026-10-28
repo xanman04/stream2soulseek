@@ -64,12 +64,12 @@ class SpotifyServicePage(QWidget):
         return self.source.is_connected()
 
     def state_text(self) -> str:
-        return "Spotify: signed in" if self.is_connected() else "Spotify: not signed in"
+        return "Spotify: Signed in" if self.is_connected() else "Spotify: Not signed in"
 
     def refresh_state(self) -> None:
         connected = self.is_connected()
         self.status.setText(self.state_text())
-        self.connection_value.setText("Connected" if connected else "Not signed in")
+        self.connection_value.setText("Signed in" if connected else "Not signed in")
         self.session_value.setText(f"Saved on this computer, {protection_text()}" if connected else "No session saved")
         self.sign_out_btn.setEnabled(connected)
         self.reconnect_btn.setText("Reconnect Spotify…" if connected else "Sign in to Spotify…")

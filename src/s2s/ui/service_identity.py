@@ -36,7 +36,7 @@ class ServiceStatus(QLabel):
 
     def setText(self, text):  # noqa: N802 - Qt API
         super().setText(text)
-        self.setVisible(bool(text) and text not in (f"{self._name}: signed in", f"{self._name}: not signed in"))
+        self.setVisible(bool(text) and text not in (f"{self._name}: Signed in", f"{self._name}: Not signed in"))
 
 
 LOGO_DIR = Path(__file__).with_name("assets") / "logos"

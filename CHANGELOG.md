@@ -2,6 +2,13 @@
 
 ## 1.3.2 — Unreleased
 
+- Partial artist names inside longer folder names now require review instead of being treated as confident
+  matches. These uncertain files do not count toward ending the search early.
+- Cached results that do not provide a usable match can be refreshed after the existing repeat cooldown.
+  Manual searches can refresh older results, while successful cache hits keep their normal lifetime.
+- Downloads now offers a manual Soulseek search when another copy is needed, with explicit confirmation
+  before downloading a replacement. Alternative-file details separate warnings, filename and folder location.
+- Connection status labels use consistent capitalization across streaming services and Soulseek.
 - Windows setup checks existing files in a visible preparation step instead of hashing files inside the
   wizard's per-file selection callback. A compiled checksum worker uses Windows cryptography services;
   files changed after comparison are checked again before being skipped.

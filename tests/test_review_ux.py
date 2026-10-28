@@ -75,6 +75,18 @@ def test_plain_text_helpers():
     assert quality_text(cand("u", "x.flac", ext="flac").file) == "FLAC"
 
 
+def test_alternative_explanation_separates_warning_from_location():
+    c = cand("u", "Artist - Song [www.example.test].mp3", flagged=True,
+             reasons=("artist found in path", "exact requested version",
+                      "filename contains promotional website text; review the raw filename"))
+    text = review_page.candidate_detail(c)
+    assert text.startswith("Check before choosing:\n• Website promotion")
+    assert "File: Artist - Song [www.example.test].mp3" in text
+    assert "Soulseek folder: " in text
+    assert "artist found in path" not in text
+    assert "exact requested version" not in text
+
+
 def test_summary_chips_and_row_text(page):
     assert page.chip_ready.text() == "2 ready"
     assert page.chip_check.text() == "1 to check"
