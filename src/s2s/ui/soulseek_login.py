@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
+from .. import applog
 from ..secretstore import SecretStore, protection_text
 from ..slskd.service import (
     SlskdService, SoulseekCredentials, SoulseekLoginError, load_credentials, save_credentials,
@@ -94,8 +95,16 @@ class SoulseekLoginDialog(QDialog):
             w.setEnabled(not busy)
 
 
+WATCH_INTERVAL_MS = 5000
+RESTART_DELAYS_S = (0, 30, 120)  # waits before each automatic restart attempt after slskd exits on its own
+
+
 class SoulseekSession(QObject):
-    """Startup flow: stored login -> start slskd silently; none (or rejected) -> login popup."""
+    """Startup flow: stored login -> start slskd silently; none (or rejected) -> login popup.
+
+    Afterwards a watchdog notices when slskd exits by itself (it can crash) and starts it again with the stored
+    login. slskd re-queues the downloads that were active, so a run carries on. Restarts keep to the service's
+    own login spacing and limits, and give up after a few tries instead of reconnecting in a loop."""
 
     status_changed = Signal(str)
     connected = Signal()
@@ -108,6 +117,11 @@ class SoulseekSession(QObject):
         self._parent = parent_widget
         self._dialog_factory = dialog_factory
         self.is_connected = False
+        self._restarting = False
+        self._attempts = 0
+        self._watch = QTimer(self)
+        self._watch.setInterval(WATCH_INTERVAL_MS)
+        self._watch.timeout.connect(self.check_alive)
 
     def connect_on_startup(self) -> None:
         creds = load_credentials(self._secrets)
@@ -129,8 +143,57 @@ class SoulseekSession(QObject):
 
     def _connected(self, username: str) -> None:
         self.is_connected = True
+        self._attempts = 0
         self.status_changed.emit(f"Soulseek: Logged in as {username}.")
+        self._watch.start()
         self.connected.emit()
+
+    # ------------------------------------------------------------ watchdog
+
+    def check_alive(self) -> None:
+        """Restart slskd if it exited on its own since the last check."""
+        if self._restarting or not self.is_connected:
+            return
+        died = getattr(self.service, "died", None)
+        if died is None or not died():
+            return
+        applog.get().warning("slskd exited unexpectedly; restarting it")
+        self.is_connected = False
+        self._try_restart()
+
+    def _try_restart(self) -> None:
+        creds = load_credentials(self._secrets)
+        if creds is None or self._attempts >= len(RESTART_DELAYS_S):
+            self._restarting = False
+            self.status_changed.emit("Soulseek: Connection lost. Restart S2S to reconnect "
+                                     "(your downloads continue when it is back).")
+            return
+        self._restarting = True
+        delay = RESTART_DELAYS_S[self._attempts]
+        self._attempts += 1
+        self.status_changed.emit(f"Soulseek: Connection lost. Reconnecting as {creds.username}...")
+
+        def start() -> None:
+            self.service.start(creds)
+
+        def ok(_r) -> None:
+            self._restarting = False
+            applog.get().info("slskd restarted")
+            self._connected(creds.username)
+
+        def failed(exc: object) -> None:
+            applog.get().warning("slskd restart failed: %s", _describe(exc))
+            if isinstance(exc, SoulseekLoginError):  # the login itself is no longer accepted: ask, do not retry
+                self._restarting = False
+                self.prompt("Soulseek did not accept your saved login. " + _describe(exc))
+                return
+            QTimer.singleShot(RESTART_DELAYS_S[min(self._attempts, len(RESTART_DELAYS_S) - 1)] * 1000,
+                              self._try_restart)
+
+        if delay:
+            QTimer.singleShot(delay * 1000, lambda: run_async(self, start, ok, failed))
+        else:
+            run_async(self, start, ok, failed)
 
     def _stored_failed(self, exc: object) -> None:
         self.is_connected = False
@@ -140,4 +203,6 @@ class SoulseekSession(QObject):
             self.status_changed.emit(f"Soulseek: {_describe(exc)}")
 
     def shutdown(self) -> None:
+        self._watch.stop()
+        self._restarting = True  # nothing restarts slskd once the app is closing
         self.service.stop()

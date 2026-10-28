@@ -441,6 +441,10 @@ class SlskdService:
                 raise SlskdServiceError("slskd did not start in time.")
             self._sleep(1.0)
 
+    def died(self) -> bool:
+        """True when the slskd this service started has exited on its own (a stop() leaves no process to check)."""
+        return self._proc is not None and self._proc.poll() is not None
+
     def stop(self) -> None:
         proc, self._proc = self._proc, None
         if proc is not None and proc.poll() is None:

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- If slskd (the Soulseek engine S2S runs) exits by itself, S2S now restarts it with your saved login, up to three
+  times and within the existing Soulseek login limits, and says so in the sidebar. slskd then re-queues the downloads
+  that were active. Before, a crash left the Downloads page stale until S2S was restarted.
 - Search skips a track when your tracklist folder already holds a file named for exactly that title and artist
   (for example "Title - Artist.mp3"), even if S2S did not put it there. It shows as "Already in your folder" and
   uses no Soulseek search. Any extra word in the file name (a VIP or remix, a second artist, a track number)

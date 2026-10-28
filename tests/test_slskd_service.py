@@ -226,3 +226,32 @@ def test_soulseek_logins_are_spaced_and_capped(tmp_path, settings, store):
     wall.t += service.LOGIN_WINDOW_S
     svc.start(CREDS)  # the window has passed
     assert len(launched) == service.LOGIN_LIMIT + 1
+
+
+def test_died_is_true_only_when_the_process_exited_by_itself(tmp_path):
+    from s2s.slskd.service import SlskdService
+
+    class Proc:
+        pid = 1
+
+        def __init__(self):
+            self.code = None
+
+        def poll(self):
+            return self.code
+
+        def terminate(self):
+            self.code = 0
+
+        def wait(self, timeout=None):
+            return self.code
+
+    service = SlskdService(Settings(), None, app_dir=tmp_path)
+    assert not service.died()          # nothing started yet
+    proc = Proc()
+    service._proc = proc
+    assert not service.died()          # running
+    proc.code = 3221225477             # exited by itself, like a crash
+    assert service.died()
+    service.stop()
+    assert not service.died()          # a stop by the app leaves nothing to restart
