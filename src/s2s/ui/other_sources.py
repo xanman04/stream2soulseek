@@ -7,8 +7,11 @@ file and queues it; the original approval is never changed. Nothing is queued wi
 
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
+                               QVBoxLayout, QWidget)
 
 from .. import workflow
 from ..approval import create_approval
@@ -32,6 +35,8 @@ class OtherSourcesPanel(QWidget):
         self._key: tuple | None = None  # (import id, approval id, apple id) shown
         self._generation = 0
         self._busy = False
+        self._search_cancel: threading.Event | None = None
+        self._track = None
         self._candidates: list[Candidate] = []
         self._destination = ""
         self.title = QLabel("Other files for this track")
@@ -48,12 +53,24 @@ class OtherSourcesPanel(QWidget):
         self.table.setColumnWidth(2, 80)
         self.table.setColumnWidth(3, 60)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.query_label = QLabel("Search Soulseek with your own words")
+        self.query = QLineEdit()
+        self.query.setObjectName("otherSourcesQuery")
+        self.query.setPlaceholderText("Artist, title, remix, or other details")
+        self.query_label.setBuddy(self.query)
+        self.search_btn = QPushButton("Search")
+        self.search_btn.setObjectName("otherSourcesSearch")
         self.download_btn = theme.primary(QPushButton("Download this file…"))
         self.download_btn.setEnabled(False)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.title)
         lay.addWidget(self.table, 1)
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.query_label)
+        search_row.addWidget(self.query, 1)
+        search_row.addWidget(self.search_btn)
+        lay.addLayout(search_row)
         lay.addWidget(self.note)
         row = QHBoxLayout()
         row.addStretch(1)
@@ -61,6 +78,8 @@ class OtherSourcesPanel(QWidget):
         lay.addLayout(row)
         self.table.itemSelectionChanged.connect(self._update_button)
         self.table.itemDoubleClicked.connect(lambda _it: self.download_selected())
+        self.search_btn.clicked.connect(self.search_custom)
+        self.query.returnPressed.connect(self.search_custom)
         self.download_btn.clicked.connect(self.download_selected)
 
     # ------------------------------------------------------------ loading
@@ -70,40 +89,86 @@ class OtherSourcesPanel(QWidget):
         key = (self.ctx.import_id, approval_id, apple_id)
         if key == self._key:
             return
+        self._invalidate_async()
+        self._set_busy(False)
         self._key = key
         self._generation += 1
         generation, import_id, store, settings = self._generation, self.ctx.import_id, self.ctx.store, self.ctx.settings
+        self._track = next((t for t in store.load_tracks(import_id) if t.apple_id == apple_id), None)
+        self.query.setText(f"{self._track.artist} {self._track.name}" if self._track else "")
         self.title.setText(f"Other files for {name}")
         self._fill([], "")
         self._say("Looking for other files…")
 
         def work():
-            plan = workflow.build_replacement_plan(store, import_id, settings, include_failed=True)
-            res = next((r for r in plan.results if r.track.apple_id == apple_id), None)
-            if res is None:
-                return [], plan.destination
-            found = [c for c in ((res.best,) if res.best else ()) + tuple(res.alternatives) if is_eligible(c)]
-            return found, plan.destination
+            return self._replacement_candidates(store, import_id, settings, apple_id)
 
         def done(payload) -> None:
-            if generation != self._generation:
+            if not self._current(generation, import_id):
                 return
             found, destination = payload
             self._fill(found, destination)
-            self._say("" if found else "No other file for this track passed your rules. Its search found nothing "
-                                       "else to try.")
+            self._say("" if found else "No alternative matched your rules. Try searching with different words below.")
 
         def failed(exc) -> None:
-            if generation == self._generation:
+            if self._current(generation, import_id):
                 self._say(self.ctx.describe(exc))
 
         run_async(self, work, done, failed)
 
+    @staticmethod
+    def _replacement_candidates(store, import_id, settings, apple_id: str):
+        plan = workflow.build_replacement_plan(store, import_id, settings, include_failed=True)
+        res = next((r for r in plan.results if r.track.apple_id == apple_id), None)
+        if res is None:
+            return [], plan.destination
+        found = [c for c in ((res.best,) if res.best else ()) + tuple(res.alternatives) if is_eligible(c)]
+        return found, plan.destination
+
+    def refresh(self) -> None:
+        """Reload eligible alternatives for the currently displayed track."""
+        if self._key is None or self._busy:
+            return
+        self._invalidate_async()
+        self._generation += 1
+        generation = self._generation
+        import_id, _approval_id, apple_id = self._key
+        store, settings = self.ctx.store, self.ctx.settings
+        self._say("Refreshing other files…")
+
+        def work():
+            return self._replacement_candidates(store, import_id, settings, apple_id)
+
+        def done(payload) -> None:
+            if not self._current(generation, import_id):
+                return
+            found, destination = payload
+            self._fill(found, destination)
+            self._say("" if found else "No other file for this track passed your rules.")
+
+        def failed(exc) -> None:
+            if self._current(generation, import_id):
+                self._say(f"Could not refresh other files: {self.ctx.describe(exc)}")
+
+        run_async(self, work, done, failed)
+
     def clear(self) -> None:
+        self._invalidate_async()
         self._key = None
         self._generation += 1
+        self._track = None
+        self.query.clear()
+        self._set_busy(False)
         self._fill([], "")
         self._say("")
+
+    def _invalidate_async(self) -> None:
+        if self._search_cancel is not None:
+            self._search_cancel.set()
+            self._search_cancel = None
+
+    def _current(self, generation: int, import_id: str) -> bool:
+        return generation == self._generation and import_id == self.ctx.import_id
 
     def _fill(self, candidates: list[Candidate], destination: str) -> None:
         self._candidates, self._destination = list(candidates), destination
@@ -127,6 +192,65 @@ class OtherSourcesPanel(QWidget):
 
     def _update_button(self) -> None:
         self.download_btn.setEnabled(self._selected() is not None and not self._busy)
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.query.setEnabled(not busy)
+        self.search_btn.setEnabled(not busy)
+        self.table.setEnabled(not busy)
+        self._update_button()
+
+    # ------------------------------------------------------------ manual search (never queues)
+
+    def search_custom(self) -> None:
+        key, track = self._key, self._track
+        query = " ".join(self.query.text().split())
+        if self._busy or key is None or track is None or not query:
+            if key is not None and not query:
+                self._say("Enter words to search for.")
+            return
+        import_id, _approval_id, apple_id = key
+        if import_id != self.ctx.import_id:
+            return
+        ctx = self.ctx
+        store, settings = ctx.store, ctx.settings
+        self._generation += 1  # reject any pending initial load before this search replans the candidates
+        generation = self._generation
+        cancel = threading.Event()
+        self._search_cancel = cancel
+        self._set_busy(True)
+        self._say("Searching…")
+
+        def work():
+            client = ctx.slskd_client()
+            try:
+                workflow.search_track_custom(store, client, import_id, track, query, settings, cancel=cancel)
+            finally:
+                client.close()
+            # Re-rank against declined/failed peers after the successful persisted search.
+            return self._replacement_candidates(store, import_id, settings, apple_id)
+
+        def finish_if_current() -> bool:
+            if not self._current(generation, import_id):
+                return False
+            self._search_cancel = None
+            self._set_busy(False)
+            return True
+
+        def done(payload) -> None:
+            if not finish_if_current():
+                return
+            found, destination = payload
+            self._fill(found, destination)
+            self._say("" if found else "No other file matched your rules. Try different search words.")
+
+        def failed(exc) -> None:
+            if not finish_if_current():
+                return
+            # Keep the existing alternatives visible so a failed search does not erase usable choices.
+            self._say(f"Search failed: {ctx.describe(exc)}")
+
+        run_async(self, work, done, failed)
 
     # ------------------------------------------------------------ queueing (explicit confirmation only)
 
@@ -153,10 +277,10 @@ class OtherSourcesPanel(QWidget):
         if not self.ask_download(name, cand):
             return
         ctx = self.ctx
+        generation = self._generation
         item_ = SelectionItem(apple_id, cand.file.username, cand.file.filename, cand.file.size, self._destination)
         downloads_dir, archive_name = ctx.settings.slskd_downloads_dir, ctx.settings.archive_dir_name
-        self._busy = True
-        self._update_button()
+        self._set_busy(True)
         self._say("Queuing…")
 
         def work():
@@ -167,13 +291,16 @@ class OtherSourcesPanel(QWidget):
             return approval
 
         def done(_approval) -> None:
-            self._busy = False
+            if generation != self._generation or self._key != key or import_id != self.ctx.import_id:
+                return
+            self._set_busy(False)
             self.clear()
             self.queued.emit(apple_id)
 
         def failed(exc) -> None:
-            self._busy = False
-            self._update_button()
+            if generation != self._generation or self._key != key or import_id != self.ctx.import_id:
+                return
+            self._set_busy(False)
             self._say("")
             show_error(self, "Could not queue the download", ctx.describe(exc))
 
