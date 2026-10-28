@@ -139,3 +139,15 @@ def test_sign_in_pages_show_no_instruction_line(tmp_path):
         finally:
             page.dispose()
             page.deleteLater()
+
+
+def test_spotify_sign_in_page_hides_the_social_buttons(_qt_application_lifetime):
+    """Google, Apple and Facebook refuse embedded browsers, so only Spotify's own email sign-in is shown."""
+    from s2s.spotify.login import SpotifyLoginWidget
+
+    widget = SpotifyLoginWidget()
+    try:
+        scripts = [s for s in widget._page.scripts().toList() if s.name() == "s2s-email-sign-in-only"]
+        assert len(scripts) == 1 and "accounts" in scripts[0].sourceCode()
+    finally:
+        widget.dispose()

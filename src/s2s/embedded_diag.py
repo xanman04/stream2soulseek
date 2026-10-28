@@ -81,3 +81,48 @@ class Trail:
             page.runJavaScript(PROBE_JS, seen)
         except Exception:  # noqa: BLE001 - diagnostics must never break sign-in
             pass
+
+
+# Google, Apple and Facebook refuse to sign anyone in inside an embedded browser window ("This browser or app may
+# not be secure"), so their buttons can only lead to a dead end. This hides just those three and the "or" line
+# beside them, leaving the service's own email sign-in. It changes only what is shown: nothing about the browser's
+# identity or the page's requests. `__HOST__` is a JavaScript regular expression for the host(s) to act on.
+SOCIAL_SIGN_IN_HIDER_JS = r"""
+(function () {
+  if (!__HOST__.test(location.hostname)) return;
+  var social = /^\s*continue with (google|apple|facebook)\s*$/i;
+  var only_or = /^\s*or\s*$/i;
+  function hide(el) { if (el && el.style.display !== "none") el.style.display = "none"; }
+  function sweep() {
+    var found = false;
+    document.querySelectorAll("button, a, [role=button]").forEach(function (b) {
+      if (!social.test(b.innerText || b.textContent || "")) return;
+      found = true;
+      var wrap = b.parentElement;
+      hide(wrap && wrap.querySelectorAll("button, a, [role=button]").length === 1 ? wrap : b);
+    });
+    if (!found) return;
+    document.querySelectorAll("body *").forEach(function (el) {  // the "or" divider above the social buttons
+      if (el.children.length === 0 && only_or.test(el.textContent || "")) {
+        var row = el.parentElement;
+        hide(row && only_or.test(row.textContent || "") ? row : el);
+      }
+    });
+  }
+  new MutationObserver(sweep).observe(document.documentElement, {childList: true, subtree: true});
+  sweep();
+})();
+"""
+
+
+def social_sign_in_hider(host_pattern: str):
+    """A Qt WebEngine script (all frames) that hides the Google/Apple/Facebook buttons on matching hosts."""
+    from PySide6.QtWebEngineCore import QWebEngineScript
+
+    script = QWebEngineScript()
+    script.setName("s2s-email-sign-in-only")
+    script.setSourceCode(SOCIAL_SIGN_IN_HIDER_JS.replace("__HOST__", host_pattern))
+    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+    script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+    script.setRunsOnSubFrames(True)
+    return script

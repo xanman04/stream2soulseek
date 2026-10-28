@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Spotify sign-in shows only the email field: the Google, Facebook and Apple buttons are hidden because those
+  providers refuse sign-in inside an app window (SoundCloud already did this).
+
 ## 1.4.0 — 2026-10-28
 
 - Spotify: playlists now appear after signing in. Spotify renamed the library field in its reply
