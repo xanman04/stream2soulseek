@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Search skips a track when your tracklist folder already holds a file named for exactly that title and artist
+  (for example "Title - Artist.mp3"), even if S2S did not put it there. It shows as "Already in your folder" and
+  uses no Soulseek search. Any extra word in the file name (a VIP or remix, a second artist, a track number)
+  means it is not treated as the same recording, so that track is searched as before.
 - Spotify sign-in shows only the email field: the Google, Facebook and Apple buttons are hidden because those
   providers refuse sign-in inside an app window (SoundCloud already did this).
 

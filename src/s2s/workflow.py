@@ -40,6 +40,7 @@ from .store import Store
 from .queue_recovery import effective_item, pool_for_track
 
 ALREADY_IMPORTED = "already imported"
+ALREADY_IN_FOLDER = "already in folder"  # a file named for exactly this track is in the tracklist folder
 NOT_SEARCHED = "not searched (search was cancelled before this track)"
 QUICK_SEARCH_S = 8
 # Searches are the scarce resource (about 8 a minute), so a track stops searching at its first good file (exact
@@ -227,6 +228,7 @@ def search_and_match(
     if cache is None:
         cache = _search.SHARED_CACHE  # no query is re-sent while its answer is cached
     done_ids = store.completed_apple_ids(imp.destination)
+    folder_names = organize.library_names(imp.destination)
     declined_peers = declined_peer_reasons(store)
     total = len(tracks)
     results: list[MatchResult] = []
@@ -302,6 +304,8 @@ def search_and_match(
             break
         if t.apple_id in done_ids:
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IMPORTED))
+        elif organize.in_library(t, folder_names):
+            finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IN_FOLDER))
         else:
             todo.append(t)  # a DJ-mixed entry is searched as the song itself (never skipped for its label)
     waiting.update((t.apple_id, t) for t in todo)
