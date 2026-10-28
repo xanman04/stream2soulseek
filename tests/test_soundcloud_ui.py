@@ -233,6 +233,8 @@ def test_sign_in_hides_the_social_buttons_that_cannot_work_in_a_window(_qt_appli
         assert len(scripts) == 1 and scripts[0].runsOnSubFrames()  # the sign-in form is a frame
         source = login_module._EMAIL_ONLY_JS
         assert "secure.soundcloud.com" in source and "google|apple|facebook" in source
+        assert any(s.name() == "s2s-reject-cookies" for s in widget._page.scripts().toList())
+        assert "onetrust-reject-all-handler" in login_module._REJECT_COOKIES_JS  # privacy-preserving answer
         assert "userAgent" not in source and "navigator" not in source  # shows less; never disguises the browser
     finally:
         widget.dispose()

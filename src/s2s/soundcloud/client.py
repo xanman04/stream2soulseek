@@ -6,6 +6,7 @@ streams, transcoding URLs, download URLs, or mutation endpoints.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -17,6 +18,8 @@ from ..models import AppleTrack, Playlist
 from ..sources.base import TrackList
 
 API_ROOT = "https://api-v2.soundcloud.com"
+log = logging.getLogger(__name__)
+LIKES_ID = "soundcloud:likes"  # the account's liked tracks, offered like a playlist
 WEB_ROOT = "https://soundcloud.com"
 ASSET_ROOT = "https://a-v2.sndcdn.com"
 _ASSET_RE = re.compile(r"https://a-v2\.sndcdn\.com/assets/[A-Za-z0-9_./-]+\.js(?:\?[A-Za-z0-9_=&.-]+)?")
@@ -25,7 +28,10 @@ _SAFE_API_PATHS = (
     re.compile(r"^/me$"),
     re.compile(r"^/users/[0-9]+/playlists_without_albums$"),
     re.compile(r"^/users/[0-9]+/playlist_likes$"),
+    re.compile(r"^/users/[0-9]+/track_likes$"),
+    re.compile(r"^/users/[0-9]+/playlists/liked_and_owned$"),
     re.compile(r"^/playlists/[0-9]+$"),
+    re.compile(r"^/playlists$"),
     re.compile(r"^/playlists/[0-9]+/tracks$"),
     re.compile(r"^/tracks$"),
     re.compile(r"^/resolve$"),
@@ -88,16 +94,34 @@ class SoundCloudClient:
         return {"account_id": account_id, "display_name": username.strip()}
 
     def list_playlists(self) -> list[Playlist]:
-        """The account's own playlists first, then the ones it saved (liked) from other people."""
+        """The account's own playlists first, then the ones it saved (liked) from other people.
+
+        One odd entry (deleted, hidden, a made-for-you station) is skipped, never the whole list. If SoundCloud
+        refuses only the saved list, the account's own playlists are still returned."""
         me = self._account()
         user_id = self._safe_id(me.get("id"), "account")
         out: list[Playlist] = []
         seen: set[str] = set()
-        for endpoint, saved in (("playlists_without_albums", False), ("playlist_likes", True)):
-            for playlist in self._playlist_pages(f"{API_ROOT}/users/{user_id}/{endpoint}", saved=saved):
+        likes = me.get("likes_count")
+        if isinstance(likes, int) and not isinstance(likes, bool) and likes > 0:
+            out.append(Playlist(id=LIKES_ID, name="Liked tracks", track_count=likes))
+            seen.add(LIKES_ID)
+
+        def add(playlists) -> None:
+            for playlist in playlists:
                 if playlist.id not in seen:
                     seen.add(playlist.id)
                     out.append(playlist)
+
+        add(self._playlist_pages(f"{API_ROOT}/users/{user_id}/playlists_without_albums", saved=False))
+        try:
+            add(self._playlist_pages(f"{API_ROOT}/users/{user_id}/playlist_likes", saved=True))
+        except SoundCloudAuthError:
+            raise
+        except SoundCloudError as exc:
+            if not out:
+                raise
+            log.warning("SoundCloud saved playlists could not be listed: %s", exc)
         return out
 
     def _playlist_pages(self, base_url: str, *, saved: bool) -> Iterator[Playlist]:
@@ -110,16 +134,42 @@ class SoundCloudClient:
             seen_pages.add(request_url)
             body = self._get_json(request_url, authenticated=True)
             entries, next_url = self._collection(body)
-            for entry in entries:
-                if saved:  # a saved playlist arrives wrapped as {"kind": "like", "playlist": {...}}
-                    entry = entry.get("playlist") if isinstance(entry, Mapping) else None
-                    if not isinstance(entry, Mapping) or not isinstance(entry.get("title"), str):
-                        continue  # deleted or hidden since it was saved
-                yield self._playlist(entry)
+            wrapped = [entry.get("playlist") if saved and isinstance(entry, Mapping) else entry for entry in entries]
+            # a saved playlist can arrive as just {"id": ...}: fetch those in one batch
+            bare = [str(e["id"]) for e in wrapped if isinstance(e, Mapping) and not isinstance(e.get("title"), str)
+                    and str(e.get("id", "")).isdigit()]
+            details = self._hydrate_playlists(bare) if bare else {}
+            for entry in wrapped:
+                if isinstance(entry, Mapping) and not isinstance(entry.get("title"), str):
+                    entry = details.get(str(entry.get("id")))
+                if not isinstance(entry, Mapping):
+                    continue  # deleted or hidden since it was saved
+                try:
+                    yield self._playlist(entry)
+                except SoundCloudError:
+                    continue  # e.g. a made-for-you station, which has no numeric ID
             if not next_url:
                 return
             url = self._safe_next(next_url)
         raise SoundCloudError("SoundCloud playlist listing exceeded the page limit.")
+
+    def _hydrate_playlists(self, ids: list[str]) -> dict[str, Mapping[str, Any]]:
+        result: dict[str, Mapping[str, Any]] = {}
+        unique = list(dict.fromkeys(ids))
+        for start in range(0, len(unique), _BATCH_SIZE):
+            chunk = unique[start:start + _BATCH_SIZE]
+            url = f"{API_ROOT}/playlists?{urlencode({'ids': ','.join(chunk)})}"
+            try:
+                body = self._get_json(self._with_client_id(url), authenticated=True)
+            except SoundCloudAuthError:
+                raise
+            except SoundCloudError:
+                continue  # those entries are left out rather than failing the list
+            if isinstance(body, list):
+                for item in body:
+                    if isinstance(item, Mapping) and item.get("id") is not None:
+                        result[str(item["id"])] = item
+        return result
 
     def resolve_playlist(self, link: str) -> Playlist:
         """A public playlist from its soundcloud.com link: no sign-in, only SoundCloud's public API."""
@@ -132,8 +182,16 @@ class SoundCloudClient:
         signed_in = bool(self._token)  # without a session only public playlists can be read
         if signed_in:
             self._account()
+        if playlist_id == LIKES_ID:
+            return self._liked_tracks()
         ident = self._playlist_id(playlist_id)
-        body = self._get_json(f"{API_ROOT}/playlists/{ident}", authenticated=signed_in)
+        try:
+            body = self._get_json(f"{API_ROOT}/playlists/{ident}", authenticated=signed_in)
+        except SoundCloudError as exc:
+            if "HTTP 404" in str(exc) or "HTTP 410" in str(exc):
+                raise SoundCloudError("This playlist is no longer available on SoundCloud: it may have been "
+                                      "deleted or made private.") from None
+            raise
         if not isinstance(body, Mapping):
             raise SoundCloudError("SoundCloud returned invalid playlist information.")
         raw_tracks = body.get("tracks")
@@ -164,9 +222,31 @@ class SoundCloudClient:
         expected = body.get("track_count")
         if expected is not None and (not isinstance(expected, int) or expected < 0):
             raise SoundCloudError("SoundCloud returned an invalid playlist track count.")
-        if isinstance(expected, int) and len(entries) < expected:
-            raise SoundCloudError("SoundCloud returned an incomplete playlist track listing.")
+        missing = expected - len(entries) if isinstance(expected, int) and len(entries) < expected else 0
+        return self._build_tracks(entries, ident, missing, signed_in)
 
+    def _liked_tracks(self) -> TrackList:
+        """The account's liked tracks, newest first, in the same shape as a playlist."""
+        user_id = self._safe_id(self._account().get("id"), "account")
+        entries: list[Any] = []
+        seen_pages: set[str] = set()
+        url = f"{API_ROOT}/users/{user_id}/track_likes?limit=200&linked_partitioning=true"
+        for _ in range(_MAX_PAGES):
+            request_url = self._with_client_id(url)
+            if request_url in seen_pages:
+                raise SoundCloudError("SoundCloud likes pagination repeated a page.")
+            seen_pages.add(request_url)
+            page, next_url = self._collection(self._get_json(request_url, authenticated=True))
+            # each like is {"kind": "like", "track": {...}}; a deleted track has no "track"
+            entries.extend(e["track"] for e in page if isinstance(e, Mapping) and isinstance(e.get("track"), Mapping))
+            if not next_url:
+                break
+            url = self._safe_next(next_url)
+        else:
+            raise SoundCloudError("SoundCloud likes exceeded the page limit.")
+        return self._build_tracks(entries, "likes", 0, True)
+
+    def _build_tracks(self, entries: list[Any], ident: str, missing: int, signed_in: bool) -> TrackList:
         original_ids: list[str | None] = []
         unresolved: list[str] = []
         for entry in entries:
@@ -195,6 +275,9 @@ class SoundCloudClient:
                 tracks.append(self._make_track(track, ident, position))
             except (TypeError, ValueError):
                 skipped.append(f"Track {position + 1} has incomplete SoundCloud metadata.")
+        if missing:  # tracks the owner removed or SoundCloud hides from this account: listing is otherwise complete
+            skipped.append(f"{missing} track{'s' if missing != 1 else ''} in this playlist "
+                           f"{'are' if missing != 1 else 'is'} not available on SoundCloud.")
         return TrackList(tracks, skipped=skipped)
 
     def _account(self) -> dict[str, Any]:
@@ -332,7 +415,7 @@ class SoundCloudClient:
         if not isinstance(title, str):
             raise SoundCloudError("SoundCloud returned a playlist without a title.")
         count = body.get("track_count")
-        return Playlist(id=f"soundcloud:playlist:{ident}", name=title,
+        return Playlist(id=f"soundcloud:playlist:{ident}", name=title.strip() or "Untitled playlist",
                         track_count=count if isinstance(count, int) and count >= 0 else None)
 
     @staticmethod

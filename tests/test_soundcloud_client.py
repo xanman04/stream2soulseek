@@ -238,3 +238,100 @@ def test_source_keeps_non_auth_errors_from_clearing_session():
     with pytest.raises(SourceAuthError, match="expired"):
         source.list_playlists()
 
+
+
+def _saved_handler(saved_body, *, tracks_body=None, saved_status=200):
+    def handler(request):
+        path = request.url.path
+        if path == "/me":
+            return httpx.Response(200, json=me())
+        if path.endswith("/playlists_without_albums"):
+            return httpx.Response(200, json={"collection": [playlist(1, "Mine")], "next_href": None})
+        if path.endswith("/playlist_likes"):
+            return httpx.Response(saved_status, json=saved_body)
+        if path == "/playlists":  # batch lookup of saved playlists that arrived as bare IDs
+            assert parse_qs(request.url.query.decode())["ids"] == ["31,32"]  # both bare IDs, one request
+            return httpx.Response(200, json=[playlist(31, "Hydrated Saved")])
+        if path.startswith("/playlists/") and tracks_body is not None:
+            return httpx.Response(200, json=tracks_body)
+        return httpx.Response(404, json={})
+    return handler
+
+
+def test_saved_playlists_survive_stubs_stations_and_blank_titles():
+    saved = {"collection": [
+        {"kind": "like", "playlist": playlist(30, "  ")},                       # blank title
+        {"kind": "like", "playlist": {"id": 31}},                               # bare ID: looked up
+        {"kind": "like", "playlist": {"id": "soundcloud:system-playlists:x", "title": "Station"}},  # no numeric ID
+        {"kind": "like", "playlist": {"id": 32}},                               # gone: lookup returns nothing
+        {"kind": "like"},                                                       # no playlist at all
+        "junk",
+    ], "next_href": None}
+    with api_client(_saved_handler(saved)) as client:
+        items = client.list_playlists()
+    assert [p.name for p in items] == ["Mine", "Untitled playlist", "Hydrated Saved"]
+
+
+def test_a_refused_saved_list_still_returns_the_accounts_own_playlists():
+    with api_client(_saved_handler({}, saved_status=500)) as client:
+        assert [p.name for p in client.list_playlists()] == ["Mine"]
+
+
+def test_an_expired_session_on_the_saved_list_is_not_hidden():
+    with api_client(_saved_handler({}, saved_status=401)) as client:
+        with pytest.raises(SoundCloudAuthError):
+            client.list_playlists()
+
+
+def test_someone_elses_playlist_with_removed_tracks_loads_with_a_note():
+    body = {"id": 77, "title": "Theirs", "track_count": 3, "tracks": [full_track(1, "One"), full_track(2, "Two")]}
+    def handler(request):
+        if request.url.path == "/me":
+            return httpx.Response(200, json=me())
+        return httpx.Response(200, json=body)
+    with api_client(handler) as client:
+        tracks = client.get_playlist_tracks("soundcloud:playlist:77")
+    assert [t.name for t in tracks] == ["One", "Two"]
+    assert tracks.skipped == ["1 track in this playlist is not available on SoundCloud."]
+
+
+def test_a_playlist_deleted_since_it_was_saved_gets_a_plain_message():
+    def handler(request):
+        return httpx.Response(200, json=me()) if request.url.path == "/me" else httpx.Response(404, json={})
+    with api_client(handler) as client:
+        with pytest.raises(SoundCloudError, match="no longer available"):
+            client.get_playlist_tracks("soundcloud:playlist:77")
+
+
+def test_liked_tracks_are_offered_first_and_read_like_a_playlist():
+    def handler(request):
+        path = request.url.path
+        if path == "/me":
+            return httpx.Response(200, json={**me(), "likes_count": 3})
+        if path.endswith("/playlists_without_albums") or path.endswith("/playlist_likes"):
+            return httpx.Response(200, json={"collection": [], "next_href": None})
+        if path.endswith("/track_likes"):
+            return httpx.Response(200, json={"collection": [
+                {"kind": "like", "track": full_track(5, "Liked One")},
+                {"kind": "like", "track": {"id": 6}},   # stub: hydrated below
+                {"kind": "like"},                        # deleted since it was liked
+            ], "next_href": None})
+        if path == "/tracks":
+            return httpx.Response(200, json=[full_track(6, "Liked Two")])
+        raise AssertionError(request.url)
+
+    with api_client(handler) as client:
+        playlists = client.list_playlists()
+        assert [(p.id, p.name, p.track_count) for p in playlists] == [("soundcloud:likes", "Liked tracks", 3)]
+        tracks = client.get_playlist_tracks("soundcloud:likes")
+    assert [t.name for t in tracks] == ["Liked One", "Liked Two"]
+    assert tracks[0].apple_id.startswith("soundcloud:likes:track:5")
+
+
+def test_no_liked_tracks_means_no_liked_entry():
+    def handler(request):
+        if request.url.path == "/me":
+            return httpx.Response(200, json={**me(), "likes_count": 0})
+        return httpx.Response(200, json={"collection": [], "next_href": None})
+    with api_client(handler) as client:
+        assert client.list_playlists() == []

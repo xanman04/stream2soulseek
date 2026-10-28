@@ -16,7 +16,8 @@ Sign-in here is by email and password. Google, Apple and Facebook refuse sign-in
 window, so S2S hides those three buttons rather than leave a dead end, and SoundCloud's bot protection may show a
 slider challenge to solve. S2S does not disguise its browser to get around either. An account that only has
 Google login can set a password from SoundCloud's "Need help?" link, or use the public-link route above.
-The list in **Choose playlist** shows the playlists you made, then the ones you saved from other people.
+The list in **Choose playlist** shows your **Liked tracks**, the playlists you made, then the ones you saved from
+other people. SoundCloud's cookie banner is answered with "Reject all" automatically.
 
 If verification fails temporarily, choose **Retry verification** without signing in again. A rejected session
 starts a fresh sign-in page.
