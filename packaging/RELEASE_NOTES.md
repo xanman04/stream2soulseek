@@ -1,25 +1,25 @@
 ## What's changed
 
-- **A cleaner native interface.** Refined light and dark themes, clearer headings, more readable tables,
-  service icons and a more organised sidebar keep the familiar workflow easier to scan.
-- **Clearer Windows updates.** Download progress and a separate installation window keep you informed while
-  S2S closes and reopens. The window follows your app theme and provides recovery actions if an update fails.
-- **Less installation work.** The Windows installer keeps unchanged runtime files in place.
-- **Reusable search results.** Candidates are cached locally for up to 12 hours across restarts, helping
-  repeated or overlapping searches. Matching rules and download confirmation remain in effect.
-- **Fairer searching.** Waiting tracks take turns, and capped responses are handled more conservatively when
-  reusing results. Search frequency is unchanged; fresh playlists of unrelated tracks still take time.
-
-**Updating from 1.2.0:** that version's updater still handles this installation. The new Windows progress
-window applies to future updates started from 1.3.1. You can install 1.3.1 manually using the links below.
+- **Safer artist matching.** A name inside a longer artist name, such as Lash inside Dominic Lash, now
+  requires review rather than counting as a confident match that can end the search early.
+- **Fresh searches when cached results are inadequate.** Responses that cannot satisfy your recording rules
+  can refresh after the existing repeat cooldown. Successful cache hits retain their normal lifetime.
+- **Search for another copy during downloads.** The Downloads page now lets you search Soulseek in your own
+  words when a track needs attention. Downloading a replacement still requires confirmation.
+- **Clearer file review.** Alternative-file details separate the warnings, filename and Soulseek folder.
+  Connection statuses use consistent capitalization across services.
+- **More responsive Windows setup.** Existing-file comparison runs in a separate checksum worker with visible
+  progress. Unchanged runtime files are preserved, and changed files are checked again before being skipped.
+- **Direct app relaunch.** Windows setup and the updater launch S2S directly. Startup timing logs help diagnose
+  delays before the main window appears; a cold-start speed improvement has not yet been confirmed live.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.1/S2S-1.3.1-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.1/S2S-1.3.1-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.1/S2S-1.3.1-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.2/S2S-1.3.2-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.2/S2S-1.3.2-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.3.2/S2S-1.3.2-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -32,10 +32,14 @@ for first-launch security prompts, checksum checks and account setup.
 
 ## Known limitations
 
-Mac live sign-in and transfers are awaiting initial user testing. The Mac app is ad hoc signed, without
+Mac live testing has covered sign-in, searching, review and raw Soulseek downloads. Verification and copying
+into the final tracklist folder still need a live retest following fixes. The Mac app is ad hoc signed without
 Developer ID signing or notarization; Windows builds are not publisher-signed. OS security prompts are expected.
+
+Search recall and Windows cold-start timing still need live testing with this version. Search rate limits
+and recording-version rules remain in effect.
 
 [Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) ·
 [Report a problem](https://github.com/xanman04/stream2soulseek/issues) ·
-[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.2.0...v1.3.1)
+[Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.3.1...v1.3.2)
 

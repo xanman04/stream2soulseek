@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.2 — Unreleased
+## 1.3.2 — 2026-10-28
 
 - Partial artist names inside longer folder names now require review instead of being treated as confident
   matches. These uncertain files do not count toward ending the search early.
