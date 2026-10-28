@@ -102,9 +102,8 @@ class SoundCloudClient:
         user_id = self._safe_id(me.get("id"), "account")
         out: list[Playlist] = []
         seen: set[str] = set()
-        likes = me.get("likes_count")
-        if isinstance(likes, int) and not isinstance(likes, bool) and likes > 0:
-            out.append(Playlist(id=LIKES_ID, name="Liked tracks", track_count=likes))
+        if self._has_liked_tracks(user_id):  # "likes_count" also counts liked albums, so ask for an actual track
+            out.append(Playlist(id=LIKES_ID, name="Liked tracks", track_count=None))
             seen.add(LIKES_ID)
 
         def add(playlists) -> None:
@@ -124,6 +123,16 @@ class SoundCloudClient:
             log.warning("SoundCloud saved playlists could not be listed: %s", exc)
         return out
 
+    def _has_liked_tracks(self, user_id: str) -> bool:
+        url = f"{API_ROOT}/users/{user_id}/track_likes?limit=5&linked_partitioning=true"
+        try:
+            entries, _next = self._collection(self._get_json(self._with_client_id(url), authenticated=True))
+        except SoundCloudAuthError:
+            raise
+        except SoundCloudError:
+            return False
+        return any(isinstance(e, Mapping) and isinstance(e.get("track"), Mapping) for e in entries)
+
     def _playlist_pages(self, base_url: str, *, saved: bool) -> Iterator[Playlist]:
         seen_pages: set[str] = set()
         url = f"{base_url}?limit=200&linked_partitioning=true"
@@ -142,8 +151,8 @@ class SoundCloudClient:
             for entry in wrapped:
                 if isinstance(entry, Mapping) and not isinstance(entry.get("title"), str):
                     entry = details.get(str(entry.get("id")))
-                if not isinstance(entry, Mapping):
-                    continue  # deleted or hidden since it was saved
+                if not isinstance(entry, Mapping) or entry.get("is_album") is True:
+                    continue  # deleted or hidden since it was saved; albums, EPs and singles are not playlists
                 try:
                     yield self._playlist(entry)
                 except SoundCloudError:

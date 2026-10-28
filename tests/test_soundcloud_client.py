@@ -322,16 +322,21 @@ def test_liked_tracks_are_offered_first_and_read_like_a_playlist():
 
     with api_client(handler) as client:
         playlists = client.list_playlists()
-        assert [(p.id, p.name, p.track_count) for p in playlists] == [("soundcloud:likes", "Liked tracks", 3)]
+        assert [(p.id, p.name) for p in playlists] == [("soundcloud:likes", "Liked tracks")]
         tracks = client.get_playlist_tracks("soundcloud:likes")
     assert [t.name for t in tracks] == ["Liked One", "Liked Two"]
     assert tracks[0].apple_id.startswith("soundcloud:likes:track:5")
 
 
-def test_no_liked_tracks_means_no_liked_entry():
+def test_liked_albums_alone_do_not_make_a_liked_tracks_entry_or_a_playlist():
     def handler(request):
         if request.url.path == "/me":
-            return httpx.Response(200, json={**me(), "likes_count": 0})
+            return httpx.Response(200, json={**me(), "likes_count": 16})  # all of them albums
+        if request.url.path.endswith("/playlist_likes"):
+            return httpx.Response(200, json={"collection": [
+                {"kind": "like", "playlist": {**playlist(8, "Some Album"), "is_album": True}},
+                {"kind": "like", "playlist": {**playlist(9, "A Playlist"), "is_album": False}},
+            ], "next_href": None})
         return httpx.Response(200, json={"collection": [], "next_href": None})
     with api_client(handler) as client:
-        assert client.list_playlists() == []
+        assert [p.name for p in client.list_playlists()] == ["A Playlist"]
