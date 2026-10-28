@@ -27,6 +27,7 @@ _SAFE_API_PATHS = (
     re.compile(r"^/playlists/[0-9]+$"),
     re.compile(r"^/playlists/[0-9]+/tracks$"),
     re.compile(r"^/tracks$"),
+    re.compile(r"^/resolve$"),
 )
 _MAX_PAGES = 200
 _BATCH_SIZE = 50
@@ -109,10 +110,19 @@ class SoundCloudClient:
             url = self._safe_next(next_url)
         raise SoundCloudError("SoundCloud playlist listing exceeded the page limit.")
 
+    def resolve_playlist(self, link: str) -> Playlist:
+        """A public playlist from its soundcloud.com link: no sign-in, only SoundCloud's public API."""
+        body = self._get_json(f"{API_ROOT}/resolve?{urlencode({'url': link})}", authenticated=False)
+        if not isinstance(body, Mapping) or body.get("kind") != "playlist":
+            raise SoundCloudError("That SoundCloud link is not a playlist.")
+        return self._playlist(body)
+
     def get_playlist_tracks(self, playlist_id: str) -> TrackList:
-        self._account()
+        signed_in = bool(self._token)  # without a session only public playlists can be read
+        if signed_in:
+            self._account()
         ident = self._playlist_id(playlist_id)
-        body = self._get_json(f"{API_ROOT}/playlists/{ident}", authenticated=True)
+        body = self._get_json(f"{API_ROOT}/playlists/{ident}", authenticated=signed_in)
         if not isinstance(body, Mapping):
             raise SoundCloudError("SoundCloud returned invalid playlist information.")
         raw_tracks = body.get("tracks")
@@ -134,7 +144,7 @@ class SoundCloudClient:
             if url in seen_pages:
                 raise SoundCloudError("SoundCloud playlist pagination repeated a page.")
             seen_pages.add(url)
-            page = self._get_json(url, authenticated=True)
+            page = self._get_json(url, authenticated=signed_in)
             more, next_url = self._collection(page)
             entries.extend(more)
         else:
@@ -158,7 +168,7 @@ class SoundCloudClient:
                 continue
             if not self._has_track_metadata(item) and original_ids[index] is not None:
                 unresolved.append(original_ids[index])
-        hydrated = self._hydrate(unresolved)
+        hydrated = self._hydrate(unresolved, authenticated=signed_in)
 
         tracks: list[AppleTrack] = []
         skipped: list[str] = []
@@ -182,13 +192,13 @@ class SoundCloudClient:
         assert self._me is not None
         return self._me
 
-    def _hydrate(self, ids: list[str]) -> dict[str, Mapping[str, Any]]:
+    def _hydrate(self, ids: list[str], *, authenticated: bool = True) -> dict[str, Mapping[str, Any]]:
         result: dict[str, Mapping[str, Any]] = {}
         unique = list(dict.fromkeys(ids))
         for start in range(0, len(unique), _BATCH_SIZE):
             chunk = unique[start:start + _BATCH_SIZE]
             url = f"{API_ROOT}/tracks?{urlencode({'ids': ','.join(chunk)})}"
-            body = self._get_json(self._with_client_id(url), authenticated=True)
+            body = self._get_json(self._with_client_id(url), authenticated=authenticated)
             if not isinstance(body, list):
                 raise SoundCloudError("SoundCloud returned invalid track details.")
             for item in body:

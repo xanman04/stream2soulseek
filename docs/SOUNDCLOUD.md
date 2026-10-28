@@ -1,13 +1,23 @@
 # SoundCloud playlist source
 
-Open **SoundCloud** in the sidebar, enable web sign-in, and choose **Sign in to SoundCloud**.
-Sign in on SoundCloud's page inside S2S. After the session is verified, S2S shows a native account
-status page. Choose **1. Choose playlist** to browse the account's playlists and preview their tracks.
-The remaining search, review, confirmation, download and import steps are shared with the other sources.
+## Open a public playlist by link (no sign-in)
 
-If verification fails temporarily, choose **Retry verification** without signing in again. A rejected
-session offers **Restart sign-in**. **Cancel sign-in** returns to the account page and preserves any
-previously saved connection; a late verification result cannot replace it after cancellation.
+In **Choose playlist**, paste a public SoundCloud playlist link (`soundcloud.com/<user>/sets/<name>`, from the
+playlist's Share menu) next to the Spotify box and choose **Open**. A link-only playlist's secret link works too.
+This reads only SoundCloud's public metadata and needs no account.
+
+## Signing in to read your own playlists
+
+Open **SoundCloud** in the sidebar and choose **Sign in to SoundCloud**, then sign in on SoundCloud's page inside
+S2S. After the session is verified, S2S shows a native account status page, and **Choose playlist** lists the
+account's playlists. The remaining steps are shared with the other sources.
+
+Limits of sign-in inside an app window: Google refuses "Continue with Google" in any embedded browser, and
+SoundCloud's bot protection may show a slider challenge. S2S does not disguise its browser to get around either;
+use the public-link route above when sign-in is blocked.
+
+If verification fails temporarily, choose **Retry verification** without signing in again. A rejected session
+starts a fresh sign-in page.
 
 This integration reads playlist and track metadata through SoundCloud's unofficial website API.
 It needs no developer application credentials. It does not request SoundCloud audio, download links or
