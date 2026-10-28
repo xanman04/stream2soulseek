@@ -1,10 +1,10 @@
 # S2S (Stream to Soulseek): development instructions and handoff
 
-Updated: 2026-10-25. Owner: Xander. Development workspace: `C:\DJ\dev`.
+Updated: 2026-10-25. Owner: the maintainer (see the repository owner).
 
-This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. All project files live under `C:\DJ\dev`; the rest of `C:\DJ` is the user's music and DJ workspace, not part of the project. This is a development plan, not evidence that the integrations work.
+This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. All project files live in the repository checkout; anything outside it (the maintainer's music library and other workspaces) is not part of the project. This is a development plan, not evidence that the integrations work.
 
-## Project-wide rules (formerly `C:\DJ\AGENTS.md`)
+## Project-wide rules
 
 Release and credentials:
 
@@ -18,7 +18,7 @@ Release and credentials:
 
 File workflow:
 
-- `C:\DJ\Tracks` contains separate flat libraries. New non-DnB playlists belong in a chosen sibling library, not automatically in `Tracks\DnB`.
+- The maintainer's music folder contains separate flat libraries (for example one per genre). New non-DnB playlists belong in a chosen sibling library, not automatically in the DnB one.
 - Treat `Tracks\Soulseek` as raw download staging/archive. `collect_songs.sh` is deprecated and must not define the new workflow.
 - Search first and show every proposed file, version, format, bitrate, and unresolved track for review. Queue no downloads until the user explicitly confirms the reviewed selection. Changed selections need fresh confirmation.
 - By default prefer exact requested versions, with an extended mix of the same remix only as fallback; always reject different remixes and VIP mismatches; by default also reject radio edits, live recordings and `[Mixed]` tracks, and prefer MP3 320 then FLAC within eligible version tiers. These defaults are user-configurable (see the recording and format policy section) except the remix/VIP identity rules.
@@ -26,7 +26,7 @@ File workflow:
 
 ## Goal and scope
 
-Build a personal Windows desktop application that reads selected Apple Music playlists, searches Soulseek for the corresponding recordings, presents proposed files for review, and downloads only after explicit confirmation. Organize completed files into separate flat libraries under `C:\DJ\Tracks`.
+Build a personal Windows desktop application that reads selected Apple Music playlists, searches Soulseek for the corresponding recordings, presents proposed files for review, and downloads only after explicit confirmation. Organize completed files into separate flat libraries under a library root the user chooses.
 
 - The user explicitly wants a native app-like GUI, not a localhost website or a browser-hosted interface.
 - Agreed direction: Python backend, PySide6/Qt native widgets, and Qt WebEngine embedded only where needed for Apple authentication.
@@ -72,7 +72,7 @@ Build a personal Windows desktop application that reads selected Apple Music pla
 ## Current filesystem and library semantics
 
 ```text
-C:\DJ\                          user's DJ workspace; no project files at this level
+<workspace>\                    the maintainer's DJ workspace; no project files at this level
   dev\                         Git repo: all application source, docs, tests and this handoff
   Tracks\
     DnB\                       one existing flat music library
@@ -81,21 +81,14 @@ C:\DJ\                          user's DJ workspace; no project files at this le
       complete\
         collect_songs.sh        DEPRECATED; do not use as workflow
         OLD\                   original downloads in peer/album subfolders
-  mixing shit\                 personal practice audio; outside import workflow
+  <other folders>\           personal audio; outside import workflow
 ```
 
-Important correction from the user: `DnB` is NOT a universal destination. A non-DnB playlist/import should create or use a chosen sibling flat library, e.g. `C:\DJ\Tracks\House`. Let the user select/name the destination. Do not create artist/album nesting inside the final library.
+Important correction from the user: `DnB` is NOT a universal destination. A non-DnB playlist/import should create or use a chosen sibling flat library, e.g. a `House` folder next to the DnB one. Let the user select/name the destination. Do not create artist/album nesting inside the final library.
 
 Observed naming convention: `Title (Version) - Artist.ext`, with some variation. Preserve meaningful remix/VIP/version text. Resolve Windows-invalid filename characters and collisions without overwriting files or changing version identity.
 
-Read-only inspection on 2026-10-24 found:
-
-- `Tracks\DnB`: 65 tracks (50 MP3, 12 FLAC, 3 M4A), about 892 MiB.
-- `Tracks\Soulseek\complete\OLD`: 66 tracks in nested source folders, about 818 MiB.
-- `Tracks\Soulseek\downloading`: empty.
-- 52 DnB files have byte-identical SHA-256 copies in OLD, often under different filenames. The remaining files are not automatically missing songs: tags or contents may differ.
-- `mixing shit`: five WAV practice/sample files.
-- These counts are a snapshot; recheck before relying on them.
+A read-only inspection of the maintainer's library on 2026-10-24 found flat genre libraries, a raw download archive with nested peer/album folders (some files duplicated byte-for-byte under different names), and a few unrelated practice files. The details are deliberately not recorded here.
 
 The old collection script flattens downloads indiscriminately, copies originals, and adds numbered duplicates on collisions. The user explicitly deprecated it. There is no obligation to reproduce its implementation.
 
@@ -183,7 +176,7 @@ The proposed Python wrapper is https://github.com/bigoulours/slskd-python-api . 
 
 Local setup:
 
-- Python 3.13.1 was confirmed. `ffprobe` exists at `C:\ffmpeg\bin\ffprobe.exe`.
+- Python 3.13.1 was confirmed. `ffprobe` was found on the development machine's PATH.
 - Docker CLI is installed; its Linux engine was not running when checked on October 15. slskd can also run as native Windows binaries. Choose after checking current prerequisites; do not require Docker unnecessarily.
 - 2026-10-24: slskd 0.26.2 (win-x64, SHA-256 verified against GitHub's digest) is installed at `%LOCALAPPDATA%\Programs\slskd\0.26.2`. The app now manages it (`src/s2s/slskd/service.py`): on start it regenerates `%LOCALAPPDATA%\S2S\slskd\slskd.yml`, launches slskd with `--app-dir` and no console window, and stops it on exit. The API runs on 127.0.0.1:5030 only, with HTTPS disabled, no shares and file retention off. Downloads go to `<downloads>\<username>\<source dir>` (`Tracks\Soulseek\complete` for the owner), and incomplete files to `%LOCALAPPDATA%\S2S\slskd\incomplete` (changed 2026-10-26 from a sibling `downloading` folder, which appeared next to the owner's tracklist folders). The Soulseek login is asked for once in a popup, saved with DPAPI only after slskd logs in, reused on later starts, and passed to slskd via `SLSKD_SLSK_USERNAME` / `SLSKD_SLSK_PASSWORD`. A live check confirmed the managed launch, the loopback-only listener and a clean stop. A real Soulseek login, search and download have not been run yet.
 - The live OpenAPI definition (0.26.2) confirmed the search, transfer, enqueue and cancel paths, the `remove` query flag, the transfer state flag names, and that `GET /application` returns `server.isLoggedIn`. Search response field shapes are still unverified until a logged-in search runs.
@@ -216,7 +209,7 @@ The user explicitly requires that personal credentials never become hardcoded or
 - Store secrets outside the repo in per-user app data with Windows-protected storage (e.g. Credential Manager/DPAPI). Restrict access to session/browser-profile files as well. Do not claim encryption without verification.
 - Never log tokens, cookies, Authorization headers, passwords or Soulseek keys. Scrub errors, diagnostic dumps, HTTP traces, screenshots and test fixtures.
 - Use synthetic accounts/tokens for automated tests. No real authenticated profiles, playlist exports, downloads or personal audio in source control or build packages.
-- `C:\DJ\dev` is its own Git repository; `C:\DJ\dev\.gitignore` excludes audio, credentials, sessions, local state and build artifacts. There is deliberately no repository or `.gitignore` at `C:\DJ`.
+- The project folder is its own Git repository; its `.gitignore` excludes audio, credentials, sessions, local state and build artifacts. The parent workspace folder deliberately has no repository.
 - Use placeholder-only templates. Review tracked files, history and explicit release contents before any future publication; ignore rules are not retroactive or sufficient alone.
 - Public release and legal review are deferred. Do not imply that private development makes unauthorized downloading/sharing lawful, or treat a disclaimer as legal protection.
 
@@ -261,4 +254,4 @@ Do not replace these milestones with a mock UI and call the app complete. Report
 
 ## Starting state
 
-Only instructions and Git exclusions exist in `C:\DJ`; no application code, slskd installation, or real Apple session has been created by this conversation. Start with milestone 1. The user has approved the desktop-app development plan, not public release or unreviewed bulk downloads.
+This section is historical: at the start only instructions and Git exclusions existed; no application code, slskd installation, or real Apple session has been created by this conversation. Start with milestone 1. The user has approved the desktop-app development plan, not public release or unreviewed bulk downloads.

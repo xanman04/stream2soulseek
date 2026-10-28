@@ -14,7 +14,7 @@ The app runs [slskd](https://github.com/slskd/slskd) for you; you only install i
    The app picks the newest version found there. To use another location, set `"slskd_exe"` under `extra`
    in `%LOCALAPPDATA%\S2S\settings.json`.
 2. **Start the app.** On first start it asks for the **slskd downloads folder** (for example
-   `C:\DJ\Tracks\Soulseek\complete`). Unfinished downloads are kept in S2S's own data folder
+   `C:\Music\Soulseek\complete`). Unfinished downloads are kept in S2S's own data folder
    (`%LOCALAPPDATA%\S2S\slskd\incomplete`; override with `"slskd_incomplete_dir"` under `extra`).
 3. **Log in to Soulseek once.** The login popup appears when no login is saved. Close SoulseekQt or any other
    client using the same account first, because two clients on one account disconnect each other. Soulseek

@@ -236,7 +236,7 @@ class SelectionItem:
     username: str
     filename: str
     size: int
-    destination: str  # absolute path of the chosen flat library, e.g. C:\\DJ\\Tracks\\House
+    destination: str  # absolute path of the chosen flat library, e.g. C:\\Music\\House
 
 
 @dataclass(frozen=True)

@@ -463,7 +463,7 @@ def test_settings_defaults_and_old_settings_json_migrates(tmp_path, monkeypatch)
     assert d.slskd_downloads_dir == "" and d.archive_dir_name == "OLD" and d.auto_import is True
     assert not hasattr(d, "tracks_root") and d.recent_destinations == []
     config.settings_path().write_text(
-        '{"tracks_root": "C:\\\\DJ\\\\Tracks", "slskd_downloads_dir": "D:\\\\dl", "ffprobe_path": "", "bogus": 1}',
+        '{"tracks_root": "C:\\\\Music", "slskd_downloads_dir": "D:\\\\dl", "ffprobe_path": "", "bogus": 1}',
         encoding="utf-8")
     s = config.load_settings()
     assert s.slskd_downloads_dir == "D:\\dl" and s.auto_import and s.archive_dir_name == "OLD"
