@@ -78,11 +78,9 @@ class AppContext:
         from ..sources import AppleSource
         from ..sources.spotify import SpotifySource
 
-        sources = [AppleSource(self.secrets), SpotifySource(self.secrets)]
-        if self.settings.extra.get("soundcloud_web_session_enabled", False):
-            from ..sources.soundcloud import SoundCloudSource
-            sources.append(SoundCloudSource(self.secrets))
-        return sources
+        from ..sources.soundcloud import SoundCloudSource
+
+        return [AppleSource(self.secrets), SpotifySource(self.secrets), SoundCloudSource(self.secrets)]
 
     def slskd_client(self, *, url: str | None = None, api_key: str | None = None) -> SlskdClient:
         key = api_key if api_key else self.secrets.get(SLSKD_API_KEY)

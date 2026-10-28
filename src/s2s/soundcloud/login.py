@@ -6,9 +6,10 @@ import re
 from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QLabel, QSizePolicy, QVBoxLayout, QWidget
 import shiboken6
 
+from ..embedded_diag import Trail, navigation_allowed
 from .session import normalize_session
 
 START_URL = "https://soundcloud.com/signin"
@@ -18,7 +19,7 @@ _DOMAINS = {"soundcloud.com", ".soundcloud.com", "secure.soundcloud.com", ".secu
 def origin_label(view, parent):
     label = QLabel("https://soundcloud.com", parent)
     label.setTextFormat(Qt.TextFormat.PlainText)
-    label.setWordWrap(True)
+    label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     def update(url):
         host = url.host()
         port = url.port()
@@ -40,14 +41,24 @@ def cookie_candidate(cookie):
         return None
 
 
+TRAIL = Trail("SoundCloud sign-in")
+
+
 class _Page(QWebEnginePage):
     def __init__(self, profile, owner, parent):
         super().__init__(profile, parent)
         self.owner = owner
         self.settings().setUnknownUrlSchemePolicy(QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes)
+        self.loadFinished.connect(lambda ok: TRAIL.loaded(self, ok))
+
+    def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
+        TRAIL.console(level, message, line, source)
 
     def acceptNavigationRequest(self, url, navigation_type, is_main_frame):  # noqa: N802
-        return url.scheme() == "https" or url.toString() == "about:blank"
+        if navigation_allowed(url, is_main_frame):
+            return True
+        TRAIL.refused(url, is_main_frame)
+        return False
 
     def createWindow(self, window_type):  # noqa: N802
         dialog = QDialog(self.owner)
@@ -60,7 +71,7 @@ class _Page(QWebEnginePage):
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(origin_label(view, dialog))
-        layout.addWidget(view)
+        layout.addWidget(view, 1)
         page.windowCloseRequested.connect(dialog.close)
         key = id(dialog)
         self.owner._popups[key] = (dialog, view, page)
@@ -91,9 +102,7 @@ class SoundCloudLoginWidget(QWidget):
         self._page.loadFinished.connect(self._loaded)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.origin = origin_label(self._view, self)
-        layout.addWidget(self.origin)
-        layout.addWidget(self._view)
+        layout.addWidget(self._view, 1)  # just the sign-in page; no address line or buttons
 
     def start(self):
         if self._closed:
@@ -112,7 +121,11 @@ class SoundCloudLoginWidget(QWidget):
         self.session_candidate.emit(candidate)
 
     def _loaded(self, ok):
-        if self._capture_enabled and not self._closed and not ok:
+        if not self._capture_enabled or self._closed:
+            return
+        if ok:
+            self.status_changed.emit("Sign in to SoundCloud in the page below.")  # replaces "Loading…"
+        else:
             self.login_failed.emit("SoundCloud sign-in could not load. Check your connection and try again.")
 
     def clear_session(self):

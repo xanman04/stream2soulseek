@@ -11,6 +11,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
+from ..embedded_diag import Trail, navigation_allowed
 from .session import _valid_cookie
 
 START_URL = "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F"
@@ -34,6 +35,9 @@ def _cookie_record(cookie: QNetworkCookie) -> dict | None:
                           "http_only": cookie.isHttpOnly(), "expires": expires})
 
 
+TRAIL = Trail("Spotify sign-in")
+
+
 class _EmbeddedPage(QWebEnginePage):
     def __init__(self, profile, controller, parent):
         super().__init__(profile, parent)
@@ -41,10 +45,16 @@ class _EmbeddedPage(QWebEnginePage):
         self.settings().setUnknownUrlSchemePolicy(
             QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes
         )
+        self.loadFinished.connect(lambda ok: TRAIL.loaded(self, ok))
+
+    def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
+        TRAIL.console(level, message, line, source)
 
     def acceptNavigationRequest(self, url, navigation_type, is_main_frame):  # noqa: N802
-        scheme = url.scheme().lower()
-        return scheme == "https" or (scheme == "about" and url.toString() == "about:blank")
+        if navigation_allowed(url, is_main_frame):
+            return True
+        TRAIL.refused(url, is_main_frame)
+        return False
 
     def createWindow(self, window_type):  # noqa: N802
         dlg = QDialog(self.controller)

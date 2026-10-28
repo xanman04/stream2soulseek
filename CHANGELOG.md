@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- SoundCloud: no more "Enable SoundCloud web sign-in" checkbox. The page is one "Sign in to SoundCloud" button,
+  and a saved session is the connection. The sign-in window now fills the page (it was squeezed at the bottom),
+  with no address line or Restart/Cancel buttons; leaving the page cancels the sign-in. The "Loading…" message
+  clears once the page has loaded, and a rejected sign-in starts a fresh sign-in page.
+- Spotify/SoundCloud sign-in: the embedded browsers allow the standard inline frames sign-in pages use, and log a
+  privacy-safe trail (browser warnings and errors without query strings, refused navigations, which known error
+  phrases the page shows; never page text, form values or cookies) to help find why Spotify's sign-in ends at
+  "Something went wrong".
+
 ## 1.3.3 — 2026-10-28
 
 - Windows setup removes obsolete program files, legacy in-folder uninstaller files and directories absent
