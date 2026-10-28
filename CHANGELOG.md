@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-10-28
 
 - Spotify: playlists now appear after signing in. Spotify renamed the library field in its reply
   (`libraryV3`, entries named `_uri`, names nested under `data`) and S2S only knew the old shape, so a successful

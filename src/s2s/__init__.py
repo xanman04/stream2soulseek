@@ -3,4 +3,4 @@
 Copyright (C) 2026 xanman04. Licensed under the GNU GPL v3 or later; see LICENSE.
 """
 
-__version__ = "1.3.3"
+__version__ = "1.4.0"
