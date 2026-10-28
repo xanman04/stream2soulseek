@@ -19,7 +19,6 @@ from ..sources.base import TrackList
 
 API_ROOT = "https://api-v2.soundcloud.com"
 log = logging.getLogger(__name__)
-LIKES_ID = "soundcloud:likes"  # the account's liked tracks, offered like a playlist
 WEB_ROOT = "https://soundcloud.com"
 ASSET_ROOT = "https://a-v2.sndcdn.com"
 _ASSET_RE = re.compile(r"https://a-v2\.sndcdn\.com/assets/[A-Za-z0-9_./-]+\.js(?:\?[A-Za-z0-9_=&.-]+)?")
@@ -28,7 +27,6 @@ _SAFE_API_PATHS = (
     re.compile(r"^/me$"),
     re.compile(r"^/users/[0-9]+/playlists_without_albums$"),
     re.compile(r"^/users/[0-9]+/playlist_likes$"),
-    re.compile(r"^/users/[0-9]+/track_likes$"),
     re.compile(r"^/users/[0-9]+/playlists/liked_and_owned$"),
     re.compile(r"^/playlists/[0-9]+$"),
     re.compile(r"^/playlists$"),
@@ -102,10 +100,6 @@ class SoundCloudClient:
         user_id = self._safe_id(me.get("id"), "account")
         out: list[Playlist] = []
         seen: set[str] = set()
-        if self._has_liked_tracks(user_id):  # "likes_count" also counts liked albums, so ask for an actual track
-            out.append(Playlist(id=LIKES_ID, name="Liked tracks", track_count=None))
-            seen.add(LIKES_ID)
-
         def add(playlists) -> None:
             for playlist in playlists:
                 if playlist.id not in seen:
@@ -122,16 +116,6 @@ class SoundCloudClient:
                 raise
             log.warning("SoundCloud saved playlists could not be listed: %s", exc)
         return out
-
-    def _has_liked_tracks(self, user_id: str) -> bool:
-        url = f"{API_ROOT}/users/{user_id}/track_likes?limit=5&linked_partitioning=true"
-        try:
-            entries, _next = self._collection(self._get_json(self._with_client_id(url), authenticated=True))
-        except SoundCloudAuthError:
-            raise
-        except SoundCloudError:
-            return False
-        return any(isinstance(e, Mapping) and isinstance(e.get("track"), Mapping) for e in entries)
 
     def _playlist_pages(self, base_url: str, *, saved: bool) -> Iterator[Playlist]:
         seen_pages: set[str] = set()
@@ -191,8 +175,6 @@ class SoundCloudClient:
         signed_in = bool(self._token)  # without a session only public playlists can be read
         if signed_in:
             self._account()
-        if playlist_id == LIKES_ID:
-            return self._liked_tracks()
         ident = self._playlist_id(playlist_id)
         try:
             body = self._get_json(f"{API_ROOT}/playlists/{ident}", authenticated=signed_in)
@@ -233,27 +215,6 @@ class SoundCloudClient:
             raise SoundCloudError("SoundCloud returned an invalid playlist track count.")
         missing = expected - len(entries) if isinstance(expected, int) and len(entries) < expected else 0
         return self._build_tracks(entries, ident, missing, signed_in)
-
-    def _liked_tracks(self) -> TrackList:
-        """The account's liked tracks, newest first, in the same shape as a playlist."""
-        user_id = self._safe_id(self._account().get("id"), "account")
-        entries: list[Any] = []
-        seen_pages: set[str] = set()
-        url = f"{API_ROOT}/users/{user_id}/track_likes?limit=200&linked_partitioning=true"
-        for _ in range(_MAX_PAGES):
-            request_url = self._with_client_id(url)
-            if request_url in seen_pages:
-                raise SoundCloudError("SoundCloud likes pagination repeated a page.")
-            seen_pages.add(request_url)
-            page, next_url = self._collection(self._get_json(request_url, authenticated=True))
-            # each like is {"kind": "like", "track": {...}}; a deleted track has no "track"
-            entries.extend(e["track"] for e in page if isinstance(e, Mapping) and isinstance(e.get("track"), Mapping))
-            if not next_url:
-                break
-            url = self._safe_next(next_url)
-        else:
-            raise SoundCloudError("SoundCloud likes exceeded the page limit.")
-        return self._build_tracks(entries, "likes", 0, True)
 
     def _build_tracks(self, entries: list[Any], ident: str, missing: int, signed_in: bool) -> TrackList:
         original_ids: list[str | None] = []
