@@ -3,10 +3,11 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QDateTime, QUrl, Qt
 from PySide6.QtNetwork import QNetworkCookie
+from PySide6.QtWidgets import QLabel
 
 from s2s.models import Settings
 from s2s.soundcloud.login import SoundCloudLoginWidget, cookie_candidate
-from s2s.soundcloud.page import ENABLED_SETTING, SoundCloudServicePage
+from s2s.soundcloud.page import SoundCloudServicePage
 from s2s.soundcloud.session import load_session, save_session
 from tests.test_spotify_session import protected_store
 
@@ -30,9 +31,7 @@ def test_cookie_capture_only_soundcloud_secure_cookie():
 
 def test_browser_capture_gates_and_dispose(_qt_application_lifetime):
     login = SoundCloudLoginWidget()
-    login._view.urlChanged.emit(QUrl("https://accounts.example.test/signin?secret=hidden"))
-    assert login.origin.text() == "https://accounts.example.test"
-    assert login.origin.textFormat() == Qt.TextFormat.PlainText
+    assert not login.findChildren(QLabel)  # just the sign-in page: no address line
     found = []
     login.session_candidate.connect(found.append)
     login._on_cookie(cookie())
@@ -52,7 +51,6 @@ def test_browser_capture_gates_and_dispose(_qt_application_lifetime):
 @pytest.fixture
 def page(tmp_path, _qt_application_lifetime):
     ctx = SimpleNamespace(secrets=protected_store(tmp_path), settings=Settings())
-    ctx.settings.extra[ENABLED_SETTING] = True
     result = SoundCloudServicePage(ctx)
     yield result
     result.dispose()
@@ -84,13 +82,18 @@ def test_success_stays_on_native_status_page(page, monkeypatch):
     assert page.stack.currentWidget() is page.account_page
 
 
-def test_disabled_connection_not_usable(page, monkeypatch):
-    monkeypatch.setattr("s2s.soundcloud.page.config.save_settings", lambda settings: None)
-    save_session(page.ctx.secrets, "synthetic-token")
-    page.enable_check.setChecked(False)
+def test_sign_in_is_one_button_with_no_extra_switch(page):
+    """There is no "Enable web sign-in" checkbox: the page offers Sign in, and a saved session is the connection."""
+    from PySide6.QtWidgets import QCheckBox
+
+    assert not page.findChildren(QCheckBox)
+    assert page.reconnect_btn.isEnabled() and page.reconnect_btn.text() == "Sign in to SoundCloud…"
     assert not page.is_connected()
-    assert not page.reconnect_btn.isEnabled()
-    assert load_session(page.ctx.secrets) is None
+    save_session(page.ctx.secrets, "synthetic-token")
+    page.refresh_state()
+    assert page.is_connected() and page.reconnect_btn.text() == "Reconnect SoundCloud…"
+    page.sign_out()
+    assert not page.is_connected() and load_session(page.ctx.secrets) is None
 
 
 def test_transient_verification_can_retry_without_new_cookie(page, monkeypatch):
@@ -112,7 +115,7 @@ def test_transient_verification_can_retry_without_new_cookie(page, monkeypatch):
     assert page.verification_progress.isHidden()
 
 
-def test_auth_failure_offers_restart_instead_of_retrying_rejected_token(page, monkeypatch):
+def test_auth_failure_restarts_sign_in_instead_of_retrying_rejected_token(page, monkeypatch):
     from s2s.soundcloud.client import SoundCloudAuthError
     pending = []
     monkeypatch.setattr("s2s.soundcloud.page.run_async", lambda *args: pending.append(args))
@@ -122,19 +125,21 @@ def test_auth_failure_offers_restart_instead_of_retrying_rejected_token(page, mo
     pending[0][3](SoundCloudAuthError("rejected"))
     assert page.retry_btn.isHidden()
     assert page._pending_candidate is None
-    assert "Restart sign-in" in page.status.text()
+    assert page.stack.currentWidget() is page.login_holder and page._login is not None  # a fresh sign-in page
+    assert "sign in again" in page.status.text().lower()
     page.retry_verification()
     assert len(pending) == 1
 
 
-def test_cancel_reconnect_keeps_previous_session_and_discards_pending_result(page, monkeypatch):
+def test_leaving_keeps_previous_session_and_discards_pending_result(page, monkeypatch):
     pending = []
     monkeypatch.setattr("s2s.soundcloud.page.run_async", lambda *args: pending.append(args))
     save_session(page.ctx.secrets, "previous-token", {"account_id": "2", "display_name": "Previous"})
     page.enter()
     page._accept_candidates = True
     page._candidate({"token": "new-token"})
-    page.cancel_btn.click()
+    page.leave()
+    page.refresh_state()  # coming back shows the account page again
     pending[0][2]({"account_id": "1", "display_name": "New"})
     assert load_session(page.ctx.secrets)["token"] == "previous-token"
     assert page.account_name.text() == "Previous"
@@ -181,7 +186,6 @@ def test_main_window_source_routing_and_token_redaction(tmp_path, _qt_applicatio
     monkeypatch.setattr(workers, "RUN_INLINE", True)
     secrets = protected_store(tmp_path / "secrets")
     settings = Settings()
-    settings.extra[ENABLED_SETTING] = True
     save_session(secrets, "synthetic-token", {"display_name": "Test"})
     store = Store(tmp_path / "test.db")
     window = MainWindow(store, secrets, settings, autostart=False)
@@ -203,3 +207,17 @@ def test_main_window_source_routing_and_token_redaction(tmp_path, _qt_applicatio
         window.close()
         window.deleteLater()
         store.close()
+
+
+def test_sign_in_page_has_only_the_login_window(page):
+    """No address line and no Restart/Cancel buttons: leaving the page cancels, and coming back starts clean."""
+    from PySide6.QtWidgets import QPushButton
+
+    page.enter()
+    page.reconnect()
+    assert page.stack.currentWidget() is page.login_holder
+    shown = [b.text() for b in page.login_holder.findChildren(QPushButton) if not b.isHidden()]
+    assert shown == []  # nothing but the sign-in page until a verification needs a retry
+    page.leave()
+    page.enter()
+    assert page.stack.currentWidget() is page.account_page

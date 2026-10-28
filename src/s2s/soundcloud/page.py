@@ -3,19 +3,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..secretstore import protection_text
-from .. import config
 from ..sources.soundcloud import SoundCloudSource
 from ..ui.workers import run_async
 from .client import SoundCloudAuthError, SoundCloudClient
 from .session import clear_session, load_session, normalize_session, save_session
 from ..ui.service_identity import ServiceAccountCard, ServiceHero, ServiceStatus, account_layout
-
-ENABLED_SETTING = "soundcloud_web_session_enabled"
 
 
 class SoundCloudServicePage(QWidget):
@@ -43,20 +40,16 @@ class SoundCloudServicePage(QWidget):
         self.session_value = QLabel(f"Session saved on this computer, {protection_text()}")
         self.session_value.setWordWrap(True)
         self.access_value = QLabel("Read playlist and track details")
-        self.enable_check = QCheckBox("Enable SoundCloud web sign-in")
-        self.enable_check.setChecked(bool(ctx.settings.extra.get(ENABLED_SETTING, False)))
         self.reconnect_btn = QPushButton()
         self.account_card = ServiceAccountCard("soundcloud", connection=self.connection_value,
             session=self.session_value, access=self.access_value, reconnect=self.reconnect_btn,
-            sign_out=self.sign_out_btn, account=self.account_name, extra=self.enable_check, parent=self)
+            sign_out=self.sign_out_btn, account=self.account_name, parent=self)
         self.account_page = account_layout(self.account_card, self)
         self.login_holder = QWidget()
         self.login_layout = QVBoxLayout(self.login_holder)
         self.login_layout.setContentsMargins(0, 0, 0, 0)
         controls = QHBoxLayout()
         self.retry_btn = QPushButton("Retry verification")
-        self.restart_btn = QPushButton("Restart sign-in")
-        self.cancel_btn = QPushButton("Cancel sign-in")
         self.verification_progress = QProgressBar()
         self.verification_progress.setRange(0, 0)
         self.verification_progress.setTextVisible(False)
@@ -65,9 +58,7 @@ class SoundCloudServicePage(QWidget):
         controls.addWidget(self.verification_progress)
         controls.addWidget(self.retry_btn)
         controls.addStretch(1)
-        controls.addWidget(self.restart_btn)
-        controls.addWidget(self.cancel_btn)
-        self.login_layout.addLayout(controls)
+        self.login_layout.addLayout(controls)  # only shows while verifying or when verification needs a retry
         self.retry_btn.hide()
         self.verification_progress.hide()
         self.stack = QStackedWidget()
@@ -82,14 +73,11 @@ class SoundCloudServicePage(QWidget):
         layout.addWidget(self.stack, 1)
         self.reconnect_btn.clicked.connect(self.reconnect)
         self.sign_out_btn.clicked.connect(self.sign_out)
-        self.enable_check.toggled.connect(self._enable_changed)
         self.retry_btn.clicked.connect(self.retry_verification)
-        self.restart_btn.clicked.connect(self.reconnect)
-        self.cancel_btn.clicked.connect(self.cancel_sign_in)
         self.refresh_state()
 
     def is_connected(self):
-        return self.enable_check.isChecked() and self.source.is_connected()
+        return self.source.is_connected()
 
     def state_text(self):
         return "SoundCloud: Signed in" if self.is_connected() else "SoundCloud: Not signed in"
@@ -103,7 +91,7 @@ class SoundCloudServicePage(QWidget):
         self.session_value.setText(f"Session saved on this computer, {protection_text()}" if load_session(self.ctx.secrets)
                                    else "No session saved")
         self.reconnect_btn.setText("Reconnect SoundCloud…" if connected else "Sign in to SoundCloud…")
-        self.reconnect_btn.setEnabled(self.enable_check.isChecked())
+        self.reconnect_btn.setEnabled(True)
         self.account_card.update_state(connected, self.account_name.text())
         self.stack.setCurrentIndex(0)
         self.state_changed.emit()
@@ -112,26 +100,7 @@ class SoundCloudServicePage(QWidget):
         self._active = True
         self.refresh_state()
 
-    def _enable_changed(self, checked):
-        previous = self.ctx.settings.extra.get(ENABLED_SETTING, False)
-        self.ctx.settings.extra[ENABLED_SETTING] = bool(checked)
-        try:
-            config.save_settings(self.ctx.settings)
-        except Exception:
-            self.ctx.settings.extra[ENABLED_SETTING] = previous
-            self.enable_check.blockSignals(True)
-            self.enable_check.setChecked(bool(previous))
-            self.enable_check.blockSignals(False)
-            self.status.setText("Could not save the SoundCloud connection setting.")
-            return
-        if not checked:
-            self.sign_out()
-        else:
-            self.refresh_state()
-
     def reconnect(self):
-        if not self.enable_check.isChecked():
-            return
         self._generation += 1
         self._pending_candidate = None
         self._set_verifying(False)
@@ -150,7 +119,7 @@ class SoundCloudServicePage(QWidget):
         login.session_candidate.connect(lambda candidate, owner=login: self._from_login(owner, candidate))
         login.login_failed.connect(lambda message, owner=login: self._login_message(owner, message))
         login.status_changed.connect(lambda message, owner=login: self._login_message(owner, message))
-        self.login_layout.addWidget(login)
+        self.login_layout.insertWidget(0, login, 1)  # just the sign-in page, filling the window
         self.stack.setCurrentIndex(1)
         self.status.setText("Sign in to SoundCloud in the page below.")
         login.start()
@@ -168,16 +137,12 @@ class SoundCloudServicePage(QWidget):
         if self._pending_candidate is not None and not self._verifying:
             self._candidate(self._pending_candidate)
 
-    def cancel_sign_in(self):
-        self.leave()
-        self.refresh_state()
-
     def _from_login(self, owner, candidate):
         if owner is self._login:
             self._candidate(candidate)
 
     def _candidate(self, candidate):
-        if not self._active or not self._accept_candidates or not self.enable_check.isChecked():
+        if not self._active or not self._accept_candidates:
             return
         try:
             candidate = normalize_session(candidate.get("token"), expires=candidate.get("expires"))
@@ -218,7 +183,8 @@ class SoundCloudServicePage(QWidget):
             if isinstance(exc, SoundCloudAuthError):
                 self._pending_candidate = None
                 self.retry_btn.hide()
-                self.status.setText("SoundCloud rejected this session. Choose Restart sign-in to try again.")
+                self.reconnect()  # a fresh sign-in page
+                self.status.setText("SoundCloud did not accept that sign-in. Please sign in again.")
             else:
                 self.retry_btn.show()
                 self.status.setText("Could not verify SoundCloud. Check your connection, then choose Retry verification.")
