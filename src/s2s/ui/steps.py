@@ -41,7 +41,7 @@ class StepFrame(QWidget):
         if index + 1 < len(STEPS):
             self.next_btn.setText(button_text(f"Next: {STEPS[index + 1][0]}"))
         else:  # the last step ends the playlist: its button starts the next one
-            self.next_btn.setText("Start another playlist")
+            self.next_btn.setText("Done")
 
         footer = self.footer = QWidget()
         footer.setObjectName("pageFooter")

@@ -130,7 +130,7 @@ def test_start_another_always_available_but_asks_while_anything_is_active(env, t
     recs = [(0, rec(TransferState.SUCCEEDED, track="a")), (0, rec(TransferState.QUEUED, "Queued, Remotely", track="b"))]
     page._refreshed(payload(recs, [imported("a")]))
     start_another = win.frames[-1].next_btn  # it lives on Step 6 now
-    assert start_another.text() == "Start another playlist" and start_another.isEnabled()
+    assert start_another.text() == "Done" and start_another.isEnabled()
     start_another.click()
     assert asked == [("this playlist", 1)] and emitted == []  # Stay
     start_another.click()
