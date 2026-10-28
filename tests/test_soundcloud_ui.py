@@ -225,14 +225,15 @@ def test_sign_in_page_has_only_the_login_window(page):
 
 def test_sign_in_hides_the_social_buttons_that_cannot_work_in_a_window(_qt_application_lifetime):
     """Google, Apple and Facebook refuse embedded browsers, so the page keeps only email sign-in."""
+    from s2s import embedded_diag
     from s2s.soundcloud import login as login_module
 
     widget = SoundCloudLoginWidget()
     try:
         scripts = [s for s in widget._page.scripts().toList() if s.name() == "s2s-email-sign-in-only"]
         assert len(scripts) == 1 and scripts[0].runsOnSubFrames()  # the sign-in form is a frame
-        source = login_module._EMAIL_ONLY_JS
-        assert "secure.soundcloud.com" in source and "google|apple|facebook" in source
+        source = embedded_diag.SOCIAL_SIGN_IN_HIDER_JS
+        assert "google|apple|facebook" in source
         assert any(s.name() == "s2s-reject-cookies" for s in widget._page.scripts().toList())
         assert "onetrust-reject-all-handler" in login_module._REJECT_COOKIES_JS  # privacy-preserving answer
         assert "userAgent" not in source and "navigator" not in source  # shows less; never disguises the browser

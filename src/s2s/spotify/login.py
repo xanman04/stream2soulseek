@@ -11,7 +11,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
-from ..embedded_diag import PROBE_JS, Trail, navigation_allowed
+from ..embedded_diag import PROBE_JS, Trail, navigation_allowed, social_sign_in_hider
 from .session import _valid_cookie
 
 START_URL = "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F"
@@ -45,6 +45,7 @@ class _EmbeddedPage(QWebEnginePage):
         self.settings().setUnknownUrlSchemePolicy(
             QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes
         )
+        self.scripts().insert(social_sign_in_hider(r"/^accounts\.spotify\.com$/"))
         self.loadFinished.connect(lambda ok: TRAIL.loaded(self, ok))
 
     def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
