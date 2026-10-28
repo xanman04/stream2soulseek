@@ -33,7 +33,7 @@ class StepFrame(QWidget):
         self.index = index
         self.content = content
         _name, title, _explanation = STEPS[index]
-        self.title_label = QLabel(f"Step {index + 1}: {title}")
+        self.title_label = QLabel(title)
         self.title_label.setObjectName("pageTitle")
         self.hint_label = QLabel("")
         subtle(self.hint_label)
@@ -52,8 +52,8 @@ class StepFrame(QWidget):
         foot.addWidget(self.hint_label)
         foot.addWidget(self.next_btn)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(26, 24, 26, 18)
-        lay.setSpacing(16)
+        lay.setContentsMargins(28, 26, 28, 18)
+        lay.setSpacing(18)
         lay.addWidget(self.title_label)
         lay.addWidget(content, 1)
         lay.addWidget(footer)

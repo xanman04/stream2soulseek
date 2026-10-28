@@ -9,9 +9,14 @@
 - Spotify sign-in: a failed attempt (Spotify's own "Something went wrong" page, or a rejected session) now shows a
   Start over button instead of leaving a dead end.
 - Sign-in pages no longer show "Sign in to X in the page below" or loading lines.
-- Sidebar: no "Workflow" heading. Streaming services and the Soulseek connection are boxed, Settings sits with
-  the connection, and the numbered steps fill their own boxed panel at the bottom, larger and bolder with a
-  filled bar on the current step.
+- Sidebar: no "Workflow" heading. The numbered steps sit in a boxed panel at the top (check mark when done,
+  filled badge and outlined row for the current step), streaming services, the Soulseek connection and Settings
+  are boxed at the bottom. The whole column scales with the window height, so it fills a tall window
+  proportionally instead of leaving a gap.
+- Look: rounder buttons, fields and tables; thinner progress bar (the counts below it carry the numbers); banners
+  and the service banner no longer have a coloured edge stripe; pill-shaped count chips; page titles drop the
+  "Step N:" prefix (the sidebar numbers the steps) and every page uses the same margins.
+- Repository text no longer mentions the maintainer's local folders or name.
 - Developer tools: tools/spotify_login_probe.py (opens S2S's real Spotify sign-in, logs a privacy-safe timeline
   and Chromium's network log without cookies) and tools/netlog_summary.py.
 - SoundCloud: no more "Enable SoundCloud web sign-in" checkbox. The page is one "Sign in to SoundCloud" button,

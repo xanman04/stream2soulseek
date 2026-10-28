@@ -182,7 +182,7 @@ class TransfersPage(QWidget):
 
         # header: one bar, a few counts
         self.progress = QProgressBar()
-        self.progress.setTextVisible(True)
+        self.progress.setTextVisible(False)  # the counts below carry the numbers
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
         self.progress.setFormat("")

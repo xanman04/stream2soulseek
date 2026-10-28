@@ -114,7 +114,7 @@ class ServiceHero(QFrame):
         border.setAlpha(58 if dark else 48)
         p.setPen(QPen(border, 1))
         p.setBrush(fill)
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 8, 8)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 10, 10)
         p.setClipRect(self.rect().adjusted(1, 1, -1, -1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         brand.setAlpha(24 if dark else 20)
@@ -122,9 +122,6 @@ class ServiceHero(QFrame):
         center = QPointF(self.width() - 70, self.height() / 2)
         for radius in (42, 64, 86, 108, 130):
             p.drawEllipse(center, radius, radius)
-        brand.setAlpha(90)
-        p.setPen(QPen(brand, 3))
-        p.drawLine(1, 28, 1, self.height() - 28)
 
 
 class ServiceAccountCard(QFrame):
