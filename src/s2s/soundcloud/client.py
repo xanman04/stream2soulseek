@@ -7,7 +7,7 @@ streams, transcoding URLs, download URLs, or mutation endpoints.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -24,6 +24,7 @@ _CLIENT_ID_RE = re.compile(r"(?:client_id|clientId)\s*[:=]\s*[\"']([A-Za-z0-9_-]
 _SAFE_API_PATHS = (
     re.compile(r"^/me$"),
     re.compile(r"^/users/[0-9]+/playlists_without_albums$"),
+    re.compile(r"^/users/[0-9]+/playlist_likes$"),
     re.compile(r"^/playlists/[0-9]+$"),
     re.compile(r"^/playlists/[0-9]+/tracks$"),
     re.compile(r"^/tracks$"),
@@ -87,12 +88,21 @@ class SoundCloudClient:
         return {"account_id": account_id, "display_name": username.strip()}
 
     def list_playlists(self) -> list[Playlist]:
+        """The account's own playlists first, then the ones it saved (liked) from other people."""
         me = self._account()
         user_id = self._safe_id(me.get("id"), "account")
         out: list[Playlist] = []
         seen: set[str] = set()
+        for endpoint, saved in (("playlists_without_albums", False), ("playlist_likes", True)):
+            for playlist in self._playlist_pages(f"{API_ROOT}/users/{user_id}/{endpoint}", saved=saved):
+                if playlist.id not in seen:
+                    seen.add(playlist.id)
+                    out.append(playlist)
+        return out
+
+    def _playlist_pages(self, base_url: str, *, saved: bool) -> Iterator[Playlist]:
         seen_pages: set[str] = set()
-        url = f"{API_ROOT}/users/{user_id}/playlists_without_albums?limit=200&linked_partitioning=true"
+        url = f"{base_url}?limit=200&linked_partitioning=true"
         for _ in range(_MAX_PAGES):
             request_url = self._with_client_id(url)
             if request_url in seen_pages:
@@ -101,12 +111,13 @@ class SoundCloudClient:
             body = self._get_json(request_url, authenticated=True)
             entries, next_url = self._collection(body)
             for entry in entries:
-                playlist = self._playlist(entry)
-                if playlist.id not in seen:
-                    seen.add(playlist.id)
-                    out.append(playlist)
+                if saved:  # a saved playlist arrives wrapped as {"kind": "like", "playlist": {...}}
+                    entry = entry.get("playlist") if isinstance(entry, Mapping) else None
+                    if not isinstance(entry, Mapping) or not isinstance(entry.get("title"), str):
+                        continue  # deleted or hidden since it was saved
+                yield self._playlist(entry)
             if not next_url:
-                return out
+                return
             url = self._safe_next(next_url)
         raise SoundCloudError("SoundCloud playlist listing exceeded the page limit.")
 

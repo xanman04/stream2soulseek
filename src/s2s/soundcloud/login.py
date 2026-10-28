@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import QUrl, Qt, Signal
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QDialog, QLabel, QSizePolicy, QVBoxLayout, QWidget
 import shiboken6
@@ -43,12 +43,51 @@ def cookie_candidate(cookie):
 
 TRAIL = Trail("SoundCloud sign-in")
 
+# Google, Apple and Facebook refuse to sign anyone in inside an embedded browser window ("This browser or app may
+# not be secure"), so those buttons can only lead to a dead end. SoundCloud's own sign-in frame has them next to the
+# email field; this hides just those three and the "or" line between them, leaving email sign-in. It changes only
+# what is shown: nothing about the browser's identity or the page's requests.
+_EMAIL_ONLY_JS = r"""
+(function () {
+  if (location.hostname !== "secure.soundcloud.com") return;
+  var social = /^\s*continue with (google|apple|facebook)\s*$/i;
+  function hide(el) { if (el && el.style.display !== "none") el.style.display = "none"; }
+  function sweep() {
+    var buttons = document.querySelectorAll("button");
+    var first = null, last = null;
+    buttons.forEach(function (b) {
+      if (!social.test(b.innerText || b.textContent || "")) return;
+      first = first || b; last = b;
+      var wrap = b.parentElement;
+      hide(wrap && wrap.querySelectorAll("button").length === 1 ? wrap : b);
+    });
+    if (!first) return;
+    // the "Or" divider row that separated the social buttons from the email field
+    document.querySelectorAll("body *").forEach(function (el) {
+      if (el.children.length === 0 && /^\s*or\s*$/i.test(el.textContent || "")) {
+        var row = el.parentElement;
+        hide(row && /^\s*or\s*$/i.test(row.textContent || "") ? row : el);
+      }
+    });
+  }
+  new MutationObserver(sweep).observe(document.documentElement, {childList: true, subtree: true});
+  sweep();
+})();
+"""
+
 
 class _Page(QWebEnginePage):
     def __init__(self, profile, owner, parent):
         super().__init__(profile, parent)
         self.owner = owner
         self.settings().setUnknownUrlSchemePolicy(QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes)
+        script = QWebEngineScript()
+        script.setName("s2s-email-sign-in-only")
+        script.setSourceCode(_EMAIL_ONLY_JS)
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(True)
+        self.scripts().insert(script)
         self.loadFinished.connect(lambda ok: TRAIL.loaded(self, ok))
 
     def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802

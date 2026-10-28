@@ -12,9 +12,11 @@ Open **SoundCloud** in the sidebar and choose **Sign in to SoundCloud**, then si
 S2S. After the session is verified, S2S shows a native account status page, and **Choose playlist** lists the
 account's playlists. The remaining steps are shared with the other sources.
 
-Limits of sign-in inside an app window: Google refuses "Continue with Google" in any embedded browser, and
-SoundCloud's bot protection may show a slider challenge. S2S does not disguise its browser to get around either;
-use the public-link route above when sign-in is blocked.
+Sign-in here is by email and password. Google, Apple and Facebook refuse sign-in inside any embedded browser
+window, so S2S hides those three buttons rather than leave a dead end, and SoundCloud's bot protection may show a
+slider challenge to solve. S2S does not disguise its browser to get around either. An account that only has
+Google login can set a password from SoundCloud's "Need help?" link, or use the public-link route above.
+The list in **Choose playlist** shows the playlists you made, then the ones you saved from other people.
 
 If verification fails temporarily, choose **Retry verification** without signing in again. A rejected session
 starts a fresh sign-in page.

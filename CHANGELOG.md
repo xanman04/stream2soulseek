@@ -19,6 +19,10 @@
 - SoundCloud: paste a public SoundCloud playlist link in Choose playlist (next to the Spotify one) to open it
   with no sign-in. Google blocks sign-in inside any embedded browser window, and SoundCloud's bot check
   (DataDome) can show a slider challenge there, so account sign-in is not available to everyone; links are.
+- SoundCloud: the playlist list now includes playlists you saved (liked) from other people, after the ones you
+  made.
+- SoundCloud sign-in shows only the email field: the Google, Apple and Facebook buttons are hidden because those
+  providers refuse sign-in inside an app window. Nothing about the browser is disguised.
 - Developer tool: tools/soundcloud_login_probe.py, the SoundCloud counterpart of the Spotify probe.
 - Repository text no longer mentions the maintainer's local folders or name.
 - Developer tools: tools/spotify_login_probe.py (opens S2S's real Spotify sign-in, logs a privacy-safe timeline
