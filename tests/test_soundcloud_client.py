@@ -49,6 +49,12 @@ def test_validates_account_and_paginates_playlists():
         calls.append(request)
         if request.url.path == "/me":
             return httpx.Response(200, json=me())
+        if request.url.path.endswith("/playlist_likes"):
+            return httpx.Response(200, json={"collection": [
+                {"kind": "like", "playlist": playlist(2, "Public Mix")},  # also created by the account: listed once
+                {"kind": "like", "playlist": playlist(9, "Saved From Someone")},
+                {"kind": "like", "playlist": None},  # removed since it was saved
+            ], "next_href": None})
         offset = parse_qs(request.url.query.decode()).get("offset", ["0"])[0]
         if offset == "0":
             assert parse_qs(request.url.query.decode())["linked_partitioning"] == ["true"]
@@ -61,7 +67,7 @@ def test_validates_account_and_paginates_playlists():
     with api_client(handler) as client:
         assert client.validate_session() == {"account_id": "42", "display_name": "Fixture DJ"}
         items = client.list_playlists()
-    assert [p.name for p in items] == ["Private Mix", "Public Mix"]
+    assert [p.name for p in items] == ["Private Mix", "Public Mix", "Saved From Someone"]
     assert all(req.headers.get("authorization") == f"OAuth {TOKEN}" for req in calls)
     assert all(req.url.host == "api-v2.soundcloud.com" for req in calls)
 
