@@ -58,6 +58,8 @@ var
   ComparedFiles: TArrayOfString;
   ComparisonPage: TOutputProgressWizardPage;
   ComparedDir: String;
+  CleanupError: String;
+  CleanupSucceeded: Boolean;
 
 procedure InitializeWizard;
 begin
@@ -72,6 +74,30 @@ begin
     ComparisonPage.SetProgress(StrToIntDef(Copy(S, 10, Length(S)), 0), {#RuntimeFileCount});
 end;
 
+function RunRuntimeCleanup(Mode: String): String;
+var
+  ExitCode, I: Integer;
+  Params, ErrorFile: String;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  ExtractTemporaryFile('s2s-runtime-layout.json');
+  ExtractTemporaryFile('s2s-runtime-clean.exe');
+  ErrorFile := ExpandConstant('{tmp}\s2s-cleanup-error.txt');
+  DeleteFile(ErrorFile);
+  Params := Mode + ' ' + AddQuotes(ExpandConstant('{app}')) + ' ' +
+    AddQuotes(ExpandConstant('{localappdata}\Programs\S2S')) + ' ' +
+    AddQuotes(ExpandConstant('{tmp}\s2s-runtime-layout.json')) + ' ' + AddQuotes(ErrorFile);
+  if not ExecAndLogOutput(ExpandConstant('{tmp}\s2s-runtime-clean.exe'), Params, '',
+    SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode, @ComparisonProgress) or (ExitCode <> 0) then begin
+    Result := 'S2S could not clean up its program folder. Close S2S and run this installer again.';
+    if LoadStringsFromFile(ErrorFile, Lines) then
+      for I := 0 to GetArrayLength(Lines) - 1 do
+        Result := Result + #13#10 + Lines[I];
+    Log(Result);
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   AppDir, ResultsFile, Params, Line: String;
@@ -80,6 +106,8 @@ var
 begin
   Result := '';
   AppDir := ExpandConstant('{app}');
+  Result := RunRuntimeCleanup('--check');
+  if Result <> '' then exit;
   if ComparedDir = AppDir then exit;
   for I := 0 to GetArrayLength(ComparedFiles) - 1 do ComparedFiles[I] := '';
   ComparedDir := AppDir;
@@ -150,13 +178,51 @@ begin
   end;
 end;
 
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    ComparisonPage.SetText('Removing obsolete program files...', 'Keeping the files included in this release.');
+    ComparisonPage.Show;
+    try
+      try
+        CleanupError := RunRuntimeCleanup('--clean');
+      except
+        CleanupError := 'S2S cleanup could not finish. Close S2S and run this installer again.';
+        Log(CleanupError);
+      end;
+      CleanupSucceeded := CleanupError = '';
+    finally
+      ComparisonPage.Hide;
+    end;
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and (CleanupError <> '') then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Installation needs attention';
+    WizardForm.FinishedLabel.Caption := CleanupError;
+  end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := 0;
+  if CleanupError <> '' then Result := 1;
+end;
+
+function CanLaunchCleanInstall: Boolean;
+begin
+  Result := CleanupSucceeded;
+end;
+
 [Icons]
 Name: "{autoprograms}\S2S"; Filename: "{app}\S2S.exe"
 Name: "{autodesktop}\S2S"; Filename: "{app}\S2S.exe"; Tasks: desktopicon
 
 [Run]
 ; Launch this executable directly in its own folder; no shell file-association lookup is needed.
-Filename: "{app}\S2S.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,S2S}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\S2S.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,S2S}"; Flags: nowait postinstall skipifsilent; Check: CanLaunchCleanInstall
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
