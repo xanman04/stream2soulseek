@@ -26,6 +26,34 @@ def P(name, ext="mp3", artist="Artist"):
     return rf"@@u\Music\{artist} - Album\03 - {artist} - {name}.{ext}"
 
 
+def test_partial_artist_name_cannot_be_a_confident_match():
+    track = T("One", "Lash", dur=263_000)
+    wrong = F(r"Music\Angharad Davies & Dominic Lash\Pieces of Eight\01 one.mp3")
+    candidate = evaluate(track, wrong)
+    assert candidate.flagged
+    assert any("artist identity is uncertain" in reason for reason in candidate.reasons)
+    from s2s.workflow import _source_count
+    assert _source_count(match(track, [wrong])) == 0
+    correct = F(r"Music\Lash\One.mp3", length=263)
+    assert match(track, [wrong, correct]).best.file == correct
+
+
+@pytest.mark.parametrize("path", [
+    r"Music\Lash\One.mp3", r"Music\Lash - Singles\One.mp3",
+    r"Music\Lash [2026]\One.mp3", r"Music\Various\Lash - One.mp3",
+    r"Music\Lash Discography\One.mp3", r"Music\Lash 2026\One.mp3",
+    r"Music\2019 - Lash - One\01 One.mp3", r"Music\Label - Lash - Album\01 One.mp3",
+])
+def test_explicit_artist_identity_keeps_album_style_matches(path):
+    assert not evaluate(T("One", "Lash"), F(path)).flagged
+
+
+def test_empty_year_folder_is_not_artist_evidence():
+    from s2s.matching.rank import _artist_label_in_path, _same_person
+    assert not _artist_label_in_path(["2019"], None, ["the the"])
+    assert not _same_person("DJ", "MC")
+
+
 # ------------------------------------------------------------------ normalise / parse
 
 @pytest.mark.parametrize("raw,expected", [
