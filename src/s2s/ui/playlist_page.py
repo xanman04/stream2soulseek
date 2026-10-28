@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from ..models import AppleTrack, Playlist
 from ..sources import PlaylistSource, SourceAuthError
 from ..sources.base import TrackList
+from ..soundcloud import public as soundcloud_public
 from ..spotify.public import PublicPlaylistError, fetch_public_playlist, parse_playlist_link
 from .context import AppContext
 from .theme import polish_table, set_banner, subtle
@@ -48,6 +49,7 @@ class PlaylistPage(QWidget):
         self._link_request = 0
         self._link_open = False  # the shown playlist came from a pasted link
         self._public_fetch = fetch_public_playlist  # replaceable in tests
+        self._soundcloud_fetch = soundcloud_public.fetch_public_playlist
         self._source_index = -1  # last accepted source, restored when the user stays on the running import
         self._restoring = False
 
@@ -63,11 +65,11 @@ class PlaylistPage(QWidget):
         top.addWidget(self.reload_btn)
         top.addWidget(self.status, 1)
 
-        # --- open a playlist by link (public Spotify playlists need no sign-in)
+        # --- open a playlist by link (public Spotify and SoundCloud playlists need no sign-in)
         self.link_edit = QLineEdit()
-        self.link_edit.setPlaceholderText("Or paste a Spotify playlist link (no sign-in needed)")
+        self.link_edit.setPlaceholderText("Or paste a Spotify or SoundCloud playlist link (no sign-in needed)")
         self.link_edit.setClearButtonEnabled(True)
-        self.link_edit.setAccessibleName("Spotify playlist link")
+        self.link_edit.setAccessibleName("Playlist link")
         self.link_btn = QPushButton("Open")
         self.link_status = QLabel()
         set_banner(self.link_status, "", "info")
@@ -141,7 +143,7 @@ class PlaylistPage(QWidget):
 
         # --- no connected service
         self.no_service_label = QLabel(
-            "Connect a streaming service to see your playlists, or paste a public Spotify playlist link above.")
+            "Connect a streaming service to see your playlists, or paste a public Spotify or SoundCloud playlist link above.")
         self.no_service_label.setWordWrap(True)
         self.connect_btn = QPushButton("Connect Apple Music")
         self.connect_spotify_btn = QPushButton("Connect Spotify")
@@ -447,23 +449,27 @@ class PlaylistPage(QWidget):
     # ------------------------------------------------------------ open by link
 
     def open_link(self) -> None:
-        """Load a public Spotify playlist from a pasted link (no sign-in), off the UI thread."""
+        """Load a public Spotify or SoundCloud playlist from a pasted link (no sign-in), off the UI thread."""
         text = self.link_edit.text().strip()
         if not text:
             return
         ident = parse_playlist_link(text)
-        if ident is None:
-            set_banner(self.link_status, "That does not look like a Spotify playlist link. "
-                       "Paste the link from Spotify's Share menu.", "error")
+        sound_link = None if ident is not None else soundcloud_public.parse_playlist_link(text)
+        if ident is None and sound_link is None:
+            set_banner(self.link_status, "That does not look like a Spotify or SoundCloud playlist link. "
+                       "Paste the link from the playlist's Share menu.", "error")
             return
         self._link_request += 1
         request = self._link_request
         self.link_btn.setEnabled(False)
-        from ..spotify import spotapi_setup
+        first = ""
+        if sound_link is None:
+            from ..spotify import spotapi_setup
 
-        first = "" if spotapi_setup.cached() else " The first time takes about half a minute."
+            first = "" if spotapi_setup.cached() else " The first time takes about half a minute."
         set_banner(self.link_status, "Opening playlist..." + first, "info")
-        fetch = self._public_fetch
+        fetch = self._public_fetch if sound_link is None else self._soundcloud_fetch
+        target = ident if sound_link is None else sound_link
 
         def done(payload) -> None:
             if request != self._link_request:
@@ -476,10 +482,11 @@ class PlaylistPage(QWidget):
             if request != self._link_request:
                 return
             self.link_btn.setEnabled(True)
-            msg = str(exc) if isinstance(exc, PublicPlaylistError) else self.ctx.describe(exc)
+            msg = (str(exc) if isinstance(exc, (PublicPlaylistError, soundcloud_public.PublicPlaylistError))
+                   else self.ctx.describe(exc))
             set_banner(self.link_status, msg or "Could not open that playlist.", "error")
 
-        run_async(self, lambda: fetch(ident), done, failed)
+        run_async(self, lambda: fetch(target), done, failed)
 
     def _set_link_mode(self, on: bool) -> None:
         """A pasted link's playlist is shown on its own: the account's playlist list steps aside."""

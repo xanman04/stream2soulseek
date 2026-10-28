@@ -86,7 +86,7 @@ def test_open_link_rejects_invalid(ctx, text):
     page._public_fetch = lambda i: pytest.fail("must not fetch")
     page.link_edit.setText(text)
     page.open_link()
-    assert not page.link_status.isHidden() and "Spotify playlist link" in page.link_status.text()
+    assert not page.link_status.isHidden() and "playlist link" in page.link_status.text()
     assert ctx.playlist is None
     page.close()
 

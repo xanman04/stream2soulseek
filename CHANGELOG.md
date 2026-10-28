@@ -16,6 +16,10 @@
 - Look: rounder buttons, fields and tables; thinner progress bar (the counts below it carry the numbers); banners
   and the service banner no longer have a coloured edge stripe; pill-shaped count chips; page titles drop the
   "Step N:" prefix (the sidebar numbers the steps) and every page uses the same margins.
+- SoundCloud: paste a public SoundCloud playlist link in Choose playlist (next to the Spotify one) to open it
+  with no sign-in. Google blocks sign-in inside any embedded browser window, and SoundCloud's bot check
+  (DataDome) can show a slider challenge there, so account sign-in is not available to everyone; links are.
+- Developer tool: tools/soundcloud_login_probe.py, the SoundCloud counterpart of the Spotify probe.
 - Repository text no longer mentions the maintainer's local folders or name.
 - Developer tools: tools/spotify_login_probe.py (opens S2S's real Spotify sign-in, logs a privacy-safe timeline
   and Chromium's network log without cookies) and tools/netlog_summary.py.
