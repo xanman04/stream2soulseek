@@ -192,8 +192,15 @@ QWidget#sidebar {{ background: {c['side']}; border-right: 1px solid {c['border']
 QLabel#appWordmark {{ font-size: 23px; font-weight: 700; letter-spacing: 1px; }}
 QLabel#navHeading {{ color: {c['muted']}; font-size: 11px; font-weight: 600;
     margin: 10px 4px 3px 4px; }}
-QFrame#connectionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; }}
-QFrame#connectionPanel QLabel {{ background: transparent; border: none; }}
+QFrame#connectionPanel, QFrame#navCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QFrame#connectionPanel QLabel, QFrame#navCard QLabel {{ background: transparent; border: none; }}
+QFrame#stepsCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QListWidget#stepList {{ background: transparent; border: none; outline: 0; }}
+QListWidget#stepList::item {{ padding: 4px 8px; border: 1px solid transparent; border-radius: 7px; }}
+QListWidget#stepList::item:hover {{ background: {c['hover']}; }}
+QListWidget#stepList::item:selected {{ background: {c['selection']}; color: {c['selected']};
+    border: 1px solid {c['focus']}; border-left: 4px solid {c['focus']}; }}
+QListWidget#stepList::item:disabled {{ color: {c['disabled']}; }}
 QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
 QLabel#pageTitle {{ font-size: 23px; font-weight: 600; margin-bottom: 4px; }}
 QWidget#pageFooter {{ border-top: 1px solid {c['border']}; }}

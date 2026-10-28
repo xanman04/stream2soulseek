@@ -121,7 +121,7 @@ class SoundCloudServicePage(QWidget):
         login.status_changed.connect(lambda message, owner=login: self._login_message(owner, message))
         self.login_layout.insertWidget(0, login, 1)  # just the sign-in page, filling the window
         self.stack.setCurrentIndex(1)
-        self.status.setText("Sign in to SoundCloud in the page below.")
+        self.status.setText("")
         login.start()
 
     def _login_message(self, owner, message):

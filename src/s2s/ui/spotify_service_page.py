@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from ..secretstore import protection_text
 from ..spotify.session import clear_session, load_session, save_session
@@ -46,6 +46,13 @@ class SpotifyServicePage(QWidget):
         self.login_holder = QWidget()
         self.login_layout = QVBoxLayout(self.login_holder)
         self.login_layout.setContentsMargins(0, 0, 0, 0)
+        # Shown only when a sign-in fails, so a failed attempt is never a dead end.
+        self.start_over_btn = QPushButton("Start over")
+        self.start_over_btn.setVisible(False)
+        start_over_row = QHBoxLayout()
+        start_over_row.addStretch(1)
+        start_over_row.addWidget(self.start_over_btn)
+        self.login_layout.addLayout(start_over_row)
         self.stack = QStackedWidget()
         self.stack.addWidget(self.account_page)
         self.stack.addWidget(self.login_holder)
@@ -57,6 +64,7 @@ class SpotifyServicePage(QWidget):
         layout.addWidget(self.status)
         layout.addWidget(self.stack, 1)
         self.reconnect_btn.clicked.connect(self.reconnect)
+        self.start_over_btn.clicked.connect(self.reconnect)
         self.sign_out_btn.clicked.connect(self.sign_out)
         self.refresh_state()
 
@@ -97,10 +105,11 @@ class SpotifyServicePage(QWidget):
             login.session_candidate.connect(lambda cookies, source=login: self._candidate_from(source, cookies))
             self._login.login_failed.connect(self._login_failed)
             self._login.status_changed.connect(self.status.setText)
-            self.login_layout.addWidget(self._login)
+            self.login_layout.insertWidget(0, self._login, 1)  # the sign-in page fills the window
         return self._login
 
     def reconnect(self) -> None:
+        self.start_over_btn.setVisible(False)
         self._generation += 1
         self._active = True
         self._accept_candidates = False
@@ -113,7 +122,7 @@ class SpotifyServicePage(QWidget):
         self.stack.setCurrentIndex(1)
         self._accept_candidates = True
         login.start()
-        self.status.setText("Sign in to Spotify in the page below.")
+        self.status.setText("")
         self.state_changed.emit()
 
     def _candidate(self, cookies) -> None:
@@ -151,6 +160,7 @@ class SpotifyServicePage(QWidget):
             else:
                 message = "Could not verify the Spotify session. Check your connection and try again."
             self.status.setText(message)
+            self.start_over_btn.setVisible(True)
 
         run_async(self, verify, success, failure)
 
@@ -161,6 +171,7 @@ class SpotifyServicePage(QWidget):
 
     def _login_failed(self, message: str) -> None:
         self.status.setText(message)
+        self.start_over_btn.setVisible(True)
 
     def session_rejected(self) -> None:
         self._generation += 1

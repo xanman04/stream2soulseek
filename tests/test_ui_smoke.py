@@ -98,7 +98,7 @@ def test_window_constructs_without_network_and_destination_not_defaulted(env):
 def test_sidebar_sections_and_disabled_future_services(env):
     win, *_ = env
     sb = win.sidebar
-    assert sb.services_header.text() == "Streaming services" and sb.steps_header.text() == "Workflow"
+    assert sb.services_header.text() == "Streaming services" and not hasattr(sb, "steps_header")  # no "Workflow" label
     labels = [sb.services.item(i).text() for i in range(sb.services.count())]
     assert labels[0].startswith("Apple Music") and labels[1].startswith("Spotify") and labels[2].startswith("SoundCloud")
     flags = [bool(sb.services.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(3)]

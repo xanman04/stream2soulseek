@@ -87,7 +87,7 @@ class ServicePage(QWidget):
         """Start a fresh embedded login; replace the saved session only after capture succeeds."""
         if self._login is not None:
             self._login.clear_session()
-        self.show_login("Reconnect to Apple Music in the page below.")
+        self.show_login("")
 
     def _ensure_login(self):
         if self._login is None:
@@ -137,4 +137,4 @@ class ServicePage(QWidget):
         if self._login is not None:
             self._login.clear_session()
         self.signed_out.emit()
-        self.show_login("Signed out. Sign in to Apple Music in the page below.")
+        self.show_login("Signed out.")

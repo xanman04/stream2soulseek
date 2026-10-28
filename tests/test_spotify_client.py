@@ -229,3 +229,62 @@ def test_generic_error_playlist_gets_a_plain_message():
     body = {"data": {"playlistV2": {"__typename": "GenericError", "message": "Failed to fetch playlist"}}}
     with pytest.raises(SpotifyError, match="private, deleted or unavailable"):
         SpotifyClient._playlist_content(body)
+
+
+def _new_shape_page(offset, limit, total=107):
+    """Spotify's library reply since late 2026 (seen live): data.me.libraryV3, entries listed directly under it,
+    each entry's URI named "_uri" and its details nested under "data"."""
+    entries = [{"addedAt": {"isoString": "2026-01-01T00:00:00Z"}, "depth": 0, "pinnable": True, "pinned": False,
+                "item": {"__typename": "PlaylistResponseWrapper", "_uri": f"spotify:playlist:{i:022d}",
+                         "data": {"__typename": "Playlist", "name": f"Mix {i}"}}}
+               for i in range(total)]
+    entries.insert(3, {"item": {"__typename": "PseudoPlaylistResponseWrapper", "_uri": "spotify:collection:tracks",
+                                "data": {"__typename": "PseudoPlaylist", "name": "Liked Songs"}}})
+    entries.insert(5, {"item": {"__typename": "FolderResponseWrapper",
+                                "_uri": "spotify:user:someone:folder:abc", "data": {"name": "A folder"}}})
+    return {"data": {"me": {"libraryV3": {"__typename": "LibraryPage", "totalCount": len(entries),
+                                           "items": entries[offset:offset + limit],
+                                           "pagingInfo": {"limit": limit, "offset": offset}}}}}
+
+
+def test_library_in_the_newer_reply_shape_lists_playlists_with_their_names():
+    class NewShape(Adapter):
+        def list_library(self, client, offset, limit):
+            self.library_calls.append((offset, limit))
+            return _new_shape_page(offset, limit)
+
+    with SpotifyClient(COOKIES, factory=lambda client: NewShape()) as client:
+        playlists = client.list_playlists()
+    assert len(playlists) == 107  # folders and Liked Songs are not playlists
+    assert playlists[0].id == "spotify:playlist:" + "0" * 22 and playlists[0].name == "Mix 0"
+    assert playlists[-1].name == "Mix 106"
+
+
+def test_both_library_shapes_are_read_and_a_broken_one_is_a_plain_error():
+    items, total = SpotifyClient._library_page(_new_shape_page(0, 10))
+    assert len(items) == 10 and total == 109
+    old = {"data": {"me": {"library": {"items": {"totalCount": 1, "items": [
+        {"item": {"uri": "spotify:playlist:" + "a" * 22, "name": "Old"}}]}}}}}
+    assert SpotifyClient._parse_library(old)[0].name == "Old"
+    with pytest.raises(SpotifyError, match="unexpected library response"):
+        SpotifyClient._library_page({"data": {"me": {"somethingElse": {}}}})
+
+
+def test_a_playlist_without_a_name_is_listed_as_untitled_and_its_structure_is_logged(monkeypatch):
+    import s2s.spotify.client as module
+
+    lines = []
+
+    class Log:
+        def info(self, fmt, *args):
+            lines.append(fmt % args)
+
+    monkeypatch.setattr("s2s.applog.get", lambda: Log())
+    monkeypatch.setattr(module, "_logged_nameless", False)
+    item = {"item": {"__typename": "PlaylistResponseWrapper", "_uri": "spotify:playlist:" + "a" * 22,
+                     "data": {"__typename": "Playlist", "secretvalue": "do-not-log"}}}
+    playlist = SpotifyClient._library_item(item)
+    assert playlist.name == "Untitled playlist"
+    assert len(lines) == 1 and "secretvalue" in lines[0] and "do-not-log" not in lines[0]
+    SpotifyClient._library_item(item)
+    assert len(lines) == 1  # once per run
