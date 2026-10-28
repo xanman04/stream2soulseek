@@ -510,7 +510,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     enabled, done, nexts, cur = nav(win)
     assert cur == STEP_FINISH and enabled == [False] * 4 + [True, True]
     assert done[:5] == [True] * 5 and not done[5]
-    assert win.frames[5].next_btn.text() == "Start another playlist"  # the last step starts the next one
+    assert win.frames[5].next_btn.text() == "Done"  # the last step finishes and returns to Choose playlist
     # Atlantis finally gets going; the page shows it without anything else moving
     win.go_step(STEP_TRANSFERS)
     fake.succeed("slowpoke", base(7))
@@ -656,7 +656,7 @@ def test_restart_resumes_downloads_and_rerun_skips_what_is_already_imported(app_
 
         # start another playlist, pick the same one again: what is already in the folder is skipped
         win2.go_step(STEP_FINISH)
-        win2.frames[STEP_FINISH].next_btn.click()  # "Start another playlist"
+        win2.frames[STEP_FINISH].next_btn.click()  # "Done"
         assert win2.stack.currentIndex() == STEP_PLAYLIST + 1
         assert win2.ctx.import_id is None and win2.ctx.approval_id is None and win2.ctx.tracks == []
         assert nav(win2)[0] == [True, False, False, False, False, False]

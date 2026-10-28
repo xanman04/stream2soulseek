@@ -31,8 +31,8 @@ DISCONNECTED_WAIT = "Soulseek disconnected. Waiting {left} for it to reconnect; 
 SEARCH_STOPPED = ("Searching stopped: Soulseek disconnected S2S and did not reconnect, so {n} track{s} could not be "
                   "searched. This can be a network problem or a temporary Soulseek search ban (about 30 minutes). "
                   "Check the Soulseek connection, then use “Retry failed searches”.")
-LOCKED_INFO = ("Downloads are already queued for this selection. To search again, use “Start another playlist” "
-               "on the Downloads page once they are done.")
+LOCKED_INFO = ("Downloads are already queued for this selection. To search again, press “Done” "
+               "on the last page once they are finished.")
 
 
 class _Progress(QObject):

@@ -22,6 +22,7 @@ from ..models import ImportOutcome, TransferState
 from ..organize import checker_failed
 from ..rejections import RejectionKind, classify, pending_declined
 from .context import AppContext
+from .. import friendly
 from .theme import accent, chip, set_banner, set_chip, subtle, tint
 from .util import fmt_mib, item, make_table, show_error
 from .other_sources import OtherSourcesPanel
@@ -67,11 +68,12 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
     outcome = getattr(result, "outcome", None)
     if raw == "local_copy_approved" and outcome not in _IMPORTED:
         if outcome in (ImportOutcome.INVALID, ImportOutcome.CONFLICT):
-            why = getattr(result, "detail", "") or "local copy failed verification"
-            return TrackStatus("Local copy needs attention", "warn", ATTENTION, why,
+            friendly.log_once(getattr(rec, "apple_id", ""), getattr(result, "detail", ""))
+            _short, sentence = friendly.explain(getattr(result, "detail", "") or "The file failed S2S's check")
+            return TrackStatus("Local copy needs attention", "warn", ATTENTION, sentence,
                                fixable=True, recheck=True,
-                               help=f"The existing file was not copied: {why}. Nothing was overwritten or removed. "
-                                    "Use Check again, or search for another file below.")
+                               help=f"{sentence} Nothing was copied or changed. Press Check again, or pick another "
+                                    "file below.")
         return TrackStatus("Copying local file…" if auto_import else "Local file ready to copy", "info", DOWNLOADING)
     if s.state == TransferState.SUCCEEDED:
         if outcome in _IMPORTED:
@@ -81,21 +83,20 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
             why = getattr(result, "detail", "") or "a different file already has this name"
             return TrackStatus("Downloaded, check needed: file conflict", "warn", ATTENTION,
                                f"{why}\nNothing was overwritten.", recheck=True,
-                               help="Your tracklist folder already has a different file with this name, so nothing "
-                                    "was copied or overwritten. Rename or remove that file, then press Check again.")
+                               help="A different file with this name is already in your folder, so nothing was copied. "
+                                    "Rename or remove it, then press Check again.")
         if outcome == ImportOutcome.INVALID and checker_failed(getattr(result, "detail", "")):
             return TrackStatus("Downloaded, not checked yet", "warn", ATTENTION,
                                f"{result.detail}\nNothing was copied into your folder.", recheck=True,
-                               help="The file downloaded, but S2S could not run its file check, so it was not "
-                                    "copied into your folder yet. The file is probably fine: press Check again.")
+                               help="The file downloaded, but S2S couldn't check it yet, so it wasn't copied. "
+                                    "It's probably fine: press Check again.")
         if outcome == ImportOutcome.INVALID:
-            why = getattr(result, "detail", "") or "the file failed verification"
-            return TrackStatus(f"Downloaded, check needed: {_lower_first(why)[:70]}", "warn", ATTENTION,
-                               f"{why}\nNothing was copied into your folder.", fixable=True, recheck=True,
-                               help=f"The downloaded file did not pass the check ({_lower_first(why)[:120]}), so "
-                                    "it was not copied into your folder (it is still in the Soulseek downloads "
-                                    "folder). Pick another file on the right to download a different copy, or press Check "
-                                    "again to re-check this one.")
+            friendly.log_once(getattr(rec, "apple_id", ""), getattr(result, "detail", ""))
+            short, sentence = friendly.explain(getattr(result, "detail", ""))
+            return TrackStatus(f"Downloaded, check needed: {short}", "warn", ATTENTION,
+                               sentence, fixable=True, recheck=True,
+                               help=f"{sentence} It wasn't copied into your folder. Pick another file on the right, "
+                                    "or press Check again.")
         if auto_import:
             return TrackStatus("Copying…", "info", DOWNLOADING, raw_line)
         return TrackStatus("Downloaded, not copied yet", "info", DOWNLOADING,
@@ -726,7 +727,7 @@ class TransfersPage(QWidget):
             parts.append(f"{waiting} waiting")
         if problems:
             parts.append(f"{problems} with a problem")
-        self.details_btn.setText(("Details: peer folders — " + ", ".join(parts)) if parts else "")
+        self.details_btn.setText(("Folder tidy-up: " + ", ".join(parts)) if parts else "")
         self.details_btn.setVisible(bool(parts))
 
     # ------------------------------------------------------------ actions
@@ -786,11 +787,11 @@ class TransfersPage(QWidget):
         """Modal question when downloads are still running. True only for Start another. Replaceable in tests."""
         from PySide6.QtWidgets import QMessageBox
 
-        box = QMessageBox(QMessageBox.Icon.Question, "Start another playlist?",
+        box = QMessageBox(QMessageBox.Icon.Question, "Finish with this playlist?",
                           f"Downloads for {name} are still running ({_plural(active, 'track', 'tracks')} not "
-                          "finished). Start another playlist?\n\nDownloads continue in Soulseek; S2S imports them "
+                          "finished). Finish and go back to Choose playlist?\n\nDownloads continue in Soulseek; S2S imports them "
                           "when you reopen S2S while they are still running.", parent=self)
-        go = box.addButton("Start another", QMessageBox.ButtonRole.AcceptRole)
+        go = box.addButton("Done", QMessageBox.ButtonRole.AcceptRole)
         stay = box.addButton("Stay here", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(stay)
         box.setEscapeButton(stay)

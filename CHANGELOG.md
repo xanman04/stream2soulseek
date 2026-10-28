@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Downloads: problems are explained in one plain sentence ("S2S couldn't find the downloaded file on this computer.")
+  instead of file names, byte counts and internal wording. The technical detail goes to S2S's background log, once
+  per track, and is included in Help > Report a problem. "Details: peer folders" is now "Folder tidy-up".
+- The spectrogram window scales the picture to fit, with no scroll bars.
+- The last step's button is "Done" (it was "Start another playlist") and returns to Choose playlist.
+
 ## 1.4.1 — 2026-10-29
 
 - Sidebar Transfers panel polish: rows painted like the account rows with a slim progress line, whole rows only, and

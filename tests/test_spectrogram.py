@@ -85,3 +85,24 @@ def test_dialog_without_ffmpeg_explains(tmp_path, monkeypatch):
     dlg = spectrogram_dialog.SpectrogramDialog(str(audio), Settings())
     assert "FFmpeg was not found" in dlg.verdict.text()
     dlg.close()
+
+
+def test_spectrogram_picture_fits_the_window_without_scrolling(qapp=None):
+    from PySide6.QtGui import QColor, QPixmap
+    from PySide6.QtWidgets import QApplication
+
+    from s2s.ui.spectrogram_dialog import FitPicture
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841
+    pic = FitPicture()
+    source = QPixmap(2400, 1000)
+    source.fill(QColor("black"))
+    pic.show()
+    pic.set_source(source)
+    for width, height in ((900, 500), (500, 500), (1400, 300)):
+        pic.resize(width, height)
+        app.processEvents()
+        shown = pic.pixmap()
+        assert shown.width() / shown.devicePixelRatio() <= width + 1
+        assert shown.height() / shown.devicePixelRatio() <= height + 1
+        assert abs(shown.width() / shown.height() - 2.4) < 0.02  # proportions kept

@@ -172,7 +172,7 @@ def test_steps_locked_until_requirements_met_and_next_buttons(env, monkeypatch):
     assert f[1].next_btn.text() == "Next: Find on Soulseek"
     assert f[3].next_btn.text() == "Next: Downloads && import"  # & escaped so Qt shows it
     assert f[4].next_btn.isVisibleTo(f[4])  # Downloads leads on to Check files
-    assert f[5].next_btn.text() == "Start another playlist"  # the last step starts the next playlist
+    assert f[5].next_btn.text() == "Done"  # the last step returns to Choose playlist
     win.go_step(2)  # locked: ignored
     assert win.stack.currentIndex() == 1
 

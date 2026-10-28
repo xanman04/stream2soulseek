@@ -227,7 +227,7 @@ class FinishPage(QWidget):
                          f" — use “Find another source” to review a different file for {them}.")
         if n_nf:
             parts.append(f"{n_nf} {'was' if n_nf == 1 else 'were'} not found on Soulseek — try again later with "
-                         "Start another playlist, or change your Matching rules.")
+                         "Done, or change your Matching rules.")
         if n_ns:
             parts.append(f"{n_ns} {'was' if n_ns == 1 else 'were'} left out by choice (no file was ticked in the "
                          "review).")

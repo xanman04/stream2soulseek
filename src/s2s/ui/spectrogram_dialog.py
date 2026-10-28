@@ -6,7 +6,7 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import config, spectrogram
 from ..organize import probe_audio
@@ -22,6 +22,34 @@ def ffmpeg_for(settings) -> str | None:
     return spectrogram.find_ffmpeg(getattr(settings, "ffprobe_path", None))
 
 
+class FitPicture(QLabel):
+    """A picture that always fits the space it is given, keeping its proportions (no scroll bars)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._source: QPixmap | None = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)  # the window decides the size
+        self.setMinimumSize(200, 120)
+
+    def set_source(self, pixmap: QPixmap) -> None:
+        self._source = pixmap
+        self._fit()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit()
+
+    def _fit(self) -> None:
+        if self._source is None or self._source.isNull() or self.width() < 2 or self.height() < 2:
+            return
+        dpr = self.devicePixelRatioF()
+        scaled = self._source.scaled((self.size() * dpr), Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+        scaled.setDevicePixelRatio(dpr)
+        self.setPixmap(scaled)
+
+
 class SpectrogramDialog(QDialog):
     def __init__(self, audio_path: str, settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -34,11 +62,7 @@ class SpectrogramDialog(QDialog):
         self.title = QLabel(f"<b>{os.path.basename(audio_path)}</b>")
         self.title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.verdict = theme.banner("Drawing the spectrogram…", "info")
-        self.picture = QLabel()
-        self.picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.picture)
+        self.picture = FitPicture()
         self.help = theme.subtle(QLabel(HELP))
         self.help.setWordWrap(True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -47,7 +71,7 @@ class SpectrogramDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(self.title)
         lay.addWidget(self.verdict)
-        lay.addWidget(scroll, 1)
+        lay.addWidget(self.picture, 1)
         lay.addWidget(self.help)
         lay.addWidget(buttons)
         self.start()
@@ -76,7 +100,7 @@ class SpectrogramDialog(QDialog):
     def _shown(self, result: spectrogram.Spectrogram) -> None:
         self.result = result
         pix = QPixmap(result.image_path)
-        self.picture.setPixmap(pix)
+        self.picture.set_source(pix)
         theme.set_banner(self.verdict, result.verdict + "  (Estimate — check the picture.)", result.kind)
 
     def _failed(self, exc: object) -> None:

@@ -213,7 +213,7 @@ def test_start_another_and_history_signals_emit_without_workflow_changes(env):  
     page.new_import_requested.connect(lambda: out.append("new"))
     page.history_requested.disconnect()
     page.history_requested.connect(lambda: out.append("history"))
-    win.frames[-1].next_btn.click()  # Step 6's "Start another playlist"
+    win.frames[-1].next_btn.click()  # Step 6's "Done"
     page.history_btn.click()
     assert out == ["new", "history"]
     page.stop()
