@@ -531,6 +531,7 @@ def search_track_custom(
         client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
         response_limit=settings.response_limit, file_limit=settings.file_limit,
         queries=[query], check_empty=True, cache=_search.SHARED_CACHE,
+        refresh_cached=True,
     )
     old = next((r for r in store.load_match_results(import_id) if r.track.apple_id == track.apple_id), None)
     files = list(found)

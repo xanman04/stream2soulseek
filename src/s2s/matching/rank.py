@@ -94,13 +94,38 @@ def _contains(hay: str, needle: str) -> bool:
 
 
 def _same_person(a: str | None, b: str | None) -> bool:
+    if a is None and b is None:
+        return True  # two versions with no named remixer share the same identity
     ta = {w for w in (a or "").split() if w not in _STOP}
     tb = {w for w in (b or "").split() if w not in _STOP}
+    if not ta or not tb:
+        return bool(a and b) and normalise(a) == normalise(b)
     return ta == tb
 
 
 def _is_artist(name: str | None, artists: list[str]) -> bool:
     return bool(name) and any(_same_person(name, a) for a in artists)
+
+
+def _explicit_artist(name: str, artists: list[str]) -> bool:
+    """An artist identity, rather than a word inside someone else's name."""
+    if any(_same_person(normalise(name), artist) for artist in artists):
+        return True
+    return any(_same_person(part, artist) for part in split_names(name) for artist in artists)
+
+
+def _artist_label_in_path(dirs: list[str], guess: str | None, artists: list[str]) -> bool:
+    if guess and _explicit_artist(guess, artists):
+        return True
+    for directory in dirs:
+        # Artist / Album / title.ext and Artist - Album / title.ext are both common.
+        # Bracketed dates/labels do not become part of the artist's name.
+        base, labels = tokenise(directory.replace("_", " "))
+        for part in [base, *(label for label, bracketed in labels if not bracketed)]:
+            part = re.sub(r"\b(?:19|20)\d{2}\b|\bdiscography\b", " ", part, flags=re.I).strip()
+            if part and _explicit_artist(part, artists):
+                return True
+    return False
 
 
 def _eff_remixer(p: ParsedTitle, artists: list[str]) -> str | None:
@@ -232,6 +257,9 @@ def _evaluate(track: AppleTrack, f: RemoteFile, policy: MatchPolicy | None = Non
     if _contains(path_norm, full_artist) or (artists and _contains(path_norm, artists[0])):
         info.append("artist found in path")
         relevance += 1
+        if not _artist_label_in_path(dirs, g, [full_artist, *artists[:1]]):
+            flags.append("artist name appears only within longer path text; artist identity is uncertain")
+            artist_weak = True
     elif any(_contains(path_norm, r) for r in remix_names):
         info.append("artist matched via remixer")
         relevance += 1

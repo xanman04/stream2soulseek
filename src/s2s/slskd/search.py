@@ -612,8 +612,8 @@ class SearchFiles(list):
 class SearchCache:
     """Responses of searches already run, by normalised query text.
 
-    A query is never sent twice while its answer is cached: an identical one is answered from the cache (or
-    waits for the identical one in flight on another worker). A query whose words include all words of an
+    An identical query reuses its answer (or waits for the one in flight on another worker). Callers can
+    refresh an inadequate answer after the repeat cooldown. A query whose words include all words of an
     already-run query is first answered from that query's files, as Soulseek matches whole words in the path.
     That is used only when the earlier answer was complete (fewer uploaders than the response limit, so no peer
     was cut off) and it yields files, so a thin or truncated answer never hides results. With `ttl_s`, answers
@@ -675,18 +675,27 @@ class SearchCache:
         return (out, min(source_times)) if out else None
 
     def get_or_run(self, query: str, run: Callable[[], list[RemoteFile]], cancel: threading.Event, *,
-                   response_limit: int | None = None, file_limit: int | None = None) -> list[RemoteFile]:
+                   response_limit: int | None = None, file_limit: int | None = None,
+                   accept_cached: Callable[[list[RemoteFile]], bool] | None = None) -> list[RemoteFile]:
         key = _query_key(query)
         while True:
             with self._lock:
                 self._expire()
                 entry = self._entries.get(key)
+                if (entry is not None and entry.files is not None and accept_cached is not None
+                        and self._clock() - entry.at >= REPEAT_COOLDOWN_S
+                        and not accept_cached(entry.files)):
+                    del self._entries[key]
+                    entry = None
                 if entry is not None and entry.files is not None:
                     self.hits += 1
                     return list(entry.files)
                 if entry is None:
                     saved = self._disk.get(key) if self._disk is not None else None
                     if saved is not None and self._ttl is not None and saved[2] >= self._ttl:
+                        saved = None
+                    if (saved is not None and accept_cached is not None and saved[2] >= REPEAT_COOLDOWN_S
+                            and not accept_cached(saved[0])):
                         saved = None
                     if saved is not None:
                         files, complete, age = saved
@@ -697,6 +706,8 @@ class SearchCache:
                         self.hits += 1
                         return list(files)
                     derived = self._derived(key)
+                    if derived is not None and accept_cached is not None and not accept_cached(derived[0]):
+                        derived = None
                     if derived is not None:
                         files, source_at = derived
                         done = self._Entry()
@@ -795,6 +806,7 @@ def run_search(
     queries: list[str] | None = None,
     check_empty: bool = False,
     cache: SearchCache | None = None,
+    refresh_cached: bool = False,
 ) -> list[RemoteFile]:
     """Try broader queries until the caller's candidate-pool target is met.
 
@@ -835,7 +847,8 @@ def run_search(
                 try:
                     if cache is not None:
                         found = cache.get_or_run(query, lambda: attempt(query, budget), cancel,
-                                                 response_limit=response_limit, file_limit=file_limit)
+                                                 response_limit=response_limit, file_limit=file_limit,
+                                                 accept_cached=(lambda _files: False) if refresh_cached else has_usable)
                     else:
                         found = attempt(query, budget)
                     break
