@@ -405,8 +405,7 @@ class TransfersPage(QWidget):
     def show_library_update(self, count: int, folder: str) -> None:
         text = (f"{count} track{'s' if count != 1 else ''} added to {folder} since you last opened this transfer. "
                 "Refresh your Rekordbox playlist when you're ready.") if count else ""
-        self.library_update.setText(text)
-        self.library_update.setVisible(bool(text))
+        set_banner(self.library_update, text, "ok")  # the same quiet success banner as "All tracks are in your folder"
 
     def start(self) -> None:
         """Begin showing/refreshing the current approval."""

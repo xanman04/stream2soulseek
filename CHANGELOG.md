@@ -2,6 +2,9 @@
 
 ## 1.4.1 — 2026-10-29
 
+- Sidebar Transfers panel polish: rows painted like the account rows with a slim progress line, whole rows only, and
+  scaled with the window like the rest of the sidebar. The "tracks added to your folder" notice on Downloads is a
+  quiet success banner.
 - Transfers keep going in the background. A **Transfers** panel in the sidebar lists every saved download session
   (playlist, how many tracks are in your folder, what is still waiting); click one to reopen it. S2S keeps checking
   all of them, imports late finishers, and tells you when new tracks were added to your folder ("Refresh your
