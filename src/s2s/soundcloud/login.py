@@ -76,8 +76,8 @@ _EMAIL_ONLY_JS = r"""
 """
 
 
-# SoundCloud's cookie-consent banner would cover the sign-in page every time, because this window keeps no cookies
-# between sign-ins. It is hidden from the very first moment (so it never flashes) and answered the
+# SoundCloud's cookie-consent banner and its Artist Pro promo bar would cover the sign-in page, because this window
+# keeps no cookies between sign-ins. They are hidden from the very first moment (so it never flashes) and answered the
 # privacy-preserving way: "Reject all" (essential cookies only).
 _REJECT_COOKIES_JS = r"""
 (function () {
@@ -86,7 +86,8 @@ _REJECT_COOKIES_JS = r"""
     var root = document.documentElement;
     if (!root) return false;
     var style = document.createElement("style");
-    style.textContent = "#onetrust-consent-sdk, #onetrust-banner-sdk, .onetrust-pc-dark-filter { display: none !important; }";
+    style.textContent = "#onetrust-consent-sdk, #onetrust-banner-sdk, .onetrust-pc-dark-filter, "
+      + "div.banner:has(.banner__close) { display: none !important; }";  // cookie banner and the Artist Pro promo
     root.appendChild(style);
     return true;
   }
