@@ -24,7 +24,26 @@ SERVICES = [
 ]
 
 
-STEP_HEIGHT = 42
+STEP_HEIGHT = 42  # the least a step row gets
+STEP_MAX_HEIGHT = 72  # and the most: taller windows give the rows more room, up to this
+
+
+class _StepList(QListWidget):
+    """The numbered steps. They fill the panel: each row grows with the available height (within limits), so
+    the section is one solid block at any window size instead of leaving a gap above it."""
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        n = self.count()
+        if not n:
+            return
+        avail = self.height() - 4
+        height = max(STEP_HEIGHT, min(STEP_MAX_HEIGHT, avail // n - self.spacing() * 2))
+        for i in range(n):
+            self.item(i).setSizeHint(QSize(0, height))
+        pad = max(0, (avail - n * (height + self.spacing() * 2)) // 2)  # extra room: even padding above and below
+        if self.viewportMargins().top() != pad:
+            self.setViewportMargins(0, pad, 0, pad)
 
 
 def _header(text: str) -> QLabel:
@@ -89,7 +108,7 @@ class Sidebar(QWidget):
         connection_layout.addWidget(self.soulseek_label)
         connection_layout.addWidget(self.soulseek_btn)
 
-        self.steps = QListWidget()
+        self.steps = _StepList()
         self.steps.setObjectName("stepList")
         self.steps.setSpacing(3)
         self.steps.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -97,7 +116,7 @@ class Sidebar(QWidget):
             it = QListWidgetItem(f"{i + 1}. {name}")
             it.setSizeHint(QSize(0, STEP_HEIGHT))
             self.steps.addItem(it)
-        self.steps.setFixedHeight((STEP_HEIGHT + 3) * len(STEPS) + 6)
+        self.steps.setMinimumHeight((STEP_HEIGHT + 6) * len(STEPS) + 8)
         self.settings_btn = QPushButton("Settings...")
 
         # The same card look for every section, so the sidebar reads as separate, deliberate blocks.
@@ -122,8 +141,7 @@ class Sidebar(QWidget):
         lay.addWidget(services_card)
         lay.addWidget(connection)
         lay.addWidget(self.settings_btn)
-        lay.addStretch(1)
-        lay.addWidget(steps_card)
+        lay.addWidget(steps_card, 1)  # the steps panel takes everything below: no empty gap
 
         # React to deliberate clicks / Enter only. currentRowChanged also fires when a list merely receives
         # focus (Qt selects row 0 on focus-in), which used to open the Apple page - and start its embedded
