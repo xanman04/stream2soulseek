@@ -181,7 +181,7 @@ def main() -> int:
                         try:
                             result = page.source.get_tracks(playlist.id)
                             tracks = list(result.tracks) if hasattr(result, "tracks") else list(result)
-                            titled = sum(1 for t in tracks if getattr(t, "title", ""))
+                            titled = sum(1 for t in tracks if getattr(t, "name", ""))
                             artist = sum(1 for t in tracks if getattr(t, "artist", ""))
                             timed = sum(1 for t in tracks if getattr(t, "duration_ms", 0) or getattr(t, "duration", 0))
                             log(f"playlist {index + 1}: {len(tracks)} tracks; title {titled}, artist {artist}, "

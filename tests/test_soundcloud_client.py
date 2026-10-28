@@ -303,35 +303,10 @@ def test_a_playlist_deleted_since_it_was_saved_gets_a_plain_message():
             client.get_playlist_tracks("soundcloud:playlist:77")
 
 
-def test_liked_tracks_are_offered_first_and_read_like_a_playlist():
-    def handler(request):
-        path = request.url.path
-        if path == "/me":
-            return httpx.Response(200, json={**me(), "likes_count": 3})
-        if path.endswith("/playlists_without_albums") or path.endswith("/playlist_likes"):
-            return httpx.Response(200, json={"collection": [], "next_href": None})
-        if path.endswith("/track_likes"):
-            return httpx.Response(200, json={"collection": [
-                {"kind": "like", "track": full_track(5, "Liked One")},
-                {"kind": "like", "track": {"id": 6}},   # stub: hydrated below
-                {"kind": "like"},                        # deleted since it was liked
-            ], "next_href": None})
-        if path == "/tracks":
-            return httpx.Response(200, json=[full_track(6, "Liked Two")])
-        raise AssertionError(request.url)
-
-    with api_client(handler) as client:
-        playlists = client.list_playlists()
-        assert [(p.id, p.name) for p in playlists] == [("soundcloud:likes", "Liked tracks")]
-        tracks = client.get_playlist_tracks("soundcloud:likes")
-    assert [t.name for t in tracks] == ["Liked One", "Liked Two"]
-    assert tracks[0].apple_id.startswith("soundcloud:likes:track:5")
-
-
-def test_liked_albums_alone_do_not_make_a_liked_tracks_entry_or_a_playlist():
+def test_liked_albums_are_not_listed_but_liked_playlists_are():
     def handler(request):
         if request.url.path == "/me":
-            return httpx.Response(200, json={**me(), "likes_count": 16})  # all of them albums
+            return httpx.Response(200, json={**me(), "likes_count": 16})  # liked tracks and albums are not playlists
         if request.url.path.endswith("/playlist_likes"):
             return httpx.Response(200, json={"collection": [
                 {"kind": "like", "playlist": {**playlist(8, "Some Album"), "is_album": True}},

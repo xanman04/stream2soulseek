@@ -16,8 +16,8 @@ Sign-in here is by email and password. Google, Apple and Facebook refuse sign-in
 window, so S2S hides those three buttons rather than leave a dead end, and SoundCloud's bot protection may show a
 slider challenge to solve. S2S does not disguise its browser to get around either. An account that only has
 Google login can set a password from SoundCloud's "Need help?" link, or use the public-link route above.
-The list in **Choose playlist** shows your **Liked tracks**, the playlists you made, then the ones you saved from
-other people. SoundCloud's cookie banner is answered with "Reject all" automatically.
+The list in **Choose playlist** shows the playlists you made, then the ones you saved (liked) from other people.
+Liked tracks, albums, EPs and singles are not listed. SoundCloud's cookie banner is answered with "Reject all" automatically.
 
 If verification fails temporarily, choose **Retry verification** without signing in again. A rejected session
 starts a fresh sign-in page.
@@ -35,8 +35,8 @@ Sign out, or disable web sign-in, to remove S2S's local SoundCloud token. This d
 
 ## Playlist and matching behavior
 
-- Lists account-owned playlists, including private playlists accessible to the session. Liked playlists,
-  liked tracks, albums and feeds are not included in this first implementation.
+- Lists account-owned playlists, including private playlists accessible to the session, then playlists the account
+  liked from other people. Liked tracks, albums, EPs, singles and feeds are not included.
 - Follows pagination and hydrates track ID placeholders in batches while preserving playlist order and duplicates.
 - Reports missing track metadata rather than silently presenting a complete playlist.
 - Uses publisher artist metadata where available; otherwise recognizes an explicit `Artist - Title`,
