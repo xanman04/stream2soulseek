@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.3 — 2026-10-28
+
+- Windows setup removes obsolete program files, legacy in-folder uninstaller files and directories absent
+  from the new release's manifest. Current files, required empty folders and the active uninstaller are kept.
+- Cleanup is limited to the standard S2S program installation. Settings, saved sessions, download storage
+  and music libraries remain separate and are preserved.
+- Linked installation paths are rejected before copying files. Locked or incomplete cleanup produces an
+  installation error and prevents automatic launch, so setup cannot report a clean installation prematurely.
+
 ## 1.3.2 — 2026-10-28
 
 - Partial artist names inside longer folder names now require review instead of being treated as confident
