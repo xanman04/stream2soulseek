@@ -76,18 +76,55 @@ _EMAIL_ONLY_JS = r"""
 """
 
 
+# SoundCloud's cookie-consent banner would cover the sign-in page every time, because this window keeps no cookies
+# between sign-ins. It is hidden from the very first moment (so it never flashes) and answered the
+# privacy-preserving way: "Reject all" (essential cookies only).
+_REJECT_COOKIES_JS = r"""
+(function () {
+  if (!/(^|\.)soundcloud\.com$/.test(location.hostname)) return;
+  function hideBanner() {
+    var root = document.documentElement;
+    if (!root) return false;
+    var style = document.createElement("style");
+    style.textContent = "#onetrust-consent-sdk, #onetrust-banner-sdk, .onetrust-pc-dark-filter { display: none !important; }";
+    root.appendChild(style);
+    return true;
+  }
+  if (!hideBanner()) {
+    var watcher = new MutationObserver(function () { if (hideBanner()) watcher.disconnect(); });
+    watcher.observe(document, {childList: true});
+  }
+  function answer() {
+    var button = document.getElementById("onetrust-reject-all-handler");
+    if (!button) {
+      document.querySelectorAll("#onetrust-banner-sdk button, #onetrust-consent-sdk button").forEach(function (b) {
+        if (/^\s*reject all\s*$/i.test(b.textContent || "")) button = button || b;
+      });
+    }
+    if (button) { button.click(); return true; }  // hidden banners still take the click
+    return false;
+  }
+  var tries = 0;
+  var timer = setInterval(function () { if (answer() || ++tries > 120) clearInterval(timer); }, 250);
+})();
+"""
+
+
 class _Page(QWebEnginePage):
     def __init__(self, profile, owner, parent):
         super().__init__(profile, parent)
         self.owner = owner
         self.settings().setUnknownUrlSchemePolicy(QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes)
-        script = QWebEngineScript()
-        script.setName("s2s-email-sign-in-only")
-        script.setSourceCode(_EMAIL_ONLY_JS)
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
-        script.setRunsOnSubFrames(True)
-        self.scripts().insert(script)
+        for name, source, when in (
+                ("s2s-email-sign-in-only", _EMAIL_ONLY_JS, QWebEngineScript.InjectionPoint.DocumentReady),
+                ("s2s-reject-cookies", _REJECT_COOKIES_JS, QWebEngineScript.InjectionPoint.DocumentCreation)):
+            script = QWebEngineScript()
+            script.setName(name)
+            script.setSourceCode(source)
+            script.setInjectionPoint(when)
+            script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+            script.setRunsOnSubFrames(True)
+            self.scripts().insert(script)
         self.loadFinished.connect(lambda ok: TRAIL.loaded(self, ok))
 
     def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802

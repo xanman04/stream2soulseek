@@ -117,11 +117,42 @@ def main() -> int:
     login.status_changed.connect(lambda m: log(f"status: {m!r}"))
     login.session_candidate.connect(lambda c: log(f"S2S captured a token candidate (expires set: {c.get('expires') is not None})"))
 
+    def shape(value, depth=4):
+        """Field names and value types only; never a value."""
+        if isinstance(value, dict):
+            return {k: shape(v, depth - 1) if depth > 0 else type(v).__name__ for k, v in list(value.items())[:40]}
+        if isinstance(value, list):
+            return [shape(value[0], depth - 1)] + ([f"... {len(value)} items"] if len(value) > 1 else []) if value else []
+        return type(value).__name__
+
+    def experiments():
+        """What the account's endpoints actually return, as shapes and counts."""
+        with page.source._client() as client:
+            client.validate_session()
+            me = client._account()
+            log("account counts: " + ", ".join(f"{k}={v}" for k, v in me.items()
+                                                if isinstance(v, int) and "count" in k and not isinstance(v, bool)))
+            user_id = me["id"]
+            for endpoint in ("playlists_without_albums", "playlist_likes", "playlists/liked_and_owned"):
+                try:
+                    body = client._get_json(f"https://api-v2.soundcloud.com/users/{user_id}/{endpoint}?limit=50&linked_partitioning=true",
+                                            authenticated=True)
+                    items = body.get("collection") if isinstance(body, dict) else None
+                    first = items[0] if items else None
+                    log(f"{endpoint}: {len(items) if items is not None else 'no collection'} items; next page: "
+                        f"{bool(isinstance(body, dict) and body.get('next_href'))}; first item: {shape(first, 2)}")
+                except Exception as exc:  # noqa: BLE001
+                    log(f"{endpoint} FAILED: {type(exc).__name__}: {embedded_diag.clean(exc)}")
+
     def signed_in():
         log("page: signed in; the session was saved. Reading playlists the way Step 1 does…")
 
         class Job(QRunnable):
             def run(self_inner):  # noqa: N805
+                try:
+                    experiments()
+                except Exception as exc:  # noqa: BLE001
+                    log(f"experiments FAILED: {type(exc).__name__}: {embedded_diag.clean(exc)}")
                 try:
                     playlists = page.source.list_playlists()
                     named = sum(1 for p in playlists if p.name)

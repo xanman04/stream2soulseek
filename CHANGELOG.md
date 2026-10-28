@@ -21,6 +21,10 @@
   (DataDome) can show a slider challenge there, so account sign-in is not available to everyone; links are.
 - SoundCloud: the playlist list now includes playlists you saved (liked) from other people, after the ones you
   made.
+- SoundCloud: your liked tracks appear as a "Liked tracks" entry at the top of the list. Saved playlists and
+  playlists made by others load even when SoundCloud sends only part of the entry, a track was removed (you get a
+  note instead of an error), or the playlist was deleted since you saved it (a plain message).
+- SoundCloud's cookie banner is answered with "Reject all" and never shown in the sign-in window.
 - SoundCloud sign-in shows only the email field: the Google, Apple and Facebook buttons are hidden because those
   providers refuse sign-in inside an app window. Nothing about the browser is disguised.
 - Developer tool: tools/soundcloud_login_probe.py, the SoundCloud counterpart of the Spotify probe.
