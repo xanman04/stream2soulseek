@@ -11,7 +11,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
-from ..embedded_diag import Trail, navigation_allowed
+from ..embedded_diag import PROBE_JS, Trail, navigation_allowed
 from .session import _valid_cookie
 
 START_URL = "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F"
@@ -116,7 +116,7 @@ class SpotifyLoginWidget(QWidget):
         self._restoring.clear()
         self._restore_timer.stop()
         cookies = [c for c in (restored_cookies or []) if _valid_cookie(c)]
-        self.status_changed.emit("Loading Spotify sign-in inside the app…")
+        self.status_changed.emit("")
         if cookies:
             self._restore_pending = True
             self._restoring = {c["name"] for c in cookies}
@@ -223,4 +223,17 @@ class SpotifyLoginWidget(QWidget):
     def _on_load_finished(self, ok):
         if not ok:
             self.login_failed.emit("Spotify sign-in page failed to load. Check your connection.")
+            return
+        generation = self._generation
+
+        def shown(keys) -> None:  # Spotify's own error page ("Something went wrong. Try again later.")
+            if (not self._disposed and generation == self._generation and keys
+                    and ("went-wrong" in keys or "try-later" in keys)):
+                self.login_failed.emit("Spotify's sign-in page reported an error. Start over; if it keeps "
+                                       "happening, wait a few minutes first.")
+
+        try:
+            self._page.runJavaScript(PROBE_JS, shown)
+        except Exception:  # noqa: BLE001 - never let the check itself break sign-in
+            pass
 

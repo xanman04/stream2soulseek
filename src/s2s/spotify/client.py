@@ -20,6 +20,36 @@ _PROFILE_URL = "https://www.spotify.com/api/account-settings/v1/profile"
 _MAX_PAGES = 2000
 
 
+def _shape(value: Any, depth: int = 4) -> Any:
+    """Key names, types and list lengths only: never a string or number value."""
+    if depth == 0:
+        return "..."
+    if isinstance(value, Mapping):
+        return {k: _shape(v, depth - 1) for k, v in list(value.items())[:20]}
+    if isinstance(value, list):
+        return [len(value), _shape(value[0], depth - 1)] if value else [0]
+    return type(value).__name__ if value is not None else "null"
+
+
+_logged_nameless = False
+
+
+def _log_nameless(item: Any) -> None:
+    """Once per run: what a library playlist without a name looks like (structure only), for the log."""
+    global _logged_nameless
+    if _logged_nameless:
+        return
+    _logged_nameless = True
+    try:
+        import json
+
+        from ..applog import get
+
+        get().info("Spotify library entry without a name; structure: %s", json.dumps(_shape(item))[:900])
+    except Exception:  # noqa: BLE001 - diagnostics only
+        pass
+
+
 class SpotifyError(Exception):
     """Safe, user-facing failure without upstream response details."""
 
@@ -339,24 +369,32 @@ class SpotifyClient:
         )
 
     @staticmethod
-    def _is_playlist(item: Any) -> bool:
+    def _entry_uri(item: Mapping[str, Any]) -> Any:
+        """The URI of a library entry. Spotify's library reply has named it "uri" and, since late 2026, "_uri"."""
+        entry = item.get("item") if isinstance(item.get("item"), Mapping) else item
+        return entry.get("uri") or entry.get("_uri") or item.get("uri") or item.get("_uri")
+
+    @classmethod
+    def _is_playlist(cls, item: Any) -> bool:
         """Only entries whose URI is a playlist URI. Folders, Liked Songs, episodes etc. are not playlists,
         whatever their type name says; treating them as playlists would fail the whole library load."""
         if not isinstance(item, Mapping):
             return False
-        entry = item.get("item") if isinstance(item.get("item"), Mapping) else item
-        uri = entry.get("uri") or item.get("uri")
+        uri = cls._entry_uri(item)
         return isinstance(uri, str) and uri.startswith("spotify:playlist:")
 
     @classmethod
     def _library_item(cls, item: Mapping[str, Any]) -> Playlist:
         entry = item.get("item") if isinstance(item.get("item"), Mapping) else item
-        uri = entry.get("uri") or entry.get("id")
+        uri = cls._entry_uri(item) or entry.get("id")
         if not isinstance(uri, str):
             raise SpotifyError("Spotify returned a playlist without an ID.")
         ident = cls._playlist_id(uri)
-        name = entry.get("name") or entry.get("title") or ""
-        return Playlist(id=f"spotify:playlist:{ident}", name=str(name))
+        data = entry.get("data") if isinstance(entry.get("data"), Mapping) else {}  # the newer reply nests the name
+        name = entry.get("name") or entry.get("title") or data.get("name") or data.get("title") or ""
+        if not name:
+            _log_nameless(item)
+        return Playlist(id=f"spotify:playlist:{ident}", name=str(name) or "Untitled playlist")
 
     @staticmethod
     def _library_page(body: Any) -> tuple[list[Any], int]:
@@ -364,11 +402,17 @@ class SpotifyClient:
             # Spotify answers an expired/invalid session with data.me == null and "User is not authorized".
             raise SpotifyAuthError("Spotify session expired; sign in again.")
         try:
-            library = body["data"]["me"]["library"]
+            me = body["data"]["me"]
+            # Spotify renamed the field: "library" (older) became "libraryV3". The newer reply lists the entries
+            # directly under it; the older nested them one level deeper (library.items.items).
+            library = me.get("libraryV3") or me["library"]
             section = library.get("items", library)
-            items = section.get("items", []) if isinstance(section, Mapping) else []
-            total = section.get("totalCount", len(items)) if isinstance(section, Mapping) else len(items)
-        except (TypeError, KeyError):
+            if isinstance(section, list):
+                items, total = section, library.get("totalCount", len(section))
+            else:
+                items = section.get("items", []) if isinstance(section, Mapping) else []
+                total = section.get("totalCount", len(items)) if isinstance(section, Mapping) else len(items)
+        except (TypeError, KeyError, AttributeError):
             raise SpotifyError("Spotify returned an unexpected library response.") from None
         if not isinstance(items, list):
             raise SpotifyError("Spotify returned an unexpected library response.")

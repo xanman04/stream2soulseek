@@ -171,7 +171,7 @@ class AppleLoginWidget(QWidget):
     # ------------------------------------------------------------------ API
 
     def start(self) -> None:
-        self.status_changed.emit("Loading Apple Music; click Sign In on the page.")
+        self.status_changed.emit("")
         self._profile.cookieStore().loadAllCookies()
         self._view.load(QUrl(START_URL))
 

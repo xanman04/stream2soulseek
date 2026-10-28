@@ -85,7 +85,7 @@ def test_reconnect_opens_embedded_login_without_deleting_saved_session(win, monk
     shown = []
     monkeypatch.setattr(win.service, "show_login", lambda msg: shown.append(msg))
     win.service.reconnect_btn.click()
-    assert shown and "Reconnect" in shown[0]
+    assert shown == [""]  # the sign-in page needs no instruction line
     assert win.service.is_connected()
 
 

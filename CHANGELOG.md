@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Spotify: playlists now appear after signing in. Spotify renamed the library field in its reply
+  (`libraryV3`, entries named `_uri`, names nested under `data`) and S2S only knew the old shape, so a successful
+  sign-in showed "unexpected library response". Both shapes are read; a playlist without a name shows as
+  "Untitled playlist" and its structure is logged once.
+- Spotify sign-in: a failed attempt (Spotify's own "Something went wrong" page, or a rejected session) now shows a
+  Start over button instead of leaving a dead end.
+- Sign-in pages no longer show "Sign in to X in the page below" or loading lines.
+- Sidebar: no "Workflow" heading. Streaming services and the Soulseek connection are boxed, Settings sits with
+  the connection, and the numbered steps fill their own boxed panel at the bottom, larger and bolder with a
+  filled bar on the current step.
+- Developer tools: tools/spotify_login_probe.py (opens S2S's real Spotify sign-in, logs a privacy-safe timeline
+  and Chromium's network log without cookies) and tools/netlog_summary.py.
 - SoundCloud: no more "Enable SoundCloud web sign-in" checkbox. The page is one "Sign in to SoundCloud" button,
   and a saved session is the connection. The sign-in window now fills the page (it was squeezed at the bottom),
   with no address line or Restart/Cancel buttons; leaving the page cancels the sign-in. The "Loading…" message

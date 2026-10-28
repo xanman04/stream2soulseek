@@ -1,4 +1,5 @@
-"""Left sidebar: streaming services, the Soulseek status row, and the numbered workflow."""
+"""Left sidebar: three boxed sections: streaming services, the Soulseek connection (with Settings), and, filling
+the bottom on its own, the numbered steps."""
 
 from __future__ import annotations
 
@@ -23,6 +24,9 @@ SERVICES = [
 ]
 
 
+STEP_HEIGHT = 42
+
+
 def _header(text: str) -> QLabel:
     lab = QLabel(text)
     lab.setObjectName("navHeading")
@@ -39,7 +43,7 @@ class Sidebar(QWidget):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(252)
+        self.setFixedWidth(268)
 
         brand = QWidget()
         brand.setObjectName("appBrand")
@@ -85,29 +89,41 @@ class Sidebar(QWidget):
         connection_layout.addWidget(self.soulseek_label)
         connection_layout.addWidget(self.soulseek_btn)
 
-        self.steps_header = _header("Workflow")
         self.steps = QListWidget()
-        self.steps.setObjectName("navigation")
-        self.steps.setSpacing(2)
+        self.steps.setObjectName("stepList")
+        self.steps.setSpacing(3)
+        self.steps.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         for i, (name, _t, _e) in enumerate(STEPS):
             it = QListWidgetItem(f"{i + 1}. {name}")
-            it.setSizeHint(QSize(0, 36))
+            it.setSizeHint(QSize(0, STEP_HEIGHT))
             self.steps.addItem(it)
-        self.steps.setFixedHeight(40 * len(STEPS) + 4)
+        self.steps.setFixedHeight((STEP_HEIGHT + 3) * len(STEPS) + 6)
         self.settings_btn = QPushButton("Settings...")
+
+        # The same card look for every section, so the sidebar reads as separate, deliberate blocks.
+        services_card = QFrame()
+        services_card.setObjectName("navCard")
+        services_layout = QVBoxLayout(services_card)
+        services_layout.setContentsMargins(10, 4, 10, 10)
+        services_layout.setSpacing(2)
+        services_layout.addWidget(self.services_header)
+        services_layout.addWidget(self.services)
+
+        steps_card = QFrame()  # only the numbered steps live here
+        steps_card.setObjectName("stepsCard")
+        steps_layout = QVBoxLayout(steps_card)
+        steps_layout.setContentsMargins(8, 8, 8, 8)
+        steps_layout.addWidget(self.steps)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 14, 14, 14)
-        lay.setSpacing(8)
+        lay.setSpacing(10)
         lay.addWidget(brand)
-        lay.addWidget(self.services_header)
-        lay.addWidget(self.services)
-        lay.addSpacing(6)
+        lay.addWidget(services_card)
         lay.addWidget(connection)
-        lay.addWidget(self.steps_header)
-        lay.addWidget(self.steps)
-        lay.addStretch(1)
         lay.addWidget(self.settings_btn)
+        lay.addStretch(1)
+        lay.addWidget(steps_card)
 
         # React to deliberate clicks / Enter only. currentRowChanged also fires when a list merely receives
         # focus (Qt selects row 0 on focus-in), which used to open the Apple page - and start its embedded
@@ -179,7 +195,11 @@ class Sidebar(QWidget):
             cur = lst.currentRow()
             for i in range(lst.count()):
                 f = QFont(lst.font())
-                f.setBold(i == cur)
+                if lst is self.steps:  # steps are larger and bolder than the rest; the current one boldest
+                    f.setPointSizeF(f.pointSizeF() * 1.12)
+                    f.setWeight(QFont.Weight.Bold if i == cur else QFont.Weight.DemiBold)
+                else:
+                    f.setBold(i == cur)
                 lst.item(i).setFont(f)
 
     def step_texts(self) -> list[str]:

@@ -93,3 +93,49 @@ def test_closing_one_popup_keeps_tracking_the_others():
     assert w._popup_dialogs == [b]
     w._popup_dialogs = []
     w.dispose()
+
+
+def test_a_failed_sign_in_offers_start_over_and_a_new_attempt_hides_it(tmp_path, monkeypatch):
+    """Spotify's page can end on "Something went wrong"; the page must never be a dead end."""
+    from types import SimpleNamespace
+
+    from s2s.models import Settings
+    from s2s.secretstore import SecretStore
+    from s2s.ui.spotify_service_page import SpotifyServicePage
+
+    ctx = SimpleNamespace(secrets=SecretStore(tmp_path, protect=lambda b: b, unprotect=lambda b: b), settings=Settings())
+    page = SpotifyServicePage(ctx)
+    try:
+        assert page.start_over_btn.isHidden()
+        page.enter()
+        page.reconnect()
+        assert page.stack.currentWidget() is page.login_holder and page.start_over_btn.isHidden()
+        first = page._login
+        page._login_failed("Spotify's sign-in page reported an error.")
+        assert not page.start_over_btn.isHidden() and "error" in page.status.text()
+        page.start_over_btn.click()
+        assert page.start_over_btn.isHidden() and page._login is not None and page._login is not first
+    finally:
+        page.dispose()
+        page.deleteLater()
+
+
+def test_sign_in_pages_show_no_instruction_line(tmp_path):
+    """"Sign in to X in the page below" says nothing the page itself does not: the status line stays empty."""
+    from types import SimpleNamespace
+
+    from s2s.models import Settings
+    from s2s.secretstore import SecretStore
+    from s2s.soundcloud.page import SoundCloudServicePage
+    from s2s.ui.spotify_service_page import SpotifyServicePage
+
+    ctx = SimpleNamespace(secrets=SecretStore(tmp_path, protect=lambda b: b, unprotect=lambda b: b), settings=Settings())
+    for page_class in (SpotifyServicePage, SoundCloudServicePage):
+        page = page_class(ctx)
+        try:
+            page.enter()
+            page.reconnect()
+            assert page.status.isHidden() and page.status.text() == ""
+        finally:
+            page.dispose()
+            page.deleteLater()

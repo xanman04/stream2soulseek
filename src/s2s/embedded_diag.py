@@ -17,7 +17,7 @@ _PHRASES = {
     "try-later": "try again later",
     "too-many": "too many",
     "incorrect": "incorrect",
-    "captcha": "captcha",
+    "verify-human": "verify you",
     "not-secure": "not secure",
     "unsupported": "browser is not supported",
     "blocked": "blocked",

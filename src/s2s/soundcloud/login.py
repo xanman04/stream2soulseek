@@ -108,7 +108,7 @@ class SoundCloudLoginWidget(QWidget):
         if self._closed:
             return
         self._capture_enabled = True
-        self.status_changed.emit("Loading SoundCloud sign-in…")
+        self.status_changed.emit("")
         self._view.load(QUrl(START_URL))
 
     def _on_cookie(self, cookie):
@@ -124,7 +124,7 @@ class SoundCloudLoginWidget(QWidget):
         if not self._capture_enabled or self._closed:
             return
         if ok:
-            self.status_changed.emit("Sign in to SoundCloud in the page below.")  # replaces "Loading…"
+            self.status_changed.emit("")
         else:
             self.login_failed.emit("SoundCloud sign-in could not load. Check your connection and try again.")
 
