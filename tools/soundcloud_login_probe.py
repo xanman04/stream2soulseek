@@ -133,16 +133,36 @@ def main() -> int:
             log("account counts: " + ", ".join(f"{k}={v}" for k, v in me.items()
                                                 if isinstance(v, int) and "count" in k and not isinstance(v, bool)))
             user_id = me["id"]
-            for endpoint in ("playlists_without_albums", "playlist_likes", "playlists/liked_and_owned"):
+            from s2s.soundcloud import client as client_module
+
+            client_module.SoundCloudClient._safe_api_url = staticmethod(lambda url: url)  # exploring: allow any path
+            for endpoint in ("playlists_without_albums", "albums", "playlist_likes", "track_likes", "likes",
+                             "playlists/liked_and_owned"):
                 try:
                     body = client._get_json(f"https://api-v2.soundcloud.com/users/{user_id}/{endpoint}?limit=50&linked_partitioning=true",
                                             authenticated=True)
                     items = body.get("collection") if isinstance(body, dict) else None
+                    kinds: dict[str, int] = {}
+                    for item in items or []:
+                        wrapped = [k for k in ("track", "playlist", "system_playlist") if isinstance(item, dict) and item.get(k)]
+                        inner = (item.get(wrapped[0]) if wrapped else item) or {}
+                        label = "+".join(wrapped) or str(item.get("kind"))
+                        if isinstance(inner, dict):
+                            label += f"/{inner.get('kind')}/set_type={inner.get('set_type')!r}/album={inner.get('is_album')}"
+                        kinds[label] = kinds.get(label, 0) + 1
                     first = items[0] if items else None
                     log(f"{endpoint}: {len(items) if items is not None else 'no collection'} items; next page: "
-                        f"{bool(isinstance(body, dict) and body.get('next_href'))}; first item: {shape(first, 2)}")
+                        f"{bool(isinstance(body, dict) and body.get('next_href'))}; kinds: {kinds}; first item: {shape(first, 2)}")
                 except Exception as exc:  # noqa: BLE001
                     log(f"{endpoint} FAILED: {type(exc).__name__}: {embedded_diag.clean(exc)}")
+            for path in ("me/library/all?limit=50", "me/library/playlists?limit=50"):
+                try:
+                    body = client._get_json(f"https://api-v2.soundcloud.com/{path}", authenticated=True)
+                    items = body.get("collection") if isinstance(body, dict) else None
+                    log(f"{path}: {len(items) if items is not None else 'no collection'} items; first item: "
+                        f"{shape(items[0], 2) if items else None}")
+                except Exception as exc:  # noqa: BLE001
+                    log(f"{path} FAILED: {type(exc).__name__}: {embedded_diag.clean(exc)}")
 
     def signed_in():
         log("page: signed in; the session was saved. Reading playlists the way Step 1 does…")
