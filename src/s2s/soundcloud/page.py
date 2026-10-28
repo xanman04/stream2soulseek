@@ -92,12 +92,12 @@ class SoundCloudServicePage(QWidget):
         return self.enable_check.isChecked() and self.source.is_connected()
 
     def state_text(self):
-        return "SoundCloud: signed in" if self.is_connected() else "SoundCloud: not signed in"
+        return "SoundCloud: Signed in" if self.is_connected() else "SoundCloud: Not signed in"
 
     def refresh_state(self):
         connected = self.is_connected()
         self.status.setText(self.state_text())
-        self.connection_value.setText("Connected" if connected else "Not signed in")
+        self.connection_value.setText("Signed in" if connected else "Not signed in")
         self.account_name.setText((load_session(self.ctx.secrets) or {}).get("account", {}).get("display_name") or "—")
         self.sign_out_btn.setEnabled(bool(load_session(self.ctx.secrets)))
         self.session_value.setText(f"Session saved on this computer, {protection_text()}" if load_session(self.ctx.secrets)

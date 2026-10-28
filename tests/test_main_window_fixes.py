@@ -134,9 +134,9 @@ def test_soulseek_button_says_change_login_once_logged_in(win):
     assert btn.text() == "Log in..."
     win.soulseek._connected("dj")
     assert btn.text() == "Change login..."
-    assert "logged in as dj" in win.sidebar.soulseek_label.text()
+    assert "Logged in as dj" in win.sidebar.soulseek_label.text()
     win.soulseek.is_connected = False
-    win.soulseek.status_changed.emit("Soulseek: not logged in")
+    win.soulseek.status_changed.emit("Soulseek: Not logged in")
     assert btn.text() == "Log in..."
 
 

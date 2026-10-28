@@ -74,7 +74,7 @@ class Sidebar(QWidget):
             self.services.addItem(it)
         self.services.setFixedHeight(40 * len(SERVICES) + 4)
 
-        self.soulseek_label = QLabel("Soulseek: not logged in")
+        self.soulseek_label = QLabel("Soulseek: Not logged in")
         self.soulseek_label.setWordWrap(True)
         self.soulseek_btn = QPushButton("Log in...")
         connection = QFrame()

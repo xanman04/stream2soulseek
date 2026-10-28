@@ -112,18 +112,18 @@ def test_sidebar_sections_and_disabled_future_services(env):
 def test_apple_state_shown_in_sidebar(env):
     win, _store, secrets, _root = env
     win.refresh_navigation()
-    assert win.sidebar.services.item(0).text() == "Apple Music: not signed in"
+    assert win.sidebar.services.item(0).text() == "Apple Music: Not signed in"
     secrets.set(APPLE_DEVELOPER_TOKEN, "test-dev")
     secrets.set(APPLE_MEDIA_USER_TOKEN, "test-user")
     win.service.refresh_state()
-    assert win.sidebar.services.item(0).text() == "Apple Music: signed in"
+    assert win.sidebar.services.item(0).text() == "Apple Music: Signed in"
     assert win.service.sign_out_btn.isEnabled()
 
 
 def test_soulseek_row_updates_and_login_button_prompts(env, monkeypatch):
     win, *_ = env
-    win.soulseek.status_changed.emit("Soulseek: logged in as someone.")
-    assert win.sidebar.soulseek_label.text() == "Soulseek: logged in as someone."
+    win.soulseek.status_changed.emit("Soulseek: Logged in as someone.")
+    assert win.sidebar.soulseek_label.text() == "Soulseek: Logged in as someone."
     calls = []
     monkeypatch.setattr(type(win.soulseek), "prompt", lambda self, message="": calls.append(1) or True)
     win.sidebar.soulseek_btn.click()

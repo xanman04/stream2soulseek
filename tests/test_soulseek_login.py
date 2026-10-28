@@ -74,7 +74,7 @@ def test_stored_login_is_reused_without_popup(qapp, store):
     s.connect_on_startup()
     assert svc.started == [SoulseekCredentials("dj", "pw")]
     assert dlg.calls == [] and s.is_connected
-    assert msgs[-1] == "Soulseek: logged in as dj."
+    assert msgs[-1] == "Soulseek: Logged in as dj."
 
 
 def test_no_stored_login_shows_popup(qapp, store):

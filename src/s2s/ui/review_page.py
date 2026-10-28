@@ -71,7 +71,9 @@ def plain_reason(text: str) -> str:
     if m := re.match(r"filename artist '(.*)' differs from requested artist", t):
         return f"the artist in the file name ({m[1]}) differs from the playlist's"
     if t.startswith("filename contains promotional website text"):
-        return "the file name has website promo text (cleaned for matching); check the raw name"
+        return "Website promotion was ignored when comparing the title. Check that this is the right recording."
+    if t.startswith("artist name appears only within longer path text"):
+        return "The artist's name appears inside a longer name or folder label. This may be a different artist."
     if m := re.match(r"folder name has a '(.*)' label", t):
         return f"the folder name is labelled '{m[1]}'"
     if t.startswith("VIP indicated only by folder name"):
@@ -105,6 +107,26 @@ def _issue_lines(text: str) -> list[str]:
 
 def _flag_reasons(c: Candidate) -> list[str]:
     return [plain_reason(r) for r in c.reasons if not r.startswith(_INFO_REASONS)]
+
+
+def candidate_detail(c: Candidate) -> str:
+    """Separate the decision from the raw filename and remote folder location."""
+    if not is_eligible(c):
+        heading = "Cannot use this file:"
+        reasons = [plain_reason(r) for r in c.reasons]
+    elif c.flagged:
+        heading = "Check before choosing:"
+        reasons = _flag_reasons(c) or ["This file needs a closer look."]
+    else:
+        heading = "Matches the requested version." if c.tier == Tier.EXACT else "Extended mix of the same version."
+        reasons = []
+    lines = [heading, *("• " + r[:1].upper() + r[1:] for r in dict.fromkeys(reasons))]
+    path = c.file.filename.replace("/", "\\")
+    folder, _, name = path.rpartition("\\")
+    lines += ["", "File: " + (name or path)]
+    if folder:
+        lines.append("Soulseek folder: " + folder)
+    return "\n".join(lines)
 
 
 def match_label(c: Candidate) -> str:
@@ -745,6 +767,7 @@ class ReviewPage(QWidget):
         self.detail.installEventFilter(self)
         # The full file name and why it does (or does not) pass the rules, for the file selected in the list.
         self.file_detail = theme.subtle(QLabel(""))
+        self.file_detail.setTextFormat(Qt.TextFormat.PlainText)
         self.file_detail.setWordWrap(True)
         self.file_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.file_detail.setVisible(False)
@@ -1092,8 +1115,7 @@ class ReviewPage(QWidget):
             self.file_detail.setVisible(False)
         else:
             cand = sel[1]
-            why = "; ".join(plain_reason(x) for x in cand.reasons)
-            self.file_detail.setText(cand.file.filename + (f"\n{match_label(cand)}" if not why else f"\n{why}"))
+            self.file_detail.setText(candidate_detail(cand))
             self.file_detail.setVisible(True)
         ok = False
         if sel is not None and not self._locked and not self._busy and sel[0] < len(self.model.rows):

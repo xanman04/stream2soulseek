@@ -114,7 +114,7 @@ class SoulseekSession(QObject):
         if creds is None:
             self.prompt()
             return
-        self.status_changed.emit(f"Soulseek: logging in as {creds.username}...")
+        self.status_changed.emit(f"Soulseek: Logging in as {creds.username}...")
         run_async(self, lambda: self.service.start(creds), lambda _r: self._connected(creds.username),
                   self._stored_failed)
 
@@ -124,12 +124,12 @@ class SoulseekSession(QObject):
             creds = load_credentials(self._secrets)
             self._connected(creds.username if creds else "")
             return True
-        self.status_changed.emit("Soulseek: not logged in (searching and downloading are unavailable).")
+        self.status_changed.emit("Soulseek: Not logged in (searching and downloading are unavailable).")
         return False
 
     def _connected(self, username: str) -> None:
         self.is_connected = True
-        self.status_changed.emit(f"Soulseek: logged in as {username}.")
+        self.status_changed.emit(f"Soulseek: Logged in as {username}.")
         self.connected.emit()
 
     def _stored_failed(self, exc: object) -> None:
