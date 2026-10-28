@@ -34,6 +34,8 @@ SERVICES = [
 
 STEP_HEIGHT = 46  # row heights at scale 1 (the smallest the sidebar is ever drawn)
 SERVICE_HEIGHT = 50
+TRANSFER_HEIGHT = 68  # a saved session: three lines and a progress line
+TRANSFER_ROWS_SHOWN = 2  # whole rows only; more sessions scroll inside the panel instead of pushing the groups below
 _STEP_TEXT = re.compile(r"^(✓ )?(\d+)\. (.*)$")
 _BADGE = 26  # diameter of a step's number badge at scale 1
 MAX_SCALE = 1.8  # the sidebar never grows past this; taller windows keep a little air between the two groups
@@ -170,29 +172,53 @@ class _ServiceDelegate(_ScaledDelegate):
         painter.restore()
 
 
-class _TransferDelegate(QStyledItemDelegate):
-    """Compact session name, destination progress, and unread additions."""
-    def paint(self, painter, option, index):
+class _TransferDelegate(_ScaledDelegate):
+    """A saved download session: its playlist, how far it got, what it is doing now, and a slim progress line.
+
+    Painted like the service rows (same inset, radius and selection) so the sidebar reads as one family."""
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        return QSize(0, round(TRANSFER_HEIGHT * self.scale))
+
+    def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
+        current = bool(option.state & QStyle.StateFlag.State_Selected)
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver) and not current
+        focus = bool(option.state & QStyle.StateFlag.State_HasFocus) and current
+        s = self.scale
         painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         row = QRectF(option.rect).adjusted(2, 1, -2, -1)
-        selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        if selected or hover:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(_color("selection", "#304b63") if selected else _color("hover", "#2b343f"))
-            painter.drawRoundedRect(row, 6, 6)
+        if current or hover:
+            painter.setPen(QPen(_color("focus", "#81a9c9"), 2 if focus else 1) if current else Qt.PenStyle.NoPen)
+            painter.setBrush(_color("selection", "#304b63") if current else _color("hover", "#2b343f"))
+            painter.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
+        left, width = row.left() + 11 * s, row.width() - 22 * s
         lines = (index.data(Qt.ItemDataRole.DisplayRole) or "").split("\n")
+        unread = bool(index.data(Qt.ItemDataRole.UserRole + 1))
         font = QFont(option.font)
-        font.setPointSizeF(max(8.0, font.pointSizeF() * .88))
+        font.setPointSizeF(max(8.0, option.font.pointSizeF() * 0.9 * type_scale(s)))
+        step = 17 * s
         for n, line in enumerate(lines[:3]):
             font.setWeight(QFont.Weight.DemiBold if n == 0 else QFont.Weight.Normal)
             painter.setFont(font)
-            painter.setPen(_color("text", "#e1e6ec") if n == 0 else
-                           theme.accent("ok") if n == 2 and index.data(Qt.ItemDataRole.UserRole + 1) else
-                           _color("muted", "#9aa6b4"))
-            box = QRectF(row.left() + 9, row.top() + 4 + n * 18, row.width() - 18, 18)
+            painter.setPen(_color("selected", "#f1f6fc") if n == 0 and current else
+                           _color("text", "#e1e6ec") if n == 0 else
+                           theme.accent("ok") if n == 2 and unread else _color("muted", "#9aa6b4"))
+            box = QRectF(left, row.top() + 7 * s + n * step, width, step)
             painter.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                             painter.fontMetrics().elidedText(line, Qt.TextElideMode.ElideRight, int(box.width())))
+                             painter.fontMetrics().elidedText(line, Qt.TextElideMode.ElideRight, int(width)))
+        progress = index.data(Qt.ItemDataRole.UserRole + 2)
+        if progress and progress[1]:
+            finished, total = progress
+            track = QRectF(left, row.bottom() - 9 * s, width, max(2.0, 3 * s))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(_color("border", "#37414c"))
+            painter.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+            if finished:
+                filled = QRectF(track)
+                filled.setWidth(max(track.height(), track.width() * min(1.0, finished / total)))
+                painter.setBrush(theme.accent("ok") if finished >= total else _color("primary", "#416f94"))
+                painter.drawRoundedRect(filled, track.height() / 2, track.height() / 2)
         painter.restore()
 
 
@@ -281,17 +307,20 @@ class Sidebar(QWidget):
         steps_card, self._steps_layout = _card("stepsCard")
         self._steps_layout.addWidget(self.steps)
 
-        self.transfer_panel, transfer_layout = _card("navCard")
-        transfer_layout.addWidget(_header("Transfers"))
+        self.transfer_panel, self._transfer_layout = _card("navCard")
+        self.transfers_header = _header("Transfers")
+        self._transfer_layout.addWidget(self.transfers_header)
         self.transfers = QListWidget()
         self.transfers.setObjectName("navigation")
         self.transfers.setAccessibleName("Saved transfers")
-        self.transfers.setItemDelegate(_TransferDelegate(self.transfers))
+        self._transfer_delegate = _TransferDelegate(self.transfers)
+        self.transfers.setItemDelegate(self._transfer_delegate)
         self.transfers.setMouseTracking(True)
-        self.transfers.setMinimumHeight(64)
-        self.transfers.setMaximumHeight(192)
+        self.transfers.setSpacing(2)
+        self.transfers.setFrameShape(QListWidget.Shape.NoFrame)
         self.transfers.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        transfer_layout.addWidget(self.transfers)
+        self.transfers.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._transfer_layout.addWidget(self.transfers)
         self.transfer_panel.setVisible(False)
         self.transfers.itemClicked.connect(lambda it: self.transfer_selected.emit(it.data(Qt.ItemDataRole.UserRole)))
         self.transfers.itemActivated.connect(lambda it: self.transfer_selected.emit(it.data(Qt.ItemDataRole.UserRole)))
@@ -309,7 +338,7 @@ class Sidebar(QWidget):
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
         lay.addWidget(brand)
         lay.addWidget(steps_card)
-        lay.addWidget(self.transfer_panel, 1)
+        lay.addWidget(self.transfer_panel)  # as tall as its rows (a whole number of them), never half a row
         lay.addStretch(1)  # what is left once the scale is capped: space between the two anchored groups
         lay.addWidget(accounts_card)
         lay.addWidget(connection)
@@ -334,6 +363,9 @@ class Sidebar(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._rescale()
+
+    def _rescale(self) -> None:
         wanted = min(MAX_SCALE, max(1.0, self.height() / self._base_height))
         stepped = round(round(wanted / SCALE_STEP) * SCALE_STEP, 2)
         if stepped != self._scale:
@@ -345,7 +377,7 @@ class Sidebar(QWidget):
         self.setFixedWidth(round(BASE_WIDTH * (1 + (scale - 1) * 0.6)))
         t = type_scale(scale)
         px = lambda base: max(1, round(base * scale))  # noqa: E731 - a measurement that grows with the sidebar
-        for delegate in (self._step_delegate, self._service_delegate):
+        for delegate in (self._step_delegate, self._service_delegate, self._transfer_delegate):
             delegate.scale = scale
         self._lay.setContentsMargins(px(14), px(14), px(14), px(14))
         self._lay.setSpacing(px(10))
@@ -356,8 +388,9 @@ class Sidebar(QWidget):
                                                Qt.TransformationMode.SmoothTransformation))
         self._name.setStyleSheet(f"font-size: {round(23 * t)}px;")
         self.services_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
+        self.transfers_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
         for layout, margins in ((self._steps_layout, (8, 8, 8, 8)), (self._accounts_layout, (8, 4, 8, 8)),
-                                (self._connection_layout, (12, 12, 12, 12))):
+                                (self._transfer_layout, (8, 4, 8, 8)), (self._connection_layout, (12, 12, 12, 12))):
             layout.setContentsMargins(*(px(m) for m in margins))
             layout.setSpacing(px(2) if layout is not self._connection_layout else px(9))
         for lst, rows, row_height in ((self.steps, len(STEPS), STEP_HEIGHT), (self.services, len(SERVICES), SERVICE_HEIGHT)):
@@ -371,8 +404,18 @@ class Sidebar(QWidget):
             widget.setFont(font)
         for button in (self.soulseek_btn, self.settings_btn):
             button.setMinimumHeight(px(34))
+        self._fit_transfers()
         self._bold_current()
         self.updateGeometry()
+
+    def _fit_transfers(self) -> None:
+        """Row heights and the list's own height: up to a few sessions show in full, more scroll."""
+        height = round(TRANSFER_HEIGHT * self._scale)
+        for i in range(self.transfers.count()):
+            self.transfers.item(i).setSizeHint(QSize(0, height))
+        count = self.transfers.count()
+        row = height + self.transfers.spacing() * 2
+        self.transfers.setFixedHeight(min(count, TRANSFER_ROWS_SHOWN) * row + 6 if count else 0)
 
     # ------------------------------------------------------------ user input
 
@@ -397,26 +440,28 @@ class Sidebar(QWidget):
     # ------------------------------------------------------------ state
 
     def set_transfer_sessions(self, sessions, current_import_id=None) -> None:
-        visible = not self.transfer_panel.isHidden()
+        visible, rows = not self.transfer_panel.isHidden(), min(self.transfers.count(), TRANSFER_ROWS_SHOWN)
         self.transfers.blockSignals(True)
         self.transfers.clear()
         for session in sessions:
-            update = f"{session.unseen_added} added since last check · " if session.unseen_added else ""
+            update = f"{session.unseen_added} added · " if session.unseen_added else ""
             item = QListWidgetItem(f"{session.playlist_name}\n{session.finished}/{session.total} in {session.folder_name}\n"
                                    + update + session.status)
             item.setData(Qt.ItemDataRole.UserRole, session.import_id)
             item.setData(Qt.ItemDataRole.UserRole + 1, bool(session.unseen_added))
-            item.setSizeHint(QSize(0, 64))
+            item.setData(Qt.ItemDataRole.UserRole + 2, (session.finished, session.total))
             item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, session.destination + ". " + item.text())
             self.transfers.addItem(item)
             if session.import_id == current_import_id:
                 self.transfers.setCurrentItem(item)
         self.transfers.blockSignals(False)
         self.transfer_panel.setVisible(bool(sessions))
-        if visible != bool(sessions):
-            # Recalculate the base height when this optional section appears, keeping the existing scale rules.
+        self._fit_transfers()
+        if visible != bool(sessions) or rows != min(len(sessions), TRANSFER_ROWS_SHOWN):
+            # This optional group changed size: measure the sidebar again at scale 1, then scale it to the window.
             self._apply_scale(1.0)
             self._base_height = self._lay.totalMinimumSize().height()
+            self._rescale()
         self.updateGeometry()
 
     def show_service(self, key: str) -> None:

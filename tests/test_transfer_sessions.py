@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import threading
 
 import pytest
@@ -73,7 +73,7 @@ def approve_tracks(store, import_id, destination, downloads, tracks, *, username
 
 def source_for(downloads, item, *, username=None, data=SOURCE_BYTES):
     user = username or item.username
-    source = downloads / user / "Album" / Path(item.filename).name
+    source = downloads / user / "Album" / PureWindowsPath(item.filename).name  # Soulseek paths use backslashes everywhere
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(data)
     return source

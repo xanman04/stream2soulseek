@@ -74,7 +74,7 @@ def test_sidebar_lists_multiple_sessions_and_emits_selected_import_id(env):
     assert rows.count() == 2
     assert rows.item(0).data(Qt.ItemDataRole.UserRole) == "older-id"
     assert rows.item(1).data(Qt.ItemDataRole.UserRole) == "recent-id"
-    assert "2 added since last check" in rows.item(0).text()
+    assert "2 added" in rows.item(0).text()
     emitted = []
     win.sidebar.transfer_selected.connect(emitted.append)
     rows.itemActivated.emit(rows.item(1))
