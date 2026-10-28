@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtGui import QBrush, QFont, QPalette
@@ -45,7 +46,7 @@ FILTERS = ("all", "check", "missing")
 _LOSSLESS_EXTS = {"flac", "wav", "aiff", "aif", "alac"}
 # Reasons the matcher records as information (why a file was accepted), not as problems to check.
 _INFO_REASONS = ("exact requested version", "extended mix of the same version", "artist found in path",
-                 "artist matched via remixer")
+                 "artist matched via remixer", "Uploader reliability: ")
 
 
 def file_key(c: Candidate) -> tuple:
@@ -121,11 +122,14 @@ def candidate_detail(c: Candidate) -> str:
         heading = "Matches the requested version." if c.tier == Tier.EXACT else "Extended mix of the same version."
         reasons = []
     lines = [heading, *("• " + r[:1].upper() + r[1:] for r in dict.fromkeys(reasons))]
+    history = [r for r in c.reasons if r.startswith("Uploader reliability: ")]
+    if history:
+        lines += history
     path = c.file.filename.replace("/", "\\")
     folder, _, name = path.rpartition("\\")
     lines += ["", "File: " + (name or path)]
     if folder:
-        lines.append("Soulseek folder: " + folder)
+        lines.append(("Local folder: " if c.file.local_sha256 is not None else "Soulseek folder: ") + folder)
     return "\n".join(lines)
 
 
@@ -319,7 +323,7 @@ class ReviewModel(QAbstractTableModel):
     def selection_items(self) -> list[SelectionItem]:
         return [
             SelectionItem(r.result.track.apple_id, r.chosen.file.username, r.chosen.file.filename,
-                          r.chosen.file.size, self.destination)
+                          r.chosen.file.size, self.destination, r.chosen.file.local_sha256)
             for r in self.checked_rows()
         ]
 
@@ -338,7 +342,7 @@ class ReviewModel(QAbstractTableModel):
         if row.chosen is None:
             return 0
         sel = SelectionItem(row.result.track.apple_id, row.chosen.file.username, row.chosen.file.filename,
-                            row.chosen.file.size, self.destination)
+                            row.chosen.file.size, self.destination, row.chosen.file.local_sha256)
         return len(proposed_backups(row.result, sel))
 
     # ------------------------------------------------------------ Qt model
@@ -392,6 +396,8 @@ class ReviewModel(QAbstractTableModel):
             return skipped_label(res.note)
         if row.chosen is None:
             return "Not found"
+        if row.chosen.file.local_sha256 is not None:
+            return "Already downloaded · check before copying" if row.needs_look else "Already downloaded · copy"
         text = match_label(row.chosen)
         return text + " · similar file in folder" if row.existing and not row.needs_look else text
 
@@ -406,6 +412,8 @@ class ReviewModel(QAbstractTableModel):
     def _source_text(self, row: ReviewRow) -> str:
         if row.chosen is None:
             return ""
+        if row.chosen.file.local_sha256 is not None:
+            return "On this computer"
         n = self.backup_count(row)
         return row.chosen.file.username + (f"  (+{n} other{'s' if n != 1 else ''})" if n else "")
 
@@ -513,10 +521,12 @@ class ConfirmDialog(QDialog):
         self.setWindowTitle("Confirm downloads")
         self.resize(900, 560)
         primary = [e for e in entries if not e.get("backup", False)]
+        local = [e for e in primary if e.get("local", False)]
+        downloads = len(primary) - len(local)
         backups = [e for e in entries if e.get("backup", False)]
         mib = lambda es: sum(e["size"] for e in es) / (1024 * 1024)  # noqa: E731
         lay = QVBoxLayout(self)
-        head = QLabel(f"Download the {len(primary)} selected track{'s' if len(primary) != 1 else ''}?")
+        head = QLabel(f"Confirm {len(primary)} selected track{'s' if len(primary) != 1 else ''}?")
         f = head.font()
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
@@ -524,10 +534,16 @@ class ConfirmDialog(QDialog):
         lay.addWidget(head)
         self.summary = QLabel(f"{len(primary)} file{'s' if len(primary) != 1 else ''} · {mib(primary):.1f} MiB "
                               f"· copied into {destination}")
+        if local:
+            self.summary.setText(f"{downloads} to download · {len(local)} already downloaded, to copy\n"
+                                 f"Save to {destination}")
         self.summary.setWordWrap(True)
         lay.addWidget(self.summary)
         note = ("Only the files listed here will be requested. After you continue, the selection is final: to "
                 "change it, use Cancel downloads on the Downloads page and start again.")
+        if local:
+            note = ("Files marked ‘Local copy’ are copied from your Soulseek downloads folder without downloading "
+                    "again. Their original files are kept. Only the listed downloads will be requested.")
         if backups:
             wait = next((e.get("wait_seconds", 45) for e in backups), 45)
             note += (f"\nIf an uploader has not started sending after {wait} seconds, S2S switches to another "
@@ -536,7 +552,7 @@ class ConfirmDialog(QDialog):
         self.note = theme.subtle(QLabel(note))
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
-        self.table = t = make_table(["Track", "Uploader", "Quality", "Size (MiB)", "File on Soulseek", "Saved to"])
+        self.table = t = make_table(["Track", "Source", "Quality", "Size (MiB)", "Source file", "Saved to"])
         t.setRowCount(len(entries))
         for r, e in enumerate(entries):
             title = e["title"]
@@ -579,10 +595,10 @@ class QueuingDialog(QDialog):
     def __init__(self, count: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._done = False
-        self.setWindowTitle("Queuing downloads")
+        self.setWindowTitle("Preparing selected tracks")
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
-        head = QLabel(f"Queuing {count} download{'s' if count != 1 else ''}…")
+        head = QLabel(f"Preparing {count} selected track{'s' if count != 1 else ''}…")
         f = head.font()
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
@@ -760,7 +776,7 @@ class ReviewPage(QWidget):
         left.addLayout(search_row)
 
         self.alt_title = theme.subtle(QLabel(""))
-        self.detail = make_table(["", "Uploader", "Quality", "Length", "Match"])
+        self.detail = make_table(["", "Source", "Quality", "Length", "Match"])
         self.detail.setWordWrap(False)
         self.detail.verticalHeader().setDefaultSectionSize(24)
         self.detail.horizontalHeader().setStretchLastSection(True)
@@ -979,6 +995,11 @@ class ReviewPage(QWidget):
             return "muted", skipped_label(res.note) + "."
         if c is None:
             return "error", "Not found. " + not_found_detail(res.note)
+        if c.file.local_sha256 is not None:
+            text = "Already downloaded — copy to your folder. The original file will be kept."
+            if c.flagged:
+                text += "\nCheck before copying:\n" + "\n".join(_flag_reasons(c))
+            return ("warn" if c.flagged else "ok"), text
         extra = ("\nA similar file is already in the folder:\n" + ", ".join(r.existing[:2])) if r.existing else ""
         if c.flagged:
             lines = ["Check before downloading:"]
@@ -1053,7 +1074,9 @@ class ReviewPage(QWidget):
             if want is not None and have is not None:
                 length += (f" (playlist {fmt_seconds(want)}, {abs(off)} s off)" if off is not None
                            else f" (playlist {fmt_seconds(want)})")
-            facts = [f"from {f.username}", quality_text(f), f"{fmt_mib(f.size)} MiB", length]
+            self.file_heading.setText("Will copy" if f.local_sha256 is not None else "Will download")
+            facts = [(f"From {Path(f.filename).parent}" if f.local_sha256 is not None else f"from {f.username}"),
+                     quality_text(f), f"{fmt_mib(f.size)} MiB", length]
             self.facts_label.setText(" · ".join(x for x in facts if x))
             self.facts_label.setStyleSheet(theme.chip_style("warn") if off is not None else "")
 
@@ -1076,7 +1099,8 @@ class ReviewPage(QWidget):
             if diff is not None and abs(diff) > self.model.duration_tolerance_s:
                 length += f" ({diff:+d} s)"
             vals = [{"in use": "✓ Using", "option": "", "rejected": "No match"}[state],
-                    f.username, quality_text(f), length, match_label(c)]
+                    "Local copy" if f.local_sha256 is not None else f.username,
+                    quality_text(f), length, match_label(c)]
             for col, text in enumerate(vals):
                 it = item(text, f"{f.filename}\n" + "\n".join(plain_reason(x) for x in c.reasons))
                 if col == 0:
@@ -1295,9 +1319,10 @@ class ReviewPage(QWidget):
 
     def summary_entries(self) -> list[dict]:
         entries = [
-            {"title": f"{r.result.track.name} - {r.result.track.artist}", "username": r.chosen.file.username,
+            {"title": f"{r.result.track.name} - {r.result.track.artist}",
+             "username": "Local copy" if r.chosen.file.local_sha256 is not None else r.chosen.file.username,
              "filename": r.chosen.file.filename, "size": r.chosen.file.size, "destination": self.model.destination,
-             "quality": quality_text(r.chosen.file)}
+             "quality": quality_text(r.chosen.file), "local": r.chosen.file.local_sha256 is not None}
             for r in self.model.checked_rows()
         ]
         return entries
@@ -1339,10 +1364,14 @@ class ReviewPage(QWidget):
         self._update_footer()
 
         def work():
-            with ctx.download_service() as svc:  # client built first: a missing API key fails before any approval
+            service = (ctx.download_service(local_only=True) if all(it.local_sha256 is not None for it in items)
+                       else ctx.download_service())
+            with service as svc:  # client built first for remote items; local-only approvals need no connection
                 approval = create_approval(ctx.store, import_id, items, downloads_dir=downloads_dir,
                                            archive_name=archive_name)
                 svc.enqueue_approved(approval.id, approval.fingerprint)
+                if any(it.local_sha256 is not None for it in items):
+                    workflow.import_completed(ctx.store, approval.id, ctx.settings)
             return approval
 
         run_async(self, work, self._queued, self._queue_failed)

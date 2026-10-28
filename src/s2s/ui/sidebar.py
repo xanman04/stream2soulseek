@@ -170,6 +170,32 @@ class _ServiceDelegate(_ScaledDelegate):
         painter.restore()
 
 
+class _TransferDelegate(QStyledItemDelegate):
+    """Compact session name, destination progress, and unread additions."""
+    def paint(self, painter, option, index):
+        painter.save()
+        row = QRectF(option.rect).adjusted(2, 1, -2, -1)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        if selected or hover:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(_color("selection", "#304b63") if selected else _color("hover", "#2b343f"))
+            painter.drawRoundedRect(row, 6, 6)
+        lines = (index.data(Qt.ItemDataRole.DisplayRole) or "").split("\n")
+        font = QFont(option.font)
+        font.setPointSizeF(max(8.0, font.pointSizeF() * .88))
+        for n, line in enumerate(lines[:3]):
+            font.setWeight(QFont.Weight.DemiBold if n == 0 else QFont.Weight.Normal)
+            painter.setFont(font)
+            painter.setPen(_color("text", "#e1e6ec") if n == 0 else
+                           theme.accent("ok") if n == 2 and index.data(Qt.ItemDataRole.UserRole + 1) else
+                           _color("muted", "#9aa6b4"))
+            box = QRectF(row.left() + 9, row.top() + 4 + n * 18, row.width() - 18, 18)
+            painter.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                             painter.fontMetrics().elidedText(line, Qt.TextElideMode.ElideRight, int(box.width())))
+        painter.restore()
+
+
 def _header(text: str) -> QLabel:
     lab = QLabel(text)
     lab.setObjectName("navHeading")
@@ -191,6 +217,7 @@ class Sidebar(QWidget):
     step_selected = Signal(int)
     soulseek_login_requested = Signal()
     settings_requested = Signal()
+    transfer_selected = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -254,6 +281,21 @@ class Sidebar(QWidget):
         steps_card, self._steps_layout = _card("stepsCard")
         self._steps_layout.addWidget(self.steps)
 
+        self.transfer_panel, transfer_layout = _card("navCard")
+        transfer_layout.addWidget(_header("Transfers"))
+        self.transfers = QListWidget()
+        self.transfers.setObjectName("navigation")
+        self.transfers.setAccessibleName("Saved transfers")
+        self.transfers.setItemDelegate(_TransferDelegate(self.transfers))
+        self.transfers.setMouseTracking(True)
+        self.transfers.setMinimumHeight(64)
+        self.transfers.setMaximumHeight(192)
+        self.transfers.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        transfer_layout.addWidget(self.transfers)
+        self.transfer_panel.setVisible(False)
+        self.transfers.itemClicked.connect(lambda it: self.transfer_selected.emit(it.data(Qt.ItemDataRole.UserRole)))
+        self.transfers.itemActivated.connect(lambda it: self.transfer_selected.emit(it.data(Qt.ItemDataRole.UserRole)))
+
         accounts_card, self._accounts_layout = _card("navCard")
         self._accounts_layout.addWidget(self.services_header)
         self._accounts_layout.addWidget(self.services)
@@ -267,6 +309,7 @@ class Sidebar(QWidget):
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
         lay.addWidget(brand)
         lay.addWidget(steps_card)
+        lay.addWidget(self.transfer_panel, 1)
         lay.addStretch(1)  # what is left once the scale is capped: space between the two anchored groups
         lay.addWidget(accounts_card)
         lay.addWidget(connection)
@@ -352,6 +395,29 @@ class Sidebar(QWidget):
         lst.blockSignals(False)
 
     # ------------------------------------------------------------ state
+
+    def set_transfer_sessions(self, sessions, current_import_id=None) -> None:
+        visible = not self.transfer_panel.isHidden()
+        self.transfers.blockSignals(True)
+        self.transfers.clear()
+        for session in sessions:
+            update = f"{session.unseen_added} added since last check · " if session.unseen_added else ""
+            item = QListWidgetItem(f"{session.playlist_name}\n{session.finished}/{session.total} in {session.folder_name}\n"
+                                   + update + session.status)
+            item.setData(Qt.ItemDataRole.UserRole, session.import_id)
+            item.setData(Qt.ItemDataRole.UserRole + 1, bool(session.unseen_added))
+            item.setSizeHint(QSize(0, 64))
+            item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, session.destination + ". " + item.text())
+            self.transfers.addItem(item)
+            if session.import_id == current_import_id:
+                self.transfers.setCurrentItem(item)
+        self.transfers.blockSignals(False)
+        self.transfer_panel.setVisible(bool(sessions))
+        if visible != bool(sessions):
+            # Recalculate the base height when this optional section appears, keeping the existing scale rules.
+            self._apply_scale(1.0)
+            self._base_height = self._lay.totalMinimumSize().height()
+        self.updateGeometry()
 
     def show_service(self, key: str) -> None:
         for r in range(self.services.count()):

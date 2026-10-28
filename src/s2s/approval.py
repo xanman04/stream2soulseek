@@ -30,7 +30,7 @@ def _key(i: SelectionItem) -> tuple:
 def fingerprint(items: Iterable[SelectionItem]) -> str:
     rows = [
         {"apple_id": i.apple_id, "username": i.username, "filename": i.filename, "size": i.size,
-         "destination": i.destination}
+         "destination": i.destination, **({"local_sha256": i.local_sha256} if i.local_sha256 is not None else {})}
         for i in sorted(items, key=_key)
     ]
     blob = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -118,6 +118,14 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
         cand = store.find_candidate(import_id, it.apple_id, it.username, it.filename, it.size)
         if cand is None:
             raise ApprovalError(f"file is not a stored candidate for track {it.apple_id}")
+        if it.local_sha256 != cand.file.local_sha256:
+            raise ApprovalError("local file selection changed; review again")
+        if it.local_sha256 is not None:
+            from .local_files import validate_source
+            try:
+                validate_source(it.filename, downloads_dir, it.size, it.local_sha256)
+            except (OSError, ValueError) as exc:
+                raise ApprovalError(f"Local file unavailable or changed; search again: {exc}") from exc
         if cand.tier == Tier.REJECTED or cand.format_rank == 9:
             raise ApprovalError(f"candidate for track {it.apple_id} is not eligible")
         if (it.apple_id, it.username.casefold()) in declined:

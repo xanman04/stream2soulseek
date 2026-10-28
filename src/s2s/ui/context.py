@@ -89,13 +89,14 @@ class AppContext:
         return SlskdClient(url or self.settings.slskd_url, key)
 
     @contextlib.contextmanager
-    def download_service(self):
+    def download_service(self, *, local_only: bool = False):
         """DownloadService bound to a fresh slskd client. Queuing is only
         done by the review screen, after confirmation."""
         from ..download import DownloadService
 
-        client = self.slskd_client()
+        client = None if local_only else self.slskd_client()
         try:
             yield DownloadService(self.store, client)
         finally:
-            client.close()
+            if client is not None:
+                client.close()

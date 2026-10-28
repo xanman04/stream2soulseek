@@ -57,7 +57,7 @@ def same_recording(approved, other) -> bool:
 def proposed_backups(result, selected: SelectionItem, limit: int = 5) -> tuple[SelectionItem, ...]:
     """Other uploaders of the same recording as the approved file (see same_recording), at most `limit`."""
     limit = min(5, max(0, int(limit)))
-    if not limit:
+    if not limit or selected.local_sha256 is not None:
         return ()
     pool = ([result.best] if result.best else []) + list(result.alternatives)
     approved = next((c for c in pool if _key(c.file) == _key(selected)), None)
@@ -66,6 +66,8 @@ def proposed_backups(result, selected: SelectionItem, limit: int = 5) -> tuple[S
     out, peers = [], {selected.username.casefold()}
     for candidate in pool:
         file = candidate.file
+        if file.local_sha256 is not None:
+            continue
         if file.username.casefold() in peers or not same_recording(approved, candidate):
             continue
         peers.add(file.username.casefold())
@@ -109,6 +111,8 @@ def approve_backups(store, approval, backups, settings, *, wait_seconds=45, max_
         proposed = backups.get(primary.apple_id, ())
         if not proposed:
             continue
+        if primary.local_sha256 is not None or any(i.local_sha256 is not None for i in proposed):
+            raise ApprovalError("Local copies cannot be part of an automatic download backup pool")
         if pool_for_track(store, approval.id, primary.apple_id) is not None:
             raise ApprovalError("Queued recovery was already reviewed for this track")
         resolved = []

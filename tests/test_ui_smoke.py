@@ -605,8 +605,8 @@ def test_enqueue_approved_only_called_from_review_page():
     assert src.index("ask_confirmation(self.summary_entries())") < src.index("enqueue_approved(")
     # Downloads page: one replacement file, queued only after its own yes
     src = (ui_dir / "other_sources.py").read_text(encoding="utf-8")
-    assert src.count("enqueue_approved(") == 1
-    assert src.index("if not self.ask_download(") < src.index("enqueue_approved(")
+    assert src.count("replace_selection(") == 1
+    assert src.index("if not self.ask_download(") < src.index("replace_selection(")
 
 
 def test_sign_out_clears_stored_session(env):

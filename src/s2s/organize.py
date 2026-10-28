@@ -314,6 +314,7 @@ def import_file(
     archive_name: str = "OLD",
     policy: MatchPolicy | None = None,
     require_peer: bool = False,
+    local_sha256: str | None = None,
 ) -> ImportResult:
     policy = policy or MatchPolicy()
     aid = track.apple_id
@@ -324,9 +325,13 @@ def import_file(
     if transfer.state != TransferState.SUCCEEDED:
         return invalid(f"transfer is not complete (state: {transfer.state.value})")
     try:
-        src = locate_download(downloads_dir, transfer.username, transfer.filename, transfer.size,
-                              archive_name=archive_name, require_peer=require_peer)
-    except OrganizeError as exc:
+        if local_sha256 is not None:
+            from .local_files import validate_source
+            src = validate_source(transfer.filename, downloads_dir, transfer.size, local_sha256)
+        else:
+            src = locate_download(downloads_dir, transfer.username, transfer.filename, transfer.size,
+                                  archive_name=archive_name, require_peer=require_peer)
+    except (OrganizeError, OSError, ValueError) as exc:
         return invalid(str(exc))
     if src.stat().st_size != transfer.size:
         return invalid("size mismatch", source=str(src))
@@ -342,6 +347,8 @@ def import_file(
         return invalid(problem, source=str(src), codec=codec, bitrate_kbps=kbps)
 
     digest = _sha256(src)
+    if local_sha256 is not None and digest != local_sha256:
+        return invalid("local file changed since review; search again", source=str(src))
     dest_dir = Path(destination)
     name = build_final_name(track, tier, detected_version, ext)
     target = dest_dir / name

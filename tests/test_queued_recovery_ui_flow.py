@@ -28,11 +28,14 @@ from s2s.ui.transfers_page import TransfersPage
 class RecoveryWindow(QWidget):
     """Exercise the real controller and pages without unrelated account/startup widgets."""
     review_queued_backups = MainWindow.review_queued_backups
+    _run_job = MainWindow._run_job
 
     def __init__(self, store, secrets, settings):
         super().__init__()
         self.ctx = AppContext(store, secrets, settings)
         self._queueing = False
+        self._closing = False
+        self._pending_jobs = 0
         self.review = ReviewPage(self.ctx, self)
         self.transfers = TransfersPage(self.ctx, self)
         self.stack = QStackedWidget(self)
@@ -144,6 +147,7 @@ def test_main_window_queued_recovery_modal_cancel_or_accept(window, tmp_path, mo
     class FakeDialog:
         def __init__(self, _ctx, _parent):
             self.approvals = {approval.id: approval}
+            self.tree = type("Tree", (), {"topLevelItemCount": lambda _self: 1})()
             self.wait_seconds = type("Wait", (), {"value": lambda _self: 24})()
 
         def exec(self):
@@ -184,3 +188,25 @@ def test_main_window_queued_recovery_modal_cancel_or_accept(window, tmp_path, mo
         assert async_results == [] and starts == []
         assert window.transfers.timer.isActive()
     assert window.stack.currentWidget() is window.frames[4]
+
+
+def test_empty_automatic_backup_dialog_returns_to_inline_search(window, tmp_path, monkeypatch):
+    _track, result, dest, import_id = prepared(window, tmp_path)
+    primary = result.best.file
+    approval = create_approval(window.ctx.store, import_id,
+                               [SelectionItem("track-1", primary.username, primary.filename, primary.size, dest)],
+                               downloads_dir=window.ctx.settings.slskd_downloads_dir)
+    window.ctx.approval_id = approval.id
+    window.go_step(4)
+    class EmptyDialog:
+        def __init__(self, *_):
+            self.tree = type("Tree", (), {"topLevelItemCount": lambda _self: 0})()
+        def exec(self):
+            pytest.fail("An empty recovery modal must never be shown")
+        def deleteLater(self):
+            pass
+    monkeypatch.setattr(main_window, "QueuedRecoveryDialog", EmptyDialog)
+    window.review_queued_backups()
+    assert window.transfers.timer.isActive()
+    assert "alternatives or search" in window.statusBar().currentMessage()
+    assert window.ctx.store.fallback_plans(import_id) == []

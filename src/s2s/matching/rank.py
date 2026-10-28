@@ -417,18 +417,26 @@ def _key(c: Candidate, policy: MatchPolicy, req_s: float | None = None):
 
 
 def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str], policy: MatchPolicy,
-                   req_s: float | None = None) -> list[Candidate]:
+                   req_s: float | None = None, *, slow_peers: Mapping[str, str] | None = None) -> list[Candidate]:
     """Flag candidates from peers that declined us before and order them AFTER otherwise-equal candidates.
 
     `declined_peers` maps casefolded username -> reason text. Only the order inside an equal
     (tier, format) bucket changes, and the candidate stays eligible (flagged, never hidden); no version
     or format rule is touched. Returns the candidates best first.
+    `slow_peers` supplies softer reliability history: order within that same bucket changes without
+    adding a review flag. Local reuse is exempt from uploader reliability.
     """
     out: list[tuple[bool, Candidate, int, bool]] = []
+    slow_peers = {user.casefold(): reason for user, reason in (slow_peers or {}).items()}
     for c in eligible:
+        # Stored alternatives may carry a reason from an earlier run; expired history must disappear.
+        c = replace(c, reasons=tuple(r for r in c.reasons if not r.startswith("Uploader reliability: ")))
         gb = _gap_bucket(c, req_s, policy)  # judged before the declined-peer flag is added
         orig_flagged = c.flagged
         reason = declined_peers.get(c.file.username.casefold())
+        slow_reason = (slow_peers or {}).get(c.file.username.casefold()) if c.file.local_sha256 is None else None
+        if slow_reason and slow_reason not in c.reasons:
+            c = replace(c, reasons=c.reasons + (slow_reason,))
         if reason:
             if reason not in c.reasons:
                 c = replace(c, flagged=True, reasons=c.reasons + (reason,))
@@ -439,22 +447,28 @@ def penalise_peers(eligible: list[Candidate], declined_peers: Mapping[str, str],
     def key(item):
         penalised, c, gb, fl = item
         if policy.tier_before_format:
-            return (int(c.tier), fl, gb, c.format_rank, penalised, -c.score, c.file.username, c.file.filename)
-        return (fl, gb, c.format_rank, int(c.tier), penalised, -c.score, c.file.username, c.file.filename)
+            return (int(c.tier), fl, gb, c.format_rank, penalised,
+                    c.file.local_sha256 is None and c.file.username.casefold() in (slow_peers or {}),
+                    -c.score, c.file.username, c.file.filename)
+        return (fl, gb, c.format_rank, int(c.tier), penalised,
+                c.file.local_sha256 is None and c.file.username.casefold() in (slow_peers or {}),
+                -c.score, c.file.username, c.file.filename)
 
     return [item[1] for item in sorted(out, key=key)]
 
 
 def match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy | None = None,
-          declined_peers: Mapping[str, str] | None = None) -> MatchResult:
+          declined_peers: Mapping[str, str] | None = None, *,
+          slow_peers: Mapping[str, str] | None = None) -> MatchResult:
     """Rank `files` for the recording the playlist entry stands for (see searchable_track); the result keeps the
     entry exactly as it is in the playlist."""
     policy = policy or MatchPolicy()
-    return replace(_match(searchable_track(track, policy), files, policy, declined_peers), track=track)
+    return replace(_match(searchable_track(track, policy), files, policy, declined_peers, slow_peers), track=track)
 
 
 def _match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy,
-           declined_peers: Mapping[str, str] | None) -> MatchResult:
+           declined_peers: Mapping[str, str] | None,
+           slow_peers: Mapping[str, str] | None = None) -> MatchResult:
 
     seen: set[tuple[str, str, int]] = set()
     evaluated: list[tuple[Candidate, int]] = []
@@ -470,8 +484,8 @@ def _match(track: AppleTrack, files: Iterable[RemoteFile], policy: MatchPolicy,
 
     req_s = track.duration_ms / 1000 if track.duration_ms else None
     eligible = sorted((c for c, _ in evaluated if c.tier != Tier.REJECTED), key=lambda c: _key(c, policy, req_s))
-    if declined_peers:
-        eligible = penalise_peers(eligible, declined_peers, policy, req_s)
+    if declined_peers or slow_peers:
+        eligible = penalise_peers(eligible, declined_peers or {}, policy, req_s, slow_peers=slow_peers)
     rejected_pairs = sorted(
         ((c, r) for c, r in evaluated if c.tier == Tier.REJECTED),
         key=lambda cr: (-cr[1], cr[0].format_rank, -cr[0].score, cr[0].file.username, cr[0].file.filename),
