@@ -160,7 +160,9 @@ def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
                 rows.append(HistoryRow(track.apple_id, track.name, track.artist, "File missing",
                                        historical.detail or "An earlier import was recorded, but its destination file is missing.", historical_path))
                 continue
-            if match.note == "already imported":
+            if match.note == "already in folder":
+                label, detail = "Already in library", "A file named for this title and artist was already in the tracklist folder."
+            elif match.note == "already imported":
                 label, detail = "File unverified", "An earlier import was recorded, but no destination file could be verified. Search this track again."
             else:
                 label, detail = "Excluded", match.note or "This track was excluded by the matching rules."

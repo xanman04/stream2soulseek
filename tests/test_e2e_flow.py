@@ -594,12 +594,10 @@ def test_existing_different_file_is_a_conflict_not_overwritten_and_not_archived(
     win, fake, _tmp, downloads, dest = app_env
     dest.mkdir(parents=True)
     mine = dest / "Innerbloom - RÜFÜS DU SOL.mp3"
-    mine.write_bytes(b"MY OWN EDIT")                           # same name, different bytes
     pick_playlist_and_folder(win, dest, monkeypatch)
     win.go_step(STEP_SEARCH)
-    rv = win.review
-    row = rv.model.rows[row_of(win, "i.0")]
-    assert "similar file is already in the folder" in rv._explain(row)[1]
+    assert win.review.model.rows[row_of(win, "i.0")].selectable  # not in the folder yet, so it is searched
+    mine.write_bytes(b"MY OWN EDIT")                           # appears before the import: same name, different bytes
     confirm_all(win, monkeypatch)
     assert win.stack.currentIndex() == STEP_TRANSFERS + 1
     for user, name in [("djpeer", base(0)), ("djpeer", base(2)), ("djpeer", base(9))]:

@@ -112,6 +112,22 @@ def test_search_never_enqueues_and_creates_no_transfers(env):
     assert "enqueue" not in " ".join(client.calls)
 
 
+def test_tracks_already_in_the_folder_by_name_are_skipped_without_searching(env):
+    (env.root / "House" / "Song - Artist.mp3").write_bytes(b"synthetic")  # put there by hand: no import record
+    client = FakeSlskd({"song": [good_file()]})
+    res, _ = run(env, client)
+    assert res[0].status == MatchStatus.SKIPPED and res[0].note == "already in folder"
+    assert res[1].status == MatchStatus.UNRESOLVED  # a track that is not there is still searched
+    assert not any("song" in client.texts[k] for k in client.texts)
+
+
+def test_a_different_version_in_the_folder_does_not_skip_the_track(env):
+    (env.root / "House" / "Song (VIP Mix) - Artist.mp3").write_bytes(b"synthetic")
+    client = FakeSlskd({"song": [good_file()]})
+    res, _ = run(env, client)
+    assert res[0].status == MatchStatus.PROPOSED
+
+
 def test_already_imported_tracks_are_skipped_without_searching(env):
     from s2s.models import ImportResult
     prev = env.store.create_import(Playlist("p.0", "Old"), str(env.root / "House"))

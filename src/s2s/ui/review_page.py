@@ -162,7 +162,7 @@ def _length_diff(want_s: int | None, have_s: int | None) -> int | None:
 
 
 def skipped_label(note: str) -> str:
-    if note == "already imported":
+    if note in ("already imported", "already in folder"):
         return "Skipped: already in folder"
     if m := re.match(r"requested track is excluded \((.*?)\)", note):
         return f"Skipped: excluded ({m[1]})"

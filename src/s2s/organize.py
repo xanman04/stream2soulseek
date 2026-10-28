@@ -235,6 +235,43 @@ def find_existing(destination: str, track: AppleTrack) -> list[Path]:
     return out
 
 
+def library_names(destination: str) -> list[list[str]]:
+    """Read-only: the word lists of the file names in a library folder, read once for many tracks."""
+    d = Path(destination)
+    if not d.is_dir():
+        return []
+    try:
+        return [_norm(p.stem).split() for p in sorted(d.iterdir())
+                if p.is_file() and not p.name.endswith(PARTIAL_SUFFIX)]
+    except OSError:
+        return []
+
+
+def _without(words: list[str], part: list[str]) -> list[str] | None:
+    """`words` with the first run of `part` removed, or None if `part` is not in it."""
+    n = len(part)
+    for i in range(len(words) - n + 1):
+        if words[i:i + n] == part:
+            return words[:i] + words[i + n:]
+    return None
+
+
+def in_library(track: AppleTrack, names: list[list[str]]) -> bool:
+    """True when a file is named for exactly this title and artist and for nothing else.
+
+    "Title - Artist", "Artist - Title" and "Title (Version) - Artist" for a track whose title already carries that
+    version all match. Any extra word (a VIP, a remix, a second artist, a track number) means it may be a different
+    recording, so it does not match: that track is searched as usual rather than skipped on a guess."""
+    title, artist = _norm(track.name).split(), _norm(track.artist).split()
+    if not title or not artist:
+        return False
+    for words in names:
+        rest = _without(words, title)
+        if rest is not None and _without(rest, artist) == []:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------- import
 
 
