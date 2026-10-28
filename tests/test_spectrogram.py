@@ -66,6 +66,24 @@ def test_render_reports_missing_file_and_ffmpeg_failure(tmp_path):
                   runner=lambda args, **kw: SimpleNamespace(returncode=1, stdout=b""))
 
 
+def test_seekable_plot_has_no_ffmpeg_legend_and_uses_separate_cache(tmp_path):
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"fixture")
+    calls = []
+
+    def runner(args, **kw):
+        calls.append(args)
+        Path(args[-1]).write_bytes(b"png")
+        return SimpleNamespace(returncode=0)
+
+    legacy = sp.render(str(audio), ffmpeg="ffmpeg", ffprobe=None, cache_dir=tmp_path / "cache", runner=runner)
+    plot = sp.render(str(audio), ffmpeg="ffmpeg", ffprobe=None, cache_dir=tmp_path / "cache", runner=runner, legend=False)
+    assert legacy.image_path != plot.image_path
+    assert any("s=1200x500:legend=0:" in arg for arg in calls[-1])
+    # Cutoff analysis still reuses its own plain image; plot pixels contain only time/frequency data.
+    assert len(calls) == 3
+
+
 def test_find_ffmpeg_prefers_sibling_of_ffprobe(tmp_path):
     (tmp_path / "ffprobe.exe").write_bytes(b"")
     (tmp_path / "ffmpeg.exe").write_bytes(b"")

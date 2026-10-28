@@ -47,3 +47,52 @@ def test_page_shows_checklist_and_actions(tmp_path, monkeypatch):
         assert csv_path.exists()
     finally:
         store.close()
+
+
+def test_attention_filter_keeps_row_identity_and_restores_selection_on_refresh(tmp_path, monkeypatch):
+    monkeypatch.setattr(workers, "RUN_INLINE", True)
+    store, iid, _lib = make_store(tmp_path)
+    ctx = AppContext(store=store, secrets=None, settings=None)
+    ctx.import_id = iid
+    page = FinishPage(ctx)
+    try:
+        page.refresh()
+        assert page.dashboard.entry.apple_id == "i.a"
+        page.attention_button.click()
+        assert page.table.isRowHidden(0)
+        assert page.dashboard.entry.apple_id == "i.c"  # a missing file, rather than an arbitrary hidden row
+        page.table.selectRow(3)
+        page.refresh()
+        assert page.dashboard.entry.apple_id == "i.d"
+        assert page.attention_button.isChecked()
+        page.all_button.click()
+        assert not page.table.isRowHidden(0)
+    finally:
+        page.close()
+        store.close()
+
+
+def test_waiting_track_offers_search_and_alternatives_without_queueing(tmp_path, monkeypatch):
+    from s2s.models import Settings
+
+    monkeypatch.setattr(workers, "RUN_INLINE", True)
+    store, iid, _lib = make_store(tmp_path)
+    ctx = AppContext(store=store, secrets=None, settings=Settings())
+    ctx.import_id = iid
+    page = FinishPage(ctx)
+    try:
+        before = store.approvals_for_import(iid)
+        page.refresh()
+        page.table.selectRow(3)
+        assert not page.dashboard.recovery_button.isHidden()
+        page.dashboard.recovery_button.click()
+        panel = page._recovery_sources
+        assert panel._key == (iid, "ap", "i.d")
+        assert panel.query.text()  # editable custom search is present even when no alternatives were saved
+        assert panel.search_btn.isEnabled()
+        assert store.approvals_for_import(iid) == before  # opening recovery never authorizes a download
+        page._recovery_dialog.reject()
+        assert panel._key is None  # stale searches cannot update a closed recovery view
+    finally:
+        page.close()
+        store.close()

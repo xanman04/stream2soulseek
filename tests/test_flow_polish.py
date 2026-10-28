@@ -34,24 +34,6 @@ def inline(monkeypatch):
     gc.collect()
 
 
-class FakeDialog:
-    """Stands in for SpectrogramDialog: records what it was opened with and never shows anything."""
-    opened: list = []
-
-    def __init__(self, path, settings, parent=None):
-        FakeDialog.opened.append((path, settings))
-
-    def exec(self):
-        return 0
-
-
-@pytest.fixture
-def fake_dialog(monkeypatch):
-    FakeDialog.opened = []
-    monkeypatch.setattr(finish_page, "SpectrogramDialog", FakeDialog)
-    return FakeDialog
-
-
 # ------------------------------------------------------------------ item 1: Step 6 "find another source"
 
 def _finish(tmp_path, *, failed: bool):
@@ -71,7 +53,7 @@ def test_find_button_hidden_when_no_download_failed_and_each_gap_is_explained(tm
     try:
         assert page.find_button.isHidden()  # waiting / not chosen / gone cannot be fixed by a replacement review
         text = page.advice.text()
-        assert not page.advice.isHidden()
+        assert page.advice.isHidden() and page.summary_button.isEnabled()
         assert "still downloading" in text and "left out by choice" in text and "no longer in the folder" in text
     finally:
         store.close()
@@ -93,24 +75,26 @@ def test_find_button_counts_failed_and_declined_tracks_only(tmp_path):
 
 # ------------------------------------------------------------------ item 4: spectrogram, Step 6
 
-def test_step6_spectrogram_only_for_in_folder_rows(tmp_path, fake_dialog):
+def test_step6_dashboard_selection_and_expansion_only_for_local_files(tmp_path, monkeypatch):
     page, store = _finish(tmp_path, failed=False)
     try:
-        assert not page.spectrogram_button.isEnabled()  # nothing selected
-        page.table.selectRow(0)  # Alpha: in folder
-        assert page.spectrogram_button.isEnabled()
-        page.spectrogram_button.click()
-        assert [os.path.basename(p) for p, _s in fake_dialog.opened] == ["Alpha (VIP) - A Artist.mp3"]
-        assert fake_dialog.opened[0][1] is page.ctx.settings
+        assert page.dashboard.entry.apple_id == "i.a"  # first track is selected, never autoplayed
+        from PySide6.QtMultimedia import QMediaPlayer
+        assert page.dashboard.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+        opened = []
+        monkeypatch.setattr(page.dashboard, "expand", lambda: opened.append(page._selected_path()))
+        page.open_spectrogram()
+        assert os.path.basename(opened[0]) == "Alpha (VIP) - A Artist.mp3"
         page.table.selectRow(2)  # Gamma: the file is gone
         assert not page.spectrogram_button.isEnabled()
-        page.table.cellDoubleClicked.emit(2, 1)
         page.table.selectRow(3)  # Delta: not downloaded
         page.open_spectrogram()
-        assert len(fake_dialog.opened) == 1
-        page.table.selectRow(1)  # Beta: in folder, opened with a double click
-        page.table.cellDoubleClicked.emit(1, 1)
-        assert len(fake_dialog.opened) == 2 and fake_dialog.opened[1][0].endswith("Beta - B Artist.flac")
+        assert len(opened) == 1
+        assert not page.dashboard.play_button.isEnabled()
+        assert not page.dashboard.recovery_button.isHidden()  # queued files have in-place recovery
+        page.table.selectRow(1)
+        page.open_spectrogram()
+        assert len(opened) == 2 and opened[1].endswith("Beta - B Artist.flac")
     finally:
         store.close()
 
