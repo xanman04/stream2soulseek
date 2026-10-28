@@ -11,12 +11,14 @@ import os
 import re
 import subprocess
 import threading
+from functools import wraps
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import applog, archive, organize
+from .peer_reliability import reasons as slow_peer_reasons
 from .matching import match, penalise_peers, searchable_track
 from .matching.versions import normalise, parse_title
 from .models import (
@@ -215,6 +217,7 @@ def search_and_match(
     cancel: threading.Event,
     progress: Callable[[int, int, MatchResult | None], None],
     cache: _search.SearchCache | None = None,
+    on_stage: Callable[[str], None] = lambda _text: None,
 ) -> list[MatchResult]:
     """Search slskd for every track (bounded concurrency), rank, and persist the results.
 
@@ -229,7 +232,11 @@ def search_and_match(
         cache = _search.SHARED_CACHE  # no query is re-sent while its answer is cached
     done_ids = store.completed_apple_ids(imp.destination)
     folder_names = organize.library_names(imp.destination)
+    from .local_files import LocalIndex
+    on_stage("Checking your existing Soulseek downloads…")
+    local_index = LocalIndex(store, settings, cancel)
     declined_peers = declined_peer_reasons(store)
+    slow_peers = slow_peer_reasons(store)
     total = len(tracks)
     results: list[MatchResult] = []
     done = 0
@@ -307,8 +314,13 @@ def search_and_match(
         elif organize.in_library(t, folder_names):
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IN_FOLDER))
         else:
-            todo.append(t)  # a DJ-mixed entry is searched as the song itself (never skipped for its label)
+            local = local_index.find(t)
+            if local is not None:
+                finish(local)
+            else:
+                todo.append(t)  # no eligible local copy: search as usual
     waiting.update((t.apple_id, t) for t in todo)
+    on_stage("")
 
     def work(track: AppleTrack, later: _Deferred | None = None) -> MatchResult | _Deferred | None:
         """One track. First pass (`later` None): the first rungs of the query ladder. A track with nothing usable
@@ -329,7 +341,7 @@ def search_and_match(
                     f"({type(exc).__name__})")
 
             def ranked(found):
-                return match(track, found, settings.match_policy, declined_peers)
+                return match(track, found, settings.match_policy, declined_peers, slow_peers=slow_peers)
 
             def with_pool(found):
                 seen = {(f.username, f.filename, f.size) for f in found}
@@ -484,9 +496,10 @@ def search_track_version(
     policy = replace(settings.match_policy, exclude_mixed=not mixed)
     track = searchable_track(original, policy)  # the mix: as in the playlist; the song: label and excerpt dropped
     peers = declined_peer_reasons(store)
+    slow_peers = slow_peer_reasons(store)
 
     def ranked(found):
-        return match(track, found, policy, peers)
+        return match(track, found, policy, peers, slow_peers=slow_peers)
 
     found = run_search(
         client, track, cancel=cancel, timeout_s=settings.search_timeout_s,
@@ -498,7 +511,8 @@ def search_track_version(
     old = next((r for r in store.load_match_results(import_id) if r.track.apple_id == apple_id), None)
     files = list(found)
     if old is not None:
-        files += [c.file for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected)]
+        files += [c.file for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected)
+                  if c.file.local_sha256 is None]
     result = match(original, files, policy, peers)  # stored under the playlist entry as it is
     notes = [result.note, MIX_CHOSEN if mixed else ""]
     if result.best is not None:
@@ -543,9 +557,11 @@ def search_track_custom(
     if old is not None:
         previous = searched_queries(old.note)
         for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected):
-            files.append(c.file)
+            if c.file.local_sha256 is None:
+                files.append(c.file)
     chosen = old.note if old is not None and MIX_CHOSEN in old.note else ""
-    result = match(track, files, policy_for(chosen, settings.match_policy), declined_peer_reasons(store))
+    result = match(track, files, policy_for(chosen, settings.match_policy), declined_peer_reasons(store),
+                   slow_peers=slow_peer_reasons(store))
     if chosen:
         result = replace(result, note="; ".join(x for x in (result.note, MIX_CHOSEN) if x))
     tried = previous + [query] if previous else [query]
@@ -606,8 +622,8 @@ class ReplacementPlan:
 
 
 def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
-                           include_failed: bool = False) -> ReplacementPlan:
-    """Review rows for the declined tracks of an import only.
+                           include_failed: bool = False, include_waiting: bool = False) -> ReplacementPlan:
+    """Review rows for declined tracks, optionally including failed checks and waiting transfers.
 
     For each such track, every candidate from a peer that declined THAT track becomes REJECTED
     ("declined by this user"); the remaining eligible candidates are re-ranked (peers that declined us
@@ -616,7 +632,8 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
     """
     pending = pending_declined(store, import_id)
     declined_extra: dict[str, set[str]] = {}
-    if include_failed:
+    waiting_users: dict[str, set[str]] = {}
+    if include_failed or include_waiting:
         latest = {}
         for approval in store.approvals_for_import(import_id):
             for selected in approval.items:
@@ -628,10 +645,13 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
             record = store.get_transfer(aid, track_id)
             if record is None:
                 continue
-            if record.status.state == TransferState.SUCCEEDED and track_id in failed_check:
+            if include_waiting and record.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS):
+                waiting_users.setdefault(track_id, set()).add(record.status.username.casefold())
+                declined_extra.setdefault(track_id, set()).add(record.status.username.casefold())
+            elif include_failed and record.status.state == TransferState.SUCCEEDED and track_id in failed_check:
                 # downloaded, but the file did not pass the check: another source can fix it too
                 declined_extra.setdefault(track_id, set()).add(selected.username.casefold())
-            elif record.status.state != TransferState.FAILED:
+            elif not (include_failed and record.status.state == TransferState.FAILED):
                 continue
             status = record.status
             rejection = classify(status.raw_state, status.error) or classify("Completed, Errored", status.error)
@@ -640,15 +660,16 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
     declined_users: dict[str, set[str]] = {}
     for d in declined_transfers(store, import_id):
         declined_users.setdefault(d.apple_id, set()).add(d.username.casefold())
-    if include_failed:
+    if include_failed or include_waiting:
         for record in store.transfers_for_import(import_id):
-            if record.status.state == TransferState.FAILED:
+            if include_failed and record.status.state == TransferState.FAILED:
                 declined_users.setdefault(record.apple_id, set()).add(record.status.username.casefold())
         for track_id, users in declined_extra.items():
             declined_users.setdefault(track_id, set()).update(users)
     stored = {r.track.apple_id: r for r in store.load_match_results(import_id)}
     tracks = {t.apple_id: t for t in store.load_tracks(import_id)}
     peers = declined_peer_reasons(store)
+    slow_peers = slow_peer_reasons(store)
     results: list[MatchResult] = []
     missing: list[str] = []
     seen: set[str] = set()
@@ -668,15 +689,18 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
                 if c.tier == Tier.REJECTED or c.format_rank == 9:
                     continue
                 if c.file.username.casefold() in users:
+                    reason = ("Current uploader; choose a different source"
+                              if c.file.username.casefold() in waiting_users.get(d.apple_id, set()) else DECLINED_BY_USER)
                     refused.append(replace(c, tier=Tier.REJECTED, flagged=False,
-                                           reasons=c.reasons + (DECLINED_BY_USER,)))
+                                           reasons=c.reasons + (reason,)))
                 else:
                     usable.append(c)
-        usable = penalise_peers(usable, peers, settings.match_policy) if usable else []
+        usable = penalise_peers(usable, peers, settings.match_policy,
+                                slow_peers=slow_peers) if usable else []
         rejected = tuple(refused) + (old.rejected if old else ())
         if usable:
             results.append(MatchResult(track, MatchStatus.PROPOSED, usable[0], tuple(usable[1:]), rejected,
-                                       note=f"replacement for a failed or declined download from {d.username}"))
+                                       note=f"alternative to the current download from {d.username}"))
         else:
             missing.append(d.apple_id)
             results.append(MatchResult(track, MatchStatus.UNRESOLVED, None, (), rejected, note=NO_OTHER_SOURCE))
@@ -691,6 +715,21 @@ def build_replacement_plan(store: Store, import_id: str, settings: Settings, *,
 # Files that failed the import check (INVALID/CONFLICT), with what they looked like then. The Downloads page calls
 # import_completed every few seconds; without this the same failing files were re-probed on every refresh.
 _FAILED_CHECKS: dict[tuple[str, str], tuple] = {}
+_IMPORT_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+_IMPORT_LOCK_GUARD = threading.Lock()
+
+
+def _serial_import(fn):
+    """Foreground and background observers must never copy/archive the same session concurrently."""
+    @wraps(fn)
+    def wrapped(store, approval_id, *args, **kwargs):
+        approval = store.get_approval(approval_id)
+        key = (store.path, approval.import_id if approval else approval_id)
+        with _IMPORT_LOCK_GUARD:
+            lock = _IMPORT_LOCKS.setdefault(key, threading.RLock())
+        with lock:
+            return fn(store, approval_id, *args, **kwargs)
+    return wrapped
 
 
 def _check_signature(item, res_source: str | None) -> tuple:
@@ -712,6 +751,7 @@ def forget_failed_checks(approval_id: str | None = None) -> None:
         del _FAILED_CHECKS[key]
 
 
+@_serial_import
 def import_completed(
     store: Store, approval_id: str, settings: Settings, *, runner=subprocess.run
 ) -> list[ImportResult]:
@@ -760,6 +800,7 @@ def import_completed(
                     destination=item.destination, ffprobe_path=settings.ffprobe_path, runner=runner,
                     archive_name=settings.archive_dir_name, policy=settings.match_policy,
                     require_peer=pool_for_track(store, approval_id, item.apple_id) is not None,
+                    local_sha256=item.local_sha256,
                 )
             except Exception as exc:
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,
@@ -820,6 +861,7 @@ def _archive_block_reason(store: Store, approval, username: str, client) -> str 
     return None
 
 
+@_serial_import
 def process_completed(
     store: Store, approval_id: str, settings: Settings, *, runner=subprocess.run, client=None
 ) -> ProcessReport:
@@ -832,8 +874,13 @@ def process_completed(
     approval = store.get_approval(approval_id)
     approval = replace(approval, items=tuple(effective_item(store, approval_id, item) or item for item in approval.items))
     already = {a.username for a in store.archives_for_approval(approval_id)}
-    for username in sorted({i.username for i in approval.items}):
+    originals = [Path(p).resolve() for p in store.reused_source_paths() if Path(p).is_file()]
+    for username in sorted({i.username for i in approval.items if i.local_sha256 is None}):
         if username in already:
+            continue
+        peer_root = (Path(settings.slskd_downloads_dir) / organize.sanitize_component(username)).resolve()
+        if any(p.is_relative_to(peer_root) for p in originals):
+            report.blocked[username] = "contains a reused local original; this folder is kept in place"
             continue
         reason = _archive_block_reason(store, approval, username, client)
         if reason:

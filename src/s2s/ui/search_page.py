@@ -37,6 +37,7 @@ LOCKED_INFO = ("Downloads are already queued for this selection. To search again
 
 class _Progress(QObject):
     step = Signal(int, int, object)
+    stage = Signal(str)
 
 
 def classify(res: MatchResult) -> tuple[str, str, str]:
@@ -44,6 +45,8 @@ def classify(res: MatchResult) -> tuple[str, str, str]:
     if res.status == MatchStatus.SKIPPED:  # only tracks already in the tracklist folder are not searched
         return "muted", "Already in your folder", res.note or "Already in your tracklist folder."
     if res.status == MatchStatus.PROPOSED and res.best is not None:
+        if res.best.file.local_sha256 is not None:
+            return ("warn" if res.best.flagged else "ok"), "Already downloaded · copy", res.note
         best = res.best
         detail = f"{best.file.username}: {best.file.filename}"
         if best.flagged:
@@ -154,6 +157,8 @@ class SearchPage(QWidget):
         self._done, self._total = 0, 0
         self._progress = _Progress(self)
         self._progress.step.connect(self._on_step)
+        self._local_stage = ""
+        self._progress.stage.connect(self._set_stage)
         self._search_timer = QTimer(self)
         self._search_timer.setInterval(1000)
         self._search_timer.timeout.connect(self._tick)
@@ -422,7 +427,7 @@ class SearchPage(QWidget):
 
     def _tick(self) -> None:
         if self._running:
-            self.searching_label.setText(self._progress_text())
+            self.searching_label.setText(self._local_stage or self._progress_text())
             self.pace_label.setText(self._pace_text())
             self._show_wait()
 
@@ -433,6 +438,11 @@ class SearchPage(QWidget):
 
     def _animate_search_label(self) -> None:  # compatibility alias
         self._tick()
+
+    def _set_stage(self, text: str) -> None:
+        self._local_stage = text
+        if self._running:
+            self.searching_label.setText(text or self._progress_text())
 
     def _on_step(self, done: int, total: int, res: object) -> None:
         if isinstance(res, MatchResult):
@@ -515,6 +525,7 @@ class SearchPage(QWidget):
         self._started_at = time.monotonic()
         self._set_running(True)
         self.searching_label.setText("Connecting to Soulseek...")
+        self._local_stage = ""
         self.bar.setRange(0, 0)
 
         def work():
@@ -534,6 +545,7 @@ class SearchPage(QWidget):
                 results = workflow.search_and_match(
                     ctx.store, client, import_id, tracks, settings, cancel=cancel,
                     progress=lambda d, t, r: self._progress.step.emit(d, t, r), cache=cache,
+                    on_stage=self._progress.stage.emit,
                 )
                 return import_id, results, cancel.is_set(), policy_fp
             finally:

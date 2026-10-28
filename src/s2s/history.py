@@ -113,6 +113,10 @@ def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
 
         if current:
             item, transfer = current
+            if item.local_sha256 is not None:
+                rows.append(HistoryRow(track.apple_id, track.name, track.artist, "Awaiting local copy",
+                                       "Approved local file; no Soulseek download is needed.", final_path))
+                continue
             if transfer is None:
                 rows.append(HistoryRow(track.apple_id, track.name, track.artist, "Approved",
                                        f"Selected for download from {item.username}; no transfer status is saved yet.", final_path))
@@ -186,6 +190,9 @@ def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
                 label = "Not found"
             detail = note
         else:
-            label, detail = "Not selected", "A file was found but was not approved for download."
+            label = "Not selected"
+            detail = ("An existing local file was found but was not approved for copying."
+                      if match.best and match.best.file.local_sha256 is not None
+                      else "A file was found but was not approved for download.")
         rows.append(HistoryRow(track.apple_id, track.name, track.artist, label, detail, final_path))
     return rows

@@ -32,7 +32,7 @@ from .models import (
     TransferStatus,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 7
 
 _SCHEMA = """
 CREATE TABLE imports (
@@ -204,6 +204,42 @@ CREATE TABLE fallback_attempts (
 """
 
 
+_SCHEMA_V5 = """
+ALTER TABLE candidates ADD COLUMN local_sha256 TEXT;
+ALTER TABLE approval_items ADD COLUMN local_sha256 TEXT;
+CREATE TABLE local_audio_cache (path TEXT PRIMARY KEY, signature TEXT NOT NULL, metadata TEXT NOT NULL);
+"""
+
+_SCHEMA_V6 = """
+CREATE TABLE peer_observations (
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    username TEXT NOT NULL COLLATE NOCASE,
+    first_wait REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    outcome TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (import_id, apple_id, username)
+);
+"""
+
+_SCHEMA_V7 = """
+CREATE TABLE transfer_session_views (
+    import_id TEXT PRIMARY KEY,
+    seen_event INTEGER NOT NULL DEFAULT 0,
+    dismissed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE library_additions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id TEXT NOT NULL,
+    apple_id TEXT NOT NULL,
+    final_path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(import_id, apple_id, final_path)
+);
+"""
+
+
 class StoreError(Exception):
     pass
 
@@ -265,10 +301,11 @@ class Store:
             raise StoreError(f"database schema {version} is newer than supported {SCHEMA_VERSION}")
         if version == SCHEMA_VERSION:
             return
-        steps = {0: _SCHEMA, 1: _SCHEMA_V2, 2: _SCHEMA_V3, 3: _SCHEMA_V4}  # each step upgrades to the next version
+        steps = {0: _SCHEMA, 1: _SCHEMA_V2, 2: _SCHEMA_V3, 3: _SCHEMA_V4, 4: _SCHEMA_V5,
+                 5: _SCHEMA_V6, 6: _SCHEMA_V7}
         with self._conn:
             if version == 0:
-                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4]
+                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7]
             else:
                 scripts = [steps[v] for v in range(version, SCHEMA_VERSION)]
             for script in scripts:
@@ -343,12 +380,12 @@ class Store:
     def _insert_candidate(self, import_id: str, aid: str, c: Candidate, role: str, ordinal: int) -> None:
         f = c.file
         self._conn.execute(
-            "INSERT OR REPLACE INTO candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 import_id, aid, f.username, f.filename, f.size, f.extension, f.bitrate, _b(f.is_vbr),
                 f.sample_rate, f.bit_depth, f.length_s, _b(f.has_free_slot), f.queue_length, f.upload_speed,
                 int(c.tier), c.format_rank, c.detected_version, int(c.flagged), c.score,
-                json.dumps(list(c.reasons)), role, ordinal,
+                json.dumps(list(c.reasons)), role, ordinal, f.local_sha256,
             ),
         )
 
@@ -406,8 +443,8 @@ class Store:
             )
             for it in approval.items:
                 self._conn.execute(
-                    "INSERT INTO approval_items VALUES (?,?,?,?,?,?)",
-                    (approval.id, it.apple_id, it.username, it.filename, it.size, it.destination),
+                    "INSERT INTO approval_items VALUES (?,?,?,?,?,?,?)",
+                    (approval.id, it.apple_id, it.username, it.filename, it.size, it.destination, it.local_sha256),
                 )
 
     def get_approval(self, approval_id: str) -> Approval | None:
@@ -420,7 +457,8 @@ class Store:
                 (approval_id,),
             ).fetchall()
         items = tuple(
-            SelectionItem(r["apple_id"], r["username"], r["filename"], r["size"], r["destination"]) for r in rows
+            SelectionItem(r["apple_id"], r["username"], r["filename"], r["size"], r["destination"], r["local_sha256"])
+            for r in rows
         )
         return Approval(a["id"], a["import_id"], a["fingerprint"], items, a["created_at"])
 
@@ -430,6 +468,23 @@ class Store:
             ids = [r["id"] for r in self._conn.execute(
                 "SELECT id FROM approvals WHERE import_id=? ORDER BY created_at, rowid", (import_id,)).fetchall()]
         return [a for a in (self.get_approval(i) for i in ids) if a is not None]
+
+    def cached_local_audio(self, path: str, signature: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT metadata FROM local_audio_cache WHERE path=? AND signature=?",
+                                     (path, signature)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def cache_local_audio(self, path: str, signature: str, metadata: dict) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO local_audio_cache VALUES (?,?,?)",
+                               (path, signature, json.dumps(metadata)))
+
+    def reused_source_paths(self) -> list[str]:
+        """Approved local originals must also be preserved when archiving another peer's downloads."""
+        with self._lock:
+            return [r[0] for r in self._conn.execute(
+                "SELECT DISTINCT filename FROM approval_items WHERE local_sha256 IS NOT NULL")]
 
     # ------------------------------------------------------------ fallback plans
 
@@ -579,6 +634,10 @@ class Store:
                     result.sha256, result.codec, result.bitrate_kbps, result.detail, utc_now(),
                 ),
             )
+            if result.outcome == ImportOutcome.COPIED and result.final_path:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO library_additions(import_id,apple_id,final_path,created_at) VALUES (?,?,?,?)",
+                    (import_id, result.apple_id, result.final_path, utc_now()))
 
     def import_results(self, import_id: str) -> list[ImportResult]:
         with self._lock:
@@ -700,7 +759,7 @@ def _candidate(r: sqlite3.Row) -> Candidate:
         username=r["username"], filename=r["filename"], size=r["size"], extension=r["extension"],
         bitrate=r["bitrate"], is_vbr=_ob(r["is_vbr"]), sample_rate=r["sample_rate"], bit_depth=r["bit_depth"],
         length_s=r["length_s"], has_free_slot=_ob(r["has_free_slot"]), queue_length=r["queue_length"],
-        upload_speed=r["upload_speed"],
+        upload_speed=r["upload_speed"], local_sha256=r["local_sha256"],
     )
     return Candidate(
         file=f, tier=Tier(r["tier"]), format_rank=r["format_rank"], detected_version=r["detected_version"],

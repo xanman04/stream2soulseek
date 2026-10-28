@@ -8,12 +8,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QStackedWidget,
-                               QWidget)
+from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
+                               QStackedWidget, QSystemTrayIcon, QWidget)
 
-from .. import workflow
+from .. import transfer_sessions, workflow
 from ..models import Playlist, Settings, TransferState
 from ..queue_recovery import approve_backups
 from ..secretstore import SecretStore
@@ -36,6 +36,7 @@ from .soulseek_login import SoulseekSession
 from .steps import STEPS, StepFrame
 from .finish_page import FinishPage
 from .transfers_page import TransfersPage
+from .transfer_monitor import TransferMonitor
 from .util import show_error
 from .workers import run_async
 
@@ -63,6 +64,12 @@ class MainWindow(QMainWindow):
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
         self._queueing = False
+        self._session_snapshots = {}
+        self._background_on_close = autostart
+        self._force_exit = False
+        self._closing = False
+        self._pending_jobs = 0
+        self._tray = None
         self._navigation_generation = 0
         self._replacement_open = False  # a "Find another source" review is open: Review may be shown again
         self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
@@ -79,6 +86,11 @@ class MainWindow(QMainWindow):
         self.review = ReviewPage(self.ctx)
         self.transfers = TransfersPage(self.ctx)
         self.finish = FinishPage(self.ctx)
+        self.transfer_monitor = TransferMonitor(self.ctx, connected=lambda: self.soulseek.is_connected,
+            skip_import=lambda: self.ctx.import_id if self.transfers.timer.isActive() else None,
+            busy=lambda: self._queueing or self._closing, parent=self)
+        self.transfer_monitor.changed.connect(self._transfer_sessions_changed)
+        self.transfer_monitor.problem.connect(lambda msg: self.statusBar().showMessage(msg, 8000))
         self.frames = [StepFrame(i, w) for i, w in enumerate(
             (self.playlists, self.destination, self.search, self.review, self.transfers, self.finish))]
         self.stack = QStackedWidget()
@@ -119,6 +131,9 @@ class MainWindow(QMainWindow):
         history_act = QAction("Import history / outstanding tracks...", self)
         history_act.triggered.connect(self.open_history)
         file_menu.addAction(history_act)
+        quit_act = QAction("Quit S2S (pause transfers)", self)
+        quit_act.triggered.connect(self.quit_application)
+        file_menu.addAction(quit_act)
         help_menu = self.menuBar().addMenu("&Help")
         report_act = QAction("Report a problem...", self)
         report_act.triggered.connect(self.report_problem)
@@ -131,6 +146,7 @@ class MainWindow(QMainWindow):
         self.sidebar.service_selected.connect(self._open_service)
         self.sidebar.soulseek_login_requested.connect(lambda: self.soulseek.prompt())
         self.sidebar.settings_requested.connect(self.open_settings)
+        self.sidebar.transfer_selected.connect(self.resume_import)
         # Review has no Next: "Confirm selection" is the only way on (it opens Downloads by itself).
         self.frames[STEP_REVIEW].next_btn.setVisible(False)
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
@@ -187,6 +203,17 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ navigation
 
+    def _run_job(self, work, done, failed) -> None:
+        """Drain controller-owned work before closing the store/engine; callbacks cannot reopen a closing UI."""
+        if self._closing:
+            return
+        self._pending_jobs += 1
+        def finish(callback, value):
+            self._pending_jobs -= 1
+            if not self._closing:
+                callback(value)
+        run_async(self, work, lambda value: finish(done, value), lambda exc: finish(failed, exc))
+
     def step_done(self) -> list[bool]:
         c = self.ctx
         has_tracks = bool(c.playlist and c.tracks)
@@ -222,6 +249,8 @@ class MainWindow(QMainWindow):
                 f.set_next(done[f.index], hint)
 
     def go_step(self, index: int) -> None:
+        if self._closing:
+            return
         if self._queueing:
             return
         self.refresh_navigation()
@@ -237,6 +266,12 @@ class MainWindow(QMainWindow):
         self.sidebar.show_step(index)
         if index == STEP_TRANSFERS:
             self.transfers.start()
+            session = next((s for s in transfer_sessions.sessions(self.ctx.store)
+                            if s.import_id == self.ctx.import_id), None)
+            self.transfers.show_library_update(session.unseen_added if session else 0,
+                                               session.folder_name if session else "")
+            if session is not None:
+                transfer_sessions.mark_seen(self.ctx.store, session.import_id, session.event_cursor)
         else:
             self.transfers.stop()
         if index == STEP_FINISH:
@@ -249,9 +284,15 @@ class MainWindow(QMainWindow):
     def _soulseek_status(self, text: str) -> None:
         self.sidebar.set_soulseek_text(text)
         self.sidebar.soulseek_btn.setText("Change login..." if self.soulseek.is_connected else "Log in...")
+        if not self._closing and self.transfer_monitor.timer.isActive():
+            self.transfer_monitor.refresh()
+
+    def _transfer_sessions_changed(self, summaries) -> None:
+        self._session_snapshots = {s.import_id: s for s in summaries}
+        self.sidebar.set_transfer_sessions(summaries, self.ctx.import_id)
 
     def _open_service(self, key: str = APPLE_KEY) -> None:
-        if self._queueing:
+        if self._queueing or self._closing:
             return
         page = self._service_pages.get(key)
         if page is None:
@@ -314,14 +355,18 @@ class MainWindow(QMainWindow):
     def startup(self) -> None:
         """Open on step 1. When the last playlist still has downloads running, reopen it at Downloads instead
         (a confirmed run can only be finished or cancelled, so it must stay reachable after a restart)."""
+        if self._closing:
+            return
         self.refresh_navigation()
         self.go_step(STEP_PLAYLIST)
         self.playlists.startup()
-        if self._downloads_running_in_last_import():
-            self.resume_last_import()
+        pending = next((s for s in transfer_sessions.sessions(self.ctx.store) if s.incomplete), None)
+        if pending is not None:
+            self.resume_import(pending.import_id)
+        self.transfer_monitor.start()
         if getattr(sys, "frozen", False):  # only the packaged app updates itself; source runs use git
             self._report_failed_update()
-            run_async(self, updater_cleanup, lambda removed: None, lambda exc: None)  # leftovers of past updates
+            self._run_job(updater_cleanup, lambda removed: None, lambda exc: None)  # leftovers of past updates
             QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
 
     # ------------------------------------------------------------ problem reports and updates
@@ -356,7 +401,7 @@ class MainWindow(QMainWindow):
             elif isinstance(exc, updater.UpdateError):  # offline or rate limited: keep trying while S2S is open
                 QTimer.singleShot(30 * 60 * 1000, lambda: self.check_for_updates(manual=False))
 
-        run_async(self, work, done, failed)
+        self._run_job(work, done, failed)
 
     def _offer_update(self, info) -> None:
         from .. import updater
@@ -395,22 +440,18 @@ class MainWindow(QMainWindow):
         from ..applog import get
 
         get().info("Quitting to install an update")
-        self.close()
-        QApplication.instance().quit()
+        self.quit_application()
 
     def _downloads_running_in_last_import(self) -> bool:
         store = self.ctx.store
         try:
-            imports = store.list_imports()
-            if not imports:
-                return False
-            iid = imports[0].id
+            imports = [s for s in transfer_sessions.sessions(store) if s.incomplete]
             active = (TransferState.QUEUED, TransferState.IN_PROGRESS, TransferState.NOT_QUEUED,
                       TransferState.UNKNOWN)
-            for approval in store.approvals_for_import(iid):
-                transfers = {r.apple_id: r for r in store.transfers_for_approval(approval.id)}
-                for item in approval.items:
-                    rec = transfers.get(item.apple_id)
+            for session in imports:
+                latest = {i.apple_id: (a.id, i) for a in store.approvals_for_import(session.import_id) for i in a.items}
+                for track, (aid, _item) in latest.items():
+                    rec = store.get_transfer(aid, track)
                     if rec is None or rec.status.state in active:
                         return True
         except Exception:  # noqa: BLE001 - a damaged history never blocks opening the app
@@ -448,7 +489,7 @@ class MainWindow(QMainWindow):
             self.refresh_navigation()
             self.go_step(STEP_REVIEW)
 
-        run_async(self, work, done, lambda e: show_error(self, "Find another source", ctx.describe(e)))
+        self._run_job(work, done, lambda e: show_error(self, "Find another source", ctx.describe(e)))
 
     def _rerun_search(self) -> None:
         """Go to Search and run it again for the current playlist and folder (searching never queues)."""
@@ -457,9 +498,12 @@ class MainWindow(QMainWindow):
             self.search.start()
 
     def _approved(self) -> None:
+        if self._closing:
+            return
         self._replacement_open = False
         self.refresh_navigation()
         self.go_step(STEP_TRANSFERS)
+        self.transfer_monitor.refresh()
 
     def ask_cancel_import(self) -> bool:
         """Modal question for "Cancel downloads". True only for an explicit yes. Replaceable in tests."""
@@ -488,6 +532,7 @@ class MainWindow(QMainWindow):
                     for rec in ctx.store.transfers_for_approval(aid):
                         if rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS):
                             svc.cancel(aid, rec.apple_id)
+            transfer_sessions.dismiss(ctx.store, iid)
 
         def done(_result=None) -> None:
             if ctx.import_id != iid:
@@ -500,7 +545,7 @@ class MainWindow(QMainWindow):
             show_error(self, "Cancel downloads", "Some downloads could not be stopped, so nothing was "
                        f"reset. Try again in a moment.\n\n{ctx.describe(exc)}")
 
-        run_async(self, work, done, failed)
+        self._run_job(work, done, failed)
 
     def _when_refresh_idle(self, fn) -> None:
         """Run fn once the Downloads page's background refresh (if any) has finished."""
@@ -522,6 +567,14 @@ class MainWindow(QMainWindow):
             return
         self.transfers.stop()
         dialog = QueuedRecoveryDialog(self.ctx, self)
+        if dialog.tree.topLevelItemCount() == 0:
+            dialog.deleteLater()
+            self.transfers._update_row_actions()
+            self.transfers.sources.query.setFocus()
+            self.statusBar().showMessage("No automatic backups are available. Use the alternatives or search "
+                                         "on Downloads to choose a replacement.", 10000)
+            self.transfers.timer.start()
+            return
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         selections, approvals = dialog.approved_backups(), dict(dialog.approvals)
         wait_seconds = dialog.wait_seconds.value()
@@ -547,7 +600,7 @@ class MainWindow(QMainWindow):
             if ctx.import_id == iid and self.stack.currentIndex() == STEP_TRANSFERS + 1:
                 self.transfers.start()
 
-        run_async(self, work, lambda _count: finish(), finish)
+        self._run_job(work, lambda _count: finish(), finish)
 
     def _queueing_changed(self, busy: bool) -> None:
         self._queueing = busy
@@ -582,6 +635,8 @@ class MainWindow(QMainWindow):
 
     def startup_checks(self) -> None:
         """Downloads folder first (slskd needs it), then the stored Soulseek login or a login popup."""
+        if self._closing:
+            return
         self.prompt_if_unconfigured()
         downloads = self.ctx.settings.slskd_downloads_dir.strip()
         if downloads:
@@ -618,6 +673,20 @@ class MainWindow(QMainWindow):
 
     def resume_last_import(self) -> None:
         """Reopen the most recent import from the local database (no network)."""
+        self.resume_import(None)
+
+    def resume_import(self, import_id: str | None) -> None:
+        """Open a saved session without losing a running search or half-submitted approval."""
+        if self._closing:
+            return
+        if self._queueing or self.search._running:
+            self.statusBar().showMessage("Finish or cancel the current search before opening another transfer.")
+            return
+        self.transfers.stop()
+        if self.transfers._inflight:
+            self._when_refresh_idle(lambda: self.resume_import(import_id))
+            return
+        self._navigation_generation += 1
         ctx = self.ctx
         generation = self._navigation_generation
         selection = (ctx.playlist.id if ctx.playlist else None, ctx.destination,
@@ -627,7 +696,9 @@ class MainWindow(QMainWindow):
             imports = ctx.store.list_imports()
             if not imports:
                 return None
-            imp = imports[0]
+            imp = next((i for i in imports if i.id == import_id), None) if import_id else imports[0]
+            if imp is None:
+                return None
             tracks = ctx.store.load_tracks(imp.id)
             results = ctx.store.load_match_results(imp.id)
             aid = workflow.latest_approval_id(ctx.store, imp.id)
@@ -639,8 +710,10 @@ class MainWindow(QMainWindow):
                        tuple(t.apple_id for t in ctx.tracks), ctx.import_id)
             if not self._queueing and generation == self._navigation_generation and selection == current:
                 self._resumed(payload)
+                if payload is not None:
+                    self.transfer_monitor.refresh()
 
-        run_async(self, work, done, lambda e: show_error(self, "Resume", ctx.describe(e)))
+        self._run_job(work, done, lambda e: show_error(self, "Resume", ctx.describe(e)))
 
     def _resumed(self, payload) -> None:
         if self._queueing:
@@ -674,13 +747,71 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Resumed import of '{imp.playlist_name}'.")
         self.refresh_navigation()
         self.go_step(STEP_TRANSFERS if approval else (STEP_REVIEW if results else STEP_SEARCH))
+        if approval:  # go_step normally shows and marks these; if it did not reach Downloads, do it here
+            session = next((s for s in transfer_sessions.sessions(ctx.store) if s.import_id == imp.id), None)
+            if session is not None and session.unseen_added:
+                self.transfers.show_library_update(session.unseen_added, session.folder_name)
+                transfer_sessions.mark_seen(ctx.store, session.import_id, session.event_cursor)
 
     # ------------------------------------------------------------ shutdown
 
+    def show_from_tray(self) -> None:
+        if self._closing:
+            return
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.transfer_monitor.refresh()
+
+    def _show_tray(self) -> bool:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return False
+        if self._tray is None:
+            self._tray = QSystemTrayIcon(self.windowIcon(), self)
+            menu = QMenu(self)
+            menu.addAction("Open S2S", self.show_from_tray)
+            menu.addSeparator()
+            menu.addAction("Quit S2S (pause transfers)", self.quit_application)
+            self._tray.setContextMenu(menu)
+            self._tray.activated.connect(lambda reason: self.show_from_tray()
+                if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None)
+        self._tray.show()
+        return True
+
+    def quit_application(self) -> None:
+        self._force_exit = True
+        self.close()
+
     def closeEvent(self, event) -> None:  # noqa: N802
+        if not self._force_exit and self._background_on_close:
+            pending = self._queueing or self.transfers._inflight or self.transfer_monitor.inflight or any(
+                s.incomplete for s in transfer_sessions.sessions(self.ctx.store))
+            if pending:
+                event.ignore()
+                if self._show_tray():
+                    self.hide()
+                else:
+                    self.showMinimized()  # no invisible process when the desktop has no tray
+                return
+        self._closing = True
+        self.transfer_monitor.stop()
         self.transfers.stop()
+        self.transfers._shutdown = True
         self.search.cancel()
+        if self.transfers.sources._search_cancel is not None:
+            self.transfers.sources._search_cancel.set()
+        if (self._pending_jobs or self.transfer_monitor.inflight or self.transfers._inflight
+                or self.transfers.sources._busy or self.review._busy or self.search._running
+                or QThreadPool.globalInstance().activeThreadCount()):
+            event.ignore()
+            self.statusBar().showMessage("Finishing the current file check before quitting…")
+            QTimer.singleShot(100, self.close)
+            return
         self.spotify_service.dispose()
         self.soundcloud_service.dispose()
         self.soulseek.shutdown()  # stop the slskd this app started
+        if self._tray is not None:
+            self._tray.hide()
         super().closeEvent(event)
+        if self._background_on_close:
+            QApplication.instance().quit()

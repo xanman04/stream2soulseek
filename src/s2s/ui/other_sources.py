@@ -14,10 +14,9 @@ from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMes
                                QVBoxLayout, QWidget)
 
 from .. import workflow
-from ..approval import create_approval
 from ..models import Candidate, SelectionItem
 from . import theme
-from .review_page import _basename, is_eligible, match_label, quality_text
+from .review_page import _basename, candidate_detail, is_eligible, match_label, quality_text
 from .util import fmt_mib, item, make_table, show_error
 from .workers import run_async
 
@@ -45,7 +44,11 @@ class OtherSourcesPanel(QWidget):
         self.title.setFont(f)
         self.note = theme.subtle(QLabel(""))
         self.note.setWordWrap(True)
-        self.table = make_table(["Uploader", "Quality", "Size (MiB)", "Length", "Match"])
+        self.file_detail = theme.subtle(QLabel(""))
+        self.file_detail.setWordWrap(True)
+        self.file_detail.setTextFormat(Qt.TextFormat.PlainText)
+        self.file_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.table = make_table(["Source", "Quality", "Size (MiB)", "Length", "Match"])
         hh = self.table.horizontalHeader()
         hh.setStretchLastSection(True)
         self.table.setColumnWidth(0, 140)
@@ -66,6 +69,7 @@ class OtherSourcesPanel(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.title)
         lay.addWidget(self.table, 1)
+        lay.addWidget(self.file_detail)
         search_row = QHBoxLayout()
         search_row.addWidget(self.query_label)
         search_row.addWidget(self.query, 1)
@@ -108,7 +112,8 @@ class OtherSourcesPanel(QWidget):
                 return
             found, destination = payload
             self._fill(found, destination)
-            self._say("" if found else "No alternative matched your rules. Try searching with different words below.")
+            self._say("" if found else "No other eligible files were saved from the last search. "
+                      "Search again below, or change the search words. Nothing changes until you confirm a replacement.")
 
         def failed(exc) -> None:
             if self._current(generation, import_id):
@@ -118,7 +123,7 @@ class OtherSourcesPanel(QWidget):
 
     @staticmethod
     def _replacement_candidates(store, import_id, settings, apple_id: str):
-        plan = workflow.build_replacement_plan(store, import_id, settings, include_failed=True)
+        plan = workflow.build_replacement_plan(store, import_id, settings, include_failed=True, include_waiting=True)
         res = next((r for r in plan.results if r.track.apple_id == apple_id), None)
         if res is None:
             return [], plan.destination
@@ -144,7 +149,8 @@ class OtherSourcesPanel(QWidget):
                 return
             found, destination = payload
             self._fill(found, destination)
-            self._say("" if found else "No other file for this track passed your rules.")
+            self._say("" if found else "No other eligible files were saved from the last search. "
+                      "Search again below, or change the search words.")
 
         def failed(exc) -> None:
             if self._current(generation, import_id):
@@ -175,7 +181,8 @@ class OtherSourcesPanel(QWidget):
         self.table.setRowCount(len(candidates))
         for r, c in enumerate(candidates):
             f = c.file
-            values = (f.username, quality_text(f), fmt_mib(f.size), _length(f.length_s), match_label(c))
+            values = ("Local copy" if f.local_sha256 is not None else f.username,
+                      quality_text(f), fmt_mib(f.size), _length(f.length_s), match_label(c))
             for col, text in enumerate(values):
                 self.table.setItem(r, col, item(text))
         if candidates:
@@ -191,6 +198,11 @@ class OtherSourcesPanel(QWidget):
         return self._candidates[rows[0].row()] if rows and rows[0].row() < len(self._candidates) else None
 
     def _update_button(self) -> None:
+        selected = self._selected()
+        self.file_detail.setText(candidate_detail(selected) if selected is not None else "")
+        self.file_detail.setVisible(selected is not None)
+        self.download_btn.setText("Copy this file…" if selected and selected.file.local_sha256 is not None
+                                  else "Download this file…")
         self.download_btn.setEnabled(self._selected() is not None and not self._busy)
 
     def _set_busy(self, busy: bool) -> None:
@@ -257,10 +269,14 @@ class OtherSourcesPanel(QWidget):
     def ask_download(self, name: str, cand: Candidate) -> bool:
         """Modal yes/no for one replacement file. Separate method so tests can answer it."""
         f = cand.file
+        local = f.local_sha256 is not None
         box = QMessageBox(QMessageBox.Icon.NoIcon, "Download another file",
-                          f"Download this file for {name}?", parent=self)
+                          f"{'Copy this local file' if local else 'Download this file'} for {name}?", parent=self)
         box.setInformativeText(f"{_basename(f.filename)}\n{f.username} · {quality_text(f)} · {fmt_mib(f.size)} MiB")
-        go = box.addButton("Download", QMessageBox.ButtonRole.AcceptRole)
+        box.setDetailedText(candidate_detail(cand))
+        box.setInformativeText(box.informativeText() +
+                               "\nAny still-waiting attempt for this track will be stopped before this file is requested.")
+        go = box.addButton("Copy" if local else "Download", QMessageBox.ButtonRole.AcceptRole)
         theme.primary(go)
         stay = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(stay)
@@ -272,22 +288,32 @@ class OtherSourcesPanel(QWidget):
         cand, key = self._selected(), self._key
         if cand is None or key is None or self._busy or not self._destination:
             return
-        import_id, _approval_id, apple_id = key
+        import_id, previous_id, apple_id = key
         name = self.title.text().removeprefix("Other files for ")
         if not self.ask_download(name, cand):
             return
+        if self._key != key or self.ctx.import_id != import_id:
+            return  # a timer refreshed/completed this track while the confirmation was open
         ctx = self.ctx
         generation = self._generation
-        item_ = SelectionItem(apple_id, cand.file.username, cand.file.filename, cand.file.size, self._destination)
+        item_ = SelectionItem(apple_id, cand.file.username, cand.file.filename, cand.file.size, self._destination,
+                              cand.file.local_sha256)
         downloads_dir, archive_name = ctx.settings.slskd_downloads_dir, ctx.settings.archive_dir_name
         self._set_busy(True)
         self._say("Queuing…")
 
         def work():
-            with ctx.download_service() as svc:
-                approval = create_approval(ctx.store, import_id, [item_], downloads_dir=downloads_dir,
-                                           archive_name=archive_name)
-                svc.enqueue_approved(approval.id, approval.fingerprint)
+            record = ctx.store.get_transfer(previous_id, apple_id)
+            from ..models import TransferState
+            active = record is not None and record.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS,
+                                                                    TransferState.UNKNOWN)
+            service = (ctx.download_service(local_only=True) if item_.local_sha256 is not None and not active
+                       else ctx.download_service())
+            with service as svc:
+                approval = svc.replace_selection(previous_id, import_id, item_, downloads_dir=downloads_dir,
+                                                  archive_name=archive_name)
+                if item_.local_sha256 is not None:
+                    workflow.import_completed(ctx.store, approval.id, ctx.settings)
             return approval
 
         def done(_approval) -> None:

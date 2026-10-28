@@ -18,7 +18,8 @@ from test_ui_smoke import env, inline_workers, mk_cand, qapp, synthetic  # noqa:
 class Svc:
     """Download service stand-in: records refreshes and enqueues; never talks to slskd."""
 
-    def __init__(self):
+    def __init__(self, store):
+        self.store = store
         self.refreshed, self.enqueued = [], []
 
     def refresh(self, aid):
@@ -28,6 +29,12 @@ class Svc:
     def enqueue_approved(self, aid, fp):
         self.enqueued.append((aid, fp))
         return []
+
+    def replace_selection(self, previous_id, import_id, item, *, downloads_dir, archive_name="OLD"):
+        approval = create_approval(self.store, import_id, [item], downloads_dir=downloads_dir,
+                                   archive_name=archive_name)
+        self.enqueue_approved(approval.id, approval.fingerprint)
+        return approval
 
 
 @pytest.fixture
@@ -46,7 +53,7 @@ def declined(env, monkeypatch):  # noqa: F811
     ctx.destination, ctx.results = dest, results
     ctx.import_id, ctx.approval_id, ctx.fingerprint = iid, ap.id, ap.fingerprint
     ctx.settings.auto_import = False
-    svc = Svc()
+    svc = Svc(store)
 
     @contextlib.contextmanager
     def fake_service(self):
@@ -169,6 +176,7 @@ def test_downloads_page_offers_other_files_in_place_and_queues_only_after_yes(de
     from PySide6.QtWidgets import QApplication
 
     from s2s.ui import other_sources
+    monkeypatch.setattr(other_sources, "show_error", lambda _parent, _title, message: pytest.fail(message))
 
     win, store, ctx, svc, ap, c, dest = declined
     t = win.transfers
@@ -193,5 +201,5 @@ def test_downloads_page_offers_other_files_in_place_and_queues_only_after_yes(de
     new = next(a for a in approvals if a.id != ap.id)
     assert [i.username for i in new.items] == ["u3"] and svc.enqueued == [(new.id, new.fingerprint)]
     assert store.get_approval(ap.id) == ap  # the original approval is untouched
-    assert other_sources.create_approval is not None
+    assert hasattr(svc, "replace_selection")
     t.stop()

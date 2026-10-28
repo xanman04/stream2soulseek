@@ -1,7 +1,28 @@
 # Changelog
 
-## Unreleased
+## 1.4.1 — 2026-10-29
 
+- Transfers keep going in the background. A **Transfers** panel in the sidebar lists every saved download session
+  (playlist, how many tracks are in your folder, what is still waiting); click one to reopen it. S2S keeps checking
+  all of them, imports late finishers, and tells you when new tracks were added to your folder ("Refresh your
+  Rekordbox playlist when you're ready"). Closing the window while downloads are unfinished hides S2S to the system
+  tray instead of stopping them; **File > Quit S2S (pause transfers)** really quits.
+- Uploader memory: persistent local history lowers the priority of uploaders with repeated long remote queues,
+  within otherwise equivalent recording/quality matches. Three-minute waits must be observed while Soulseek is
+  connected; local queues, outages and long polling gaps do not count, nor does cancellation itself. At least three stalled
+  tracks and a 50% stall rate are needed. Successful starts offset the history and observations older than 30 days
+  do not affect ranking. Uploaders remain eligible, no extra review flags are added, and file details explain the
+  lower priority. Polls and retries cannot multiply the same track's observation.
+- Downloads: tracks stuck waiting on an uploader now show saved alternatives and an editable Soulseek search
+  directly beside the problem. An empty automatic-backup pool returns to these recovery tools instead of an
+  empty dialog. Manually confirmed replacements stop the old queued attempt before requesting the new file;
+  changed selections, missing transfer IDs, cancellation failures and downloads that have started or finished
+  prevent an unsafe switch. Alternative filenames and matching warnings are visible before confirmation.
+- Reuse verified audio already in the configured Soulseek downloads folder, including its archive. Review shows
+  local copies separately from downloads and asks for confirmation before copying them into the tracklist folder.
+  Recording/version and format rules still apply; changed files fail verification, sources stay in place, and
+  existing destination files are never overwritten. Local copies never enter Soulseek queues or automatic backup
+  pools. Metadata is cached for unchanged files, with at most four file checks running at once.
 - If slskd (the Soulseek engine S2S runs) exits by itself, S2S now restarts it with your saved login, up to three
   times and within the existing Soulseek login limits, and says so in the sidebar. slskd then re-queues the downloads
   that were active. Before, a crash left the Downloads page stale until S2S was restarted.

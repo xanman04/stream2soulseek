@@ -65,6 +65,14 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
     error = getattr(s, "error", None)
     raw_line = f"slskd: {raw}" + (f" ({error})" if error else "") if raw or error else ""
     outcome = getattr(result, "outcome", None)
+    if raw == "local_copy_approved" and outcome not in _IMPORTED:
+        if outcome in (ImportOutcome.INVALID, ImportOutcome.CONFLICT):
+            why = getattr(result, "detail", "") or "local copy failed verification"
+            return TrackStatus("Local copy needs attention", "warn", ATTENTION, why,
+                               fixable=True, recheck=True,
+                               help=f"The existing file was not copied: {why}. Nothing was overwritten or removed. "
+                                    "Use Check again, or search for another file below.")
+        return TrackStatus("Copying local file…" if auto_import else "Local file ready to copy", "info", DOWNLOADING)
     if s.state == TransferState.SUCCEEDED:
         if outcome in _IMPORTED:
             final = getattr(result, "final_path", None) or ""
@@ -127,10 +135,10 @@ def describe_track(rec, result, *, auto_import: bool = True) -> TrackStatus:
 
 
 def stuck_waiting(minutes: int) -> TrackStatus:
-    return TrackStatus(f"Waiting on uploader for {minutes} min", "warn", ATTENTION,
+    return TrackStatus(f"Waiting on uploader for {minutes} min", "warn", ATTENTION, fixable=True,
                        help="The uploader has not started sending this file. Their queue may be long or they may be "
-                            "away. Keep waiting, or press Choose another uploader to pick a different copy of the "
-                            "same file yourself.")
+                            "away. Choose another file below, or search Soulseek with your own words. Nothing "
+                            "changes until you confirm a replacement; you can also keep waiting or cancel.")
 
 
 def set_label(index: int) -> str:
@@ -179,6 +187,7 @@ class TransfersPage(QWidget):
         self._waiting_since: dict[tuple[str, str], float] = {}  # (approval id, apple id) -> first seen waiting
         self._manual = False
         self._active = 0  # tracks still downloading, waiting or not started (from the last refresh)
+        self._shutdown = False
 
         # header: one bar, a few counts
         self.progress = QProgressBar()
@@ -186,6 +195,9 @@ class TransfersPage(QWidget):
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
         self.progress.setFormat("")
+        self.library_update = QLabel("")
+        self.library_update.setWordWrap(True)
+        self.library_update.setVisible(False)
         self.chip_folder = chip("", "ok")
         self.chip_downloading = chip("", "info")
         self.chip_waiting = chip("", "warn")
@@ -246,7 +258,7 @@ class TransfersPage(QWidget):
         self.retry_btn = QPushButton("Retry same file")
         self.recheck_btn = QPushButton("Check again")
         self.stop_wait_btn = QPushButton("Cancel download")
-        self.queued_backups_btn = QPushButton("Choose another uploader…")  # opens a chooser; nothing is automatic
+        self.queued_backups_btn = QPushButton("Automatic backups…")
         self.queued_backups_btn.setVisible(False)
         self.fix_btn.setVisible(False)  # replacements are chosen in place, in the "Other files" list beside
         self.sources = OtherSourcesPanel(ctx)  # the problem (no trip back to Review)
@@ -300,6 +312,7 @@ class TransfersPage(QWidget):
         chips.addWidget(self.refresh_btn)
         lay.addLayout(chips)
         lay.addWidget(self.info)
+        lay.addWidget(self.library_update)
         lay.addWidget(self.banner)
         lay.addWidget(self.split, 1)
         footer = QHBoxLayout()
@@ -389,10 +402,19 @@ class TransfersPage(QWidget):
         self.attention.setVisible(False)
         self._active = 0
 
+    def show_library_update(self, count: int, folder: str) -> None:
+        text = (f"{count} track{'s' if count != 1 else ''} added to {folder} since you last opened this transfer. "
+                "Refresh your Rekordbox playlist when you're ready.") if count else ""
+        self.library_update.setText(text)
+        self.library_update.setVisible(bool(text))
+
     def start(self) -> None:
         """Begin showing/refreshing the current approval."""
+        if self._shutdown:
+            return
         self._reset_header()
         if self._shown_import_id != self.ctx.import_id:
+            self.show_library_update(0, "")
             self._blocked, self._archive_errors = {}, {}
             self._waiting_since = {}
             self._shown_import_id = self.ctx.import_id
@@ -419,6 +441,8 @@ class TransfersPage(QWidget):
 
     def refresh(self, *, process: bool | None = None) -> None:
         """Poll slskd, then (auto_import, or process=True from the button) import and archive."""
+        if self._shutdown:
+            return
         latest, iid = self.ctx.approval_id, self.ctx.import_id
         if not latest:
             self._reset_header()
@@ -435,16 +459,27 @@ class TransfersPage(QWidget):
             aids = (workflow.approval_ids(ctx.store, iid) if iid else []) or [latest]
             err = proc_err = None
             reports = []
+            local_only = all(ap is not None and all(i.local_sha256 is not None for i in ap.items)
+                             for ap in (ctx.store.get_approval(aid) for aid in aids))
+            if local_only:
+                from ..download import DownloadService
+                svc = DownloadService(ctx.store, None)
+                for aid in aids:
+                    svc.refresh(aid)
+                    if do_process:
+                        reports.append(workflow.process_completed(ctx.store, aid, ctx.settings))
             try:
-                with ctx.download_service() as svc:
-                    for aid in aids:
-                        svc.refresh(aid)
-                    if hasattr(svc, "recover_queued"):
+                if not local_only:
+                    with ctx.download_service() as svc:
                         for aid in aids:
-                            svc.recover_queued(aid, ctx.settings.match_policy.fingerprint())
+                            svc.refresh(aid)
+                        if hasattr(svc, "recover_queued"):
+                            for aid in aids:
+                                svc.recover_queued(aid, ctx.settings.match_policy.fingerprint())
             except Exception as exc:  # noqa: BLE001 - show stored state anyway
-                err = ctx.describe(exc)
-            if do_process and err is None:
+                if not local_only:
+                    err = ctx.describe(exc)
+            if do_process and err is None and not local_only:
                 try:
                     client = ctx.slskd_client()
                     try:
@@ -573,7 +608,8 @@ class TransfersPage(QWidget):
             source = quality = ""
             if rec is not None:
                 s = rec.status
-                source = s.username + (" (replacement)" if replacement else "")
+                source = ("Local copy" if s.raw_state == "local_copy_approved" else
+                          s.username + (" (replacement)" if replacement else ""))
                 ext = s.filename.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[-1].upper() if "." in s.filename else ""
                 size = fmt_mib(s.size)
                 quality = " · ".join(x for x in (ext, f"{size} MiB" if size else "") if x)
@@ -660,7 +696,8 @@ class TransfersPage(QWidget):
 
     def _show_archives(self, records: list, archives: list, relevant: dict[str, str]) -> None:
         done = {a.username: a for a in archives}  # later approvals win
-        peers = sorted({r.status.username for r in records} | set(done), key=str.casefold)
+        peers = sorted({r.status.username for r in records if r.status.raw_state != "local_copy_approved"}
+                       | set(done), key=str.casefold)
         name = self.ctx.settings.archive_dir_name
         self.archive_table.setRowCount(len(peers))
         archived = waiting = problems = 0

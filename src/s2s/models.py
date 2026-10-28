@@ -56,6 +56,7 @@ class RemoteFile:
     has_free_slot: bool | None = None
     queue_length: int | None = None
     upload_speed: int | None = None  # bytes/s
+    local_sha256: str | None = None  # local reuse only: filename is an absolute path, username is empty
 
 
 # ---------------------------------------------------------------- Matching rules (per-user)
@@ -237,6 +238,7 @@ class SelectionItem:
     filename: str
     size: int
     destination: str  # absolute path of the chosen flat library, e.g. C:\\Music\\House
+    local_sha256: str | None = None  # binds an approved local copy to its reviewed contents
 
 
 @dataclass(frozen=True)

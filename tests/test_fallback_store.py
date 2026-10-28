@@ -28,20 +28,16 @@ def _primary_approval():
 
 
 def test_v3_migration_adds_fallback_tables_without_losing_data(tmp_path):
+    from s2s.store import _SCHEMA, _SCHEMA_V2, _SCHEMA_V3
     path = tmp_path / "v3.sqlite3"
-    store = Store(path)
-    with store._lock, store._conn:
-        store._conn.execute("DROP TABLE fallback_attempts")
-        store._conn.execute("DROP TABLE fallback_plans")
-        store._conn.execute("INSERT INTO imports VALUES (?,?,?,?,?)",
-                            ("i", "playlist", "name", "dest", "created"))
-        store._conn.execute("INSERT INTO peer_rejections VALUES (?,?,?,?,?)",
-                            ("peer", "banned", "first", "last", 2))
-        store._conn.execute("PRAGMA user_version=3")
-    store.close()
+    with sqlite3.connect(path) as conn:
+        conn.executescript(_SCHEMA + _SCHEMA_V2 + _SCHEMA_V3)
+        conn.execute("INSERT INTO imports VALUES (?,?,?,?,?)", ("i", "playlist", "name", "dest", "created"))
+        conn.execute("INSERT INTO peer_rejections VALUES (?,?,?,?,?)", ("peer", "banned", "first", "last", 2))
+        conn.execute("PRAGMA user_version=3")
 
     migrated = Store(path)
-    assert SCHEMA_VERSION == 4
+    assert migrated._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert migrated.get_import("i").playlist_name == "name"
     assert migrated.peer_rejections() == [{"username": "peer", "kind": "banned",
                                            "first_seen": "first", "last_seen": "last", "count": 2}]

@@ -169,7 +169,8 @@ def test_v2_database_migrates_to_v3(tmp_path):
     s = Store(path)
     try:
         assert s.get_import("i1").playlist_name == "P"
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        from s2s.store import SCHEMA_VERSION
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert s.peer_rejections() == []
     finally:
         s.close()
