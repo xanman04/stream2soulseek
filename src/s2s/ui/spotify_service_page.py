@@ -58,7 +58,7 @@ class SpotifyServicePage(QWidget):
         self.stack.addWidget(self.login_holder)
         self.stack.currentChanged.connect(self.hero.set_page_index)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 16)
+        layout.setContentsMargins(28, 26, 28, 18)
         layout.setSpacing(12)
         layout.addWidget(self.hero)
         layout.addWidget(self.status)

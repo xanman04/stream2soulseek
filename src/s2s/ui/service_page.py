@@ -46,7 +46,7 @@ class ServicePage(QWidget):
         self.stack.currentChanged.connect(self.hero.set_page_index)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 20, 22, 16)
+        lay.setContentsMargins(28, 26, 28, 18)
         lay.setSpacing(12)
         lay.addWidget(self.hero)
         lay.addWidget(self.status)

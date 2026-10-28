@@ -45,16 +45,16 @@ def _rgba(kind: str, alpha: int) -> str:
 
 
 def banner_style(kind: str) -> str:
-    """Stylesheet for a QLabel/QFrame banner: tinted background, accent left border, normal text colour."""
+    """Stylesheet for a QLabel/QFrame banner: the accent as a faint fill and an even hairline, normal text colour."""
     r, g, b = _ACCENTS.get(kind, _ACCENTS["info"])
-    return (f"background-color: rgba({r},{g},{b},22); border: 1px solid rgba({r},{g},{b},50);"
-            f" border-left: 3px solid rgb({r},{g},{b}); border-radius: 4px; padding: 9px 12px;")
+    return (f"background-color: rgba({r},{g},{b},20); border: 1px solid rgba({r},{g},{b},70);"
+            " border-radius: 8px; padding: 10px 14px;")
 
 
 def chip_style(kind: str) -> str:
     r, g, b = _ACCENTS.get(kind, _ACCENTS["muted"])
-    return (f"background-color: rgba({r},{g},{b},20); border: 1px solid rgba({r},{g},{b},65);"
-            " border-radius: 4px; padding: 4px 10px;")
+    return (f"background-color: rgba({r},{g},{b},22); border: 1px solid rgba({r},{g},{b},55);"
+            " border-radius: 11px; padding: 3px 11px;")
 
 
 def banner(text: str = "", kind: str = "info", parent: QWidget | None = None) -> QLabel:
@@ -128,8 +128,8 @@ def polish_table(table) -> None:
     """Keep data views compact and readable; status backgrounds supply the row separation."""
     table.setShowGrid(False)
     table.setAlternatingRowColors(True)
-    table.verticalHeader().setDefaultSectionSize(32)
-    table.horizontalHeader().setMinimumHeight(36)
+    table.verticalHeader().setDefaultSectionSize(34)
+    table.horizontalHeader().setMinimumHeight(38)
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
 
@@ -202,10 +202,10 @@ QListWidget#stepList::item:selected {{ background: {c['selection']}; color: {c['
     border: 1px solid {c['focus']}; border-left: 4px solid {c['focus']}; }}
 QListWidget#stepList::item:disabled {{ color: {c['disabled']}; }}
 QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
-QLabel#pageTitle {{ font-size: 23px; font-weight: 600; margin-bottom: 4px; }}
+QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
 QWidget#pageFooter {{ border-top: 1px solid {c['border']}; }}
-QPushButton {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 6px;
-              padding: 6px 12px; min-height: 18px; }}
+QPushButton {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px;
+              padding: 6px 14px; min-height: 20px; }}
 QPushButton:hover {{ background: {c['hover']}; border-color: {c['muted']}; }}
 QPushButton:pressed {{ background: {c['selection']}; }}
 QPushButton:focus {{ border-color: {c['focus']}; }}
@@ -220,22 +220,22 @@ QPushButton[segment="last"] {{ border-top-left-radius: 0; border-bottom-left-rad
 QPushButton[segment]:checked {{ background: {c['primary']}; color: #ffffff; border-color: {c['primary']};
                                font-weight: 600; }}
 QPushButton[primary="true"] {{ background: {c['primary']}; color: #ffffff; border-color: {c['primary']};
-                               font-weight: 600; padding: 7px 16px; }}
+                               font-weight: 600; padding: 8px 20px; }}
 QPushButton[primary="true"]:hover {{ background: #507fa3; border-color: #507fa3; }}
 QPushButton[primary="true"]:pressed {{ background: #345d7e; }}
 QPushButton[primary="true"]:disabled {{ background: {c['hover']}; color: {c['disabled']}; border-color: {c['border']}; }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: {c['panel']}; border: 1px solid {c['border']};
-    border-radius: 6px; padding: 7px 10px; min-height: 18px; }}
+    border-radius: 8px; padding: 7px 11px; min-height: 20px; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {c['focus']}; }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {c['disabled']}; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox QAbstractItemView {{ background: {c['panel']}; border: 1px solid {c['border']}; padding: 4px; }}
 QTableView, QTableWidget, QListWidget {{ background: {c['panel']}; border: 1px solid {c['border']};
-    border-radius: 6px; outline: 0; alternate-background-color: {c['window']}; }}
+    border-radius: 10px; outline: 0; alternate-background-color: {c['window']}; }}
 QTableView::item {{ padding: 4px 8px; border: none; border-radius: 0; }}
 QTableView::item:selected {{ background: {c['selection']}; color: {c['selected']}; }}
-QHeaderView::section {{ background: {c['side']}; color: {c['muted']}; border: none;
-    border-bottom: 1px solid {c['border']}; padding: 9px 8px; font-weight: 600; }}
+QHeaderView::section {{ background: {c['panel']}; color: {c['muted']}; border: none;
+    border-bottom: 1px solid {c['border']}; padding: 9px 8px; font-size: 12px; font-weight: 600; }}
 QTableCornerButton::section {{ background: {c['panel']}; border: none; }}
 QListWidget::item {{ padding: 7px 10px; border: 1px solid transparent; border-radius: 3px; }}
 QListWidget::item:hover {{ background: {c['hover']}; }}
@@ -244,15 +244,15 @@ QListWidget#navigation {{ background: transparent; border: none; }}
 QListWidget#navigation::item {{ padding: 6px 9px; border-left: 3px solid transparent; border-radius: 5px; }}
 QListWidget#navigation::item:selected {{ border-left-color: {c['focus']}; }}
 QListWidget#navigation::item:disabled {{ color: {c['disabled']}; }}
-QGroupBox {{ border: 1px solid {c['border']}; border-radius: 4px; margin-top: 12px; padding: 12px; }}
+QGroupBox {{ border: 1px solid {c['border']}; border-radius: 10px; margin-top: 12px; padding: 12px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {c['muted']}; }}
 QTabWidget::pane {{ border: 1px solid {c['border']}; border-radius: 4px; }}
 QTabBar::tab {{ background: transparent; color: {c['muted']}; padding: 8px 14px; border-bottom: 2px solid transparent; }}
 QTabBar::tab:selected {{ color: {c['text']}; border-bottom-color: {c['focus']}; }}
 QTabBar::tab:hover {{ background: {c['hover']}; }}
-QProgressBar {{ background: {c['panel']}; border: none; border-radius: 3px; min-height: 8px; max-height: 16px;
+QProgressBar {{ background: {c['hover']}; border: none; border-radius: 4px; min-height: 8px; max-height: 8px;
                text-align: center; }}
-QProgressBar::chunk {{ background: {c['primary']}; border-radius: 3px; }}
+QProgressBar::chunk {{ background: {c['primary']}; border-radius: 4px; }}
 QSplitter::handle {{ background: transparent; width: 8px; height: 8px; }}
 QSplitter::handle:hover {{ background: {c['border']}; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}

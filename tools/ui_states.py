@@ -210,10 +210,13 @@ def main():
     shot("01_playlist")
     win.resume_last_import()
     pump()
+    approval = win.ctx.approval_id
     for i, name in enumerate(["01b_playlist_resumed", "02_destination", "03_search", "04_review", "05_downloads",
                               "06_check_export"]):
+        win.ctx.approval_id = approval if i >= 4 else None  # steps 1-4 are closed once downloads are confirmed
         win.go_step(i)
         shot(name)
+    win.ctx.approval_id = approval
     win.review.model  # noqa: B018
     win.go_step(3)
     if win.review.view.model().rowCount():
