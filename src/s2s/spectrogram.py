@@ -106,7 +106,7 @@ def verdict_for(cutoff_hz: float | None, codec: str | None, bitrate_kbps: int | 
 
 def render(audio_path: str, *, ffmpeg: str, ffprobe: str | None, cache_dir: Path, codec: str | None = None,
            bitrate_kbps: int | None = None, runner: Callable = subprocess.run,
-           row_energy: Callable[[str], list[float]] | None = None) -> Spectrogram:
+           row_energy: Callable[[str], list[float]] | None = None, legend: bool = True) -> Spectrogram:
     """Render (or reuse) the spectrogram picture and estimate the cutoff. Raises OSError/RuntimeError on failure.
 
     `row_energy(path)` returns per-row brightness of an image (top row first); the default uses Qt's QImage.
@@ -116,11 +116,11 @@ def render(audio_path: str, *, ffmpeg: str, ffprobe: str | None, cache_dir: Path
         raise OSError(f"File not found: {audio}")
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = _cache_key(audio)
-    picture = cache_dir / f"{key}.png"
+    picture = cache_dir / f"{key}{'' if legend else '-plot'}.png"
     plain = cache_dir / f"{key}-plain.png"
     if not picture.exists():
         res = _run(runner, [ffmpeg, "-v", "error", "-y", "-i", str(audio), "-lavfi",
-                            "showspectrumpic=s=1200x500:legend=1:scale=log:color=intensity", str(picture)])
+                            f"showspectrumpic=s=1200x500:legend={int(legend)}:scale=log:color=intensity", str(picture)])
         if getattr(res, "returncode", 1) != 0 or not picture.exists():
             raise RuntimeError("FFmpeg could not draw the spectrogram for this file.")
     if not plain.exists():

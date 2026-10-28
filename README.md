@@ -78,8 +78,12 @@ permissions, library access and unavailable tracks can affect the playlist data 
    exact selection before any downloads begin.
 5. **Downloads & import.** Monitor downloads and automatic file checks. **Needs attention** explains
    failed, declined or long-waiting transfers and offers recovery actions. Replacements need your approval.
-6. **Check files.** Compare the folder against the playlist, export missing tracks, or inspect a file's
-   spectrogram. Choose **Start another playlist** to begin again.
+6. **Check files.** Compare the folder against the playlist and inspect each selected track in a permanent
+   spectrogram and audio-player dashboard. Selection stays paused; click the spectrogram to seek and play,
+   or use the playback controls. **Expand** opens a larger view of the same track. File details include the
+   original source filename and available audio metadata. Queued or failed downloads offer alternatives and
+   custom Soulseek searches, with confirmation required before a replacement downloads. Export missing tracks
+   when needed, and choose **Done** to begin another playlist.
 
 After confirming downloads, steps 1–4 are locked for that run. **Cancel downloads** stops unfinished
 transfers and starts over; files already imported stay in the tracklist folder. Import history records

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Check files now has a permanent selected-track dashboard: a seekable spectrogram beside file information
+  and playback controls. Selecting a track never plays it; clicking its spectrogram seeks and plays. Expand
+  shares the same player, and leaving the page stops playback. Smaller layouts stack the panels and fold file
+  details. Queued and failed tracks can open the existing alternatives and custom-search recovery flow from
+  the dashboard; replacement downloads still require confirmation. Plain-language quality hints explain
+  suspicious frequency cutoffs as estimates to help with review, without automatically rejecting files.
+
 - Downloads: problems are explained in one plain sentence ("S2S couldn't find the downloaded file on this computer.")
   instead of file names, byte counts and internal wording. The technical detail goes to S2S's background log, once
   per track, and is included in Help > Report a problem. "Details: peer folders" is now "Folder tidy-up".
