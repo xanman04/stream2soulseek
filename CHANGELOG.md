@@ -15,6 +15,8 @@
 - Manual installers and the independent updater launch S2S directly in its installation folder.
 - Setup logs are enabled, and S2S records startup phases to help locate delays before the main window opens.
   Cold packaged-app opening time still needs live verification.
+- Build dependency downloads use checked byte ranges, retries and a total time budget to recover from
+  stalled upstream transfers while retaining the pinned archive checksums.
 
 ## 1.3.1 — 2026-10-27
 

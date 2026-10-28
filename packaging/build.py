@@ -26,6 +26,7 @@ import zipfile
 from pathlib import Path
 
 from check_bundle import check_directory
+from download import download
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "build" / "package"
@@ -86,9 +87,7 @@ def fetch(url: str, sha256: str | None = None) -> Path:
     path = CACHE / name
     if not path.exists():
         log(f"downloading {url}")
-        req = urllib.request.Request(url, headers={"User-Agent": "s2s-build"})
-        with urllib.request.urlopen(req, timeout=300) as r, open(path.with_suffix(".part"), "wb") as f:
-            shutil.copyfileobj(r, f)
+        download(url, path.with_suffix(".part"))
         path.with_suffix(".part").replace(path)
     if sha256:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
