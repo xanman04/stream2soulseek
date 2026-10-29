@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.5.0 — 2026-10-29
+
+- Home provides a recent-playlist carousel and separate entry points for playlist transfers and individual
+  tracks. Playlist steps nest in the sidebar; returning Home preserves the current session and unfinished
+  transfers remain accessible.
+- Find a track adds Quick search with the existing matching rules and unrestricted Free search with raw
+  Soulseek results. Optional user filters cover format, filename, uploader, bitrate, duration, size and free
+  upload slots; sorting cycles back to response order. Searches share the existing cache and rate limits.
+  Exact-file confirmation creates an independent saved transfer. Free selections retain their original
+  basename without playlist format/version filtering, while completion, size, path and no-overwrite checks
+  remain enforced. No files are opened or executed automatically.
+
 - Check files now has a permanent selected-track dashboard: a seekable spectrogram beside file information
   and playback controls. Selecting a track never plays it; clicking its spectrogram seeks and plays. Expand
   shares the same player, and leaving the page stops playback. Smaller layouts stack the panels and fold file
