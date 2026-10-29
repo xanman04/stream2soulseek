@@ -182,8 +182,20 @@ def main():
     ap.add_argument("--width", type=int, default=1500)
     ap.add_argument("--height", type=int, default=920)
     ap.add_argument("--theme", choices=("auto", "light", "dark"), default="auto")
+    ap.add_argument("--font-file", action="append", default=[], help="a font file to load for this render only (mock-ups)")
+    ap.add_argument("--font-family", default="", help="family name to use for the whole app (with --font-file)")
     args = ap.parse_args()
     apply_app_style(app, dark=None if args.theme == "auto" else args.theme == "dark")
+    if args.font_file:  # a try-out of a font: loaded for this process only, never copied or bundled
+        from PySide6.QtGui import QFont, QFontDatabase
+
+        for path in args.font_file:
+            QFontDatabase.addApplicationFont(path)
+        if args.font_family:
+            font = app.font()
+            font.setFamily(args.font_family)
+            app.setFont(font)
+        apply_app_style(app, dark=None if args.theme == "auto" else args.theme == "dark")  # headings pick up Clash Display
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -203,6 +215,10 @@ def main():
         win.grab().save(str(out / f"{name}.png"))
         print("saved", name)
 
+    win.show_home()
+    shot("00_home")
+    win.open_track_search("quick")
+    shot("00b_find_a_track")
     win.playlists.refresh_sources()
     win.playlists.load_playlists()
     win.go_step(0)

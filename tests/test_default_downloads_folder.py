@@ -38,3 +38,20 @@ def test_settings_keeps_the_soulseek_folder_under_advanced(qapp=None, tmp_path=N
     advanced = dlg.tabs.widget(names.index("Advanced"))
     general = dlg.tabs.widget(names.index("General"))
     assert advanced.isAncestorOf(dlg.downloads) and not general.isAncestorOf(dlg.downloads)
+
+
+def test_clash_display_is_used_for_headings_only_when_it_is_installed(monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    from s2s.ui import theme
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(theme, "display_font_family", lambda: "")
+    theme.apply_app_style(app, dark=True)
+    assert "Clash Display" not in app.styleSheet()
+    monkeypatch.setattr(theme, "display_font_family", lambda: "Clash Display")
+    theme.apply_app_style(app, dark=True)
+    assert 'QLabel#pageTitle' in app.styleSheet() and '"Clash Display"' in app.styleSheet()
+    assert "QLabel#navHeading" not in app.styleSheet().split("Clash Display")[1].split("}")[0]  # headings only
+    monkeypatch.undo()
+    theme.apply_app_style(app, dark=True)
