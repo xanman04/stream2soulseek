@@ -559,6 +559,35 @@ def search_track_custom(
         for c in ([old.best] if old.best else []) + list(old.alternatives) + list(old.rejected):
             if c.file.local_sha256 is None:
                 files.append(c.file)
+    import_record = store.get_import(import_id)
+    from .track_search import is_standalone_free_import
+    if import_record is not None and is_standalone_free_import(import_record.playlist_id):
+        # Free is intentionally unrestricted: retain every upstream file and old
+        # manual candidate in response order. These flagged candidates require a
+        # direct user choice and are ineligible for automatic backup switching.
+        manual: list[Candidate] = []
+        seen_files: set[tuple[str, str, int]] = set()
+        for remote in files:
+            key = (remote.username, remote.filename, remote.size)
+            if key in seen_files:
+                continue
+            seen_files.add(key)
+            manual.append(Candidate(
+                file=remote, tier=Tier.EXACT, format_rank=1, detected_version=None,
+                reasons=("Manual Free selection; recording identity is not verified.",), flagged=True,
+            ))
+        if manual:
+            result = MatchResult(
+                track, MatchStatus.PROPOSED, manual[0], tuple(manual[1:]),
+                note="Manual Free results; recording identity is not verified.",
+            )
+        else:
+            result = MatchResult(
+                track, MatchStatus.UNRESOLVED, None,
+                note=f'Manual Free search returned no files for "{query}".',
+            )
+        store.save_match_results(import_id, [result])
+        return result
     chosen = old.note if old is not None and MIX_CHOSEN in old.note else ""
     result = match(track, files, policy_for(chosen, settings.match_policy), declined_peer_reasons(store),
                    slow_peers=slow_peer_reasons(store))
@@ -764,6 +793,12 @@ def import_completed(
         raise ValueError("unknown approval")
     if not settings.slskd_downloads_dir.strip():
         raise ValueError("The slskd downloads folder is not set. Open Settings and choose it.")
+    import_record = store.get_import(approval.import_id)
+    from .track_search import import_manual_file, is_standalone_free_import
+    standalone_free = bool(import_record and is_standalone_free_import(import_record.playlist_id))
+    if standalone_free:
+        from .approval import verify_approval
+        approval = verify_approval(store, approval_id, approval.fingerprint)
     # named after the recording that was looked for: a DJ-mixed entry under the song's own name, unless the mix
     # was chosen in Review
     notes = {r.track.apple_id: r.note for r in store.load_match_results(approval.import_id)}
@@ -794,14 +829,30 @@ def import_completed(
                                "stored track or candidate is missing; cannot verify")
         else:
             try:
-                res = organize.import_file(
-                    track=track, tier=cand.tier, detected_version=cand.detected_version,
-                    transfer=rec.status, downloads_dir=settings.slskd_downloads_dir,
-                    destination=item.destination, ffprobe_path=settings.ffprobe_path, runner=runner,
-                    archive_name=settings.archive_dir_name, policy=settings.match_policy,
-                    require_peer=pool_for_track(store, approval_id, item.apple_id) is not None,
-                    local_sha256=item.local_sha256,
-                )
+                if standalone_free:
+                    # This persisted namespace opts one standalone Free import out of playlist
+                    # recording/format policy after restart. The helper still requires a successful
+                    # transfer, a size-matched file under the approved peer folder, safe raw name,
+                    # and an atomic no-overwrite copy. Audio probing is informational.
+                    status = rec.status
+                    if (status.username, status.filename, status.size) != (item.username, item.filename, item.size):
+                        res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,
+                                           "transfer identity differs from the approved file")
+                    else:
+                        res = import_manual_file(
+                            track=track, transfer=status, downloads_dir=settings.slskd_downloads_dir,
+                            destination=item.destination, ffprobe_path=settings.ffprobe_path,
+                            runner=runner, archive_name=settings.archive_dir_name,
+                        )
+                else:
+                    res = organize.import_file(
+                        track=track, tier=cand.tier, detected_version=cand.detected_version,
+                        transfer=rec.status, downloads_dir=settings.slskd_downloads_dir,
+                        destination=item.destination, ffprobe_path=settings.ffprobe_path, runner=runner,
+                        archive_name=settings.archive_dir_name, policy=settings.match_policy,
+                        require_peer=pool_for_track(store, approval_id, item.apple_id) is not None,
+                        local_sha256=item.local_sha256,
+                    )
             except Exception as exc:
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,
                                    f"import failed: {type(exc).__name__}: {scrub(exc)}")
