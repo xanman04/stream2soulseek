@@ -1,24 +1,28 @@
 ## What's changed
 
-S2S 1.5.0 adds individual track search and a playback dashboard alongside the playlist workflow.
+S2S 1.6.0 is a redesign, plus an easier first setup and a new way to rescue stuck downloads.
 
-- **New Home page.** Return to recently used S2S playlists, start a playlist transfer, or find an individual track. Playlist steps expand beneath their sidebar entry; saved transfers stay accessible.
-- **Quick search.** Enter a title, artist and optional version to find a track using your existing matching rules.
-- **Free search.** Browse raw Soulseek results without automatic recording or format filtering. Optional filters cover format, filename, uploader, bitrate, duration, size and free upload slots. Sorting cycles through ascending, descending and original order.
-- **Independent downloads.** Review the exact file and destination before confirming. Individual downloads have their own saved transfers and do not replace your current playlist. Free selections retain their original basename, with safe-path, completion, size and no-overwrite checks.
-- **Playback and spectrogram dashboard.** Check files shows the selected track's spectrogram, file information and playback controls together. Selecting a track never autoplays; clicking the spectrogram seeks and plays. Expand opens a larger view, and smaller windows adapt the layout.
-- **Accessible audio analysis.** Plain-language hints explain potentially suspicious frequency cutoffs as estimates, helping you decide what to inspect or listen to.
-- **Recovery and clearer messages.** Open alternatives and custom search for queued or failed tracks from Check files. Download problems use plain-language explanations, with technical details retained in diagnostic logs. The final workflow button is now **Done**.
+- **A new look.** Headings and the S2S wordmark use Clash Display. Navigation has consistent icons and clear active
+  states, and each recent playlist on Home is a tile in its service's colour.
+- **A sidebar that never scrolls.** On a short window it tightens step by step (and moves the playlist steps into a
+  menu if it has to), so your streaming accounts, Soulseek connection and Settings are always in view.
+- **One folder to choose.** You pick your tracklist folder. S2S creates Soulseek's own download folder for you; you
+  can still change it under **Settings > Advanced**.
+- **Rescue a stuck download.** For a failed or stalled track, search Soulseek freely beside the problem and choose any
+  file; you confirm it and it is copied for that track. You judge the recording and format yourself.
+- **Free search with several formats at once**, shown as removable filter chips.
+- A cleaner updater progress bar.
 
-Existing settings and saved transfers carry over. Searches continue to share the same cache and rate limits; downloads still require explicit confirmation.
+Your settings, saved sign-ins and libraries carry over. S2S upgrades its saved-transfers database automatically on
+first start; because of that, going back to an older version afterwards is not supported.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.5.0/S2S-1.5.0-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.5.0/S2S-1.5.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.5.0/S2S-1.5.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.6.0/S2S-1.6.0-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.6.0/S2S-1.6.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.6.0/S2S-1.6.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -28,8 +32,8 @@ Python, slskd and FFmpeg are included. The **Source code** archives are for deve
 
 ## Known limitations
 
-The new search and playback features have automated and native Windows visual coverage; live service use and playback on different Mac hardware still need broader testing. Spectrogram hints are estimates, not proof of audio quality. Free search deliberately leaves recording and file-type decisions to you; non-audio files are not opened or executed automatically.
+The redesign, the never-scrolling sidebar and stuck-download rescue have had automated tests and native Windows visual checks; live service use and Mac hardware still need broader testing.
 
 SoundCloud's bot protection may require a slider challenge. Mac builds are ad hoc signed without Developer ID signing or notarization; Windows builds are not publisher-signed, so operating-system security prompts are expected.
 
-[Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) · [Report a problem](https://github.com/xanman04/stream2soulseek/issues) · [Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.4.1...v1.5.0)
+[Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) · [Report a problem](https://github.com/xanman04/stream2soulseek/issues) · [Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.5.0...v1.6.0)
