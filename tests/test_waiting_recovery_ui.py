@@ -101,3 +101,23 @@ def test_fresh_search_for_waiting_track_never_cancels_or_queues(waiting_page, mo
     assert page.sources.search_btn.isEnabled()
     assert events == []
     assert len(ctx.store.approvals_for_import(ctx.import_id)) == 1
+
+
+def test_a_confirmed_replacement_leaves_needs_attention_at_once_and_returns_if_queuing_fails(waiting_page):
+    page, _ctx, _result, _events = waiting_page
+    assert page.problems.rowCount() == 1  # the stuck track is listed
+    page.sources.replacing.emit("t")  # the user confirmed a replacement
+    assert page.problems.rowCount() == 0 and page._statuses["t"].text == "Replacing…"  # gone immediately
+    page.sources.replace_failed.emit("t")  # queuing failed
+    assert page.problems.rowCount() == 1  # back in Needs attention without waiting for a poll
+    assert "t" not in page._replacing
+
+
+def test_the_marker_clears_once_the_replacement_has_its_own_approval(waiting_page):
+    page, _ctx, _result, _events = waiting_page
+    page.sources.replacing.emit("t")
+    assert "t" in page._replacing
+    payload = list(page._last_payload)
+    payload[-1] = {"t": "a-newer-approval"}  # the successor now exists for the track
+    page._refreshed(tuple(payload))
+    assert "t" not in page._replacing  # from here its own status (even a failure) decides where it shows

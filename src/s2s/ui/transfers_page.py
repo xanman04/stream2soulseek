@@ -180,6 +180,8 @@ class TransfersPage(QWidget):
         self._names: dict[str, str] = {}
         self._states: dict[tuple[str, str], TransferState] = {}  # (approval id, apple id) -> state
         self._statuses: dict[str, TrackStatus] = {}  # apple id -> current status
+        self._replacing: dict[str, str] = {}  # apple id -> the approval being replaced (until its successor exists)
+        self._last_payload: tuple | None = None
         self._fingerprints: dict[str, str] = {}  # approval id -> fingerprint (for retry)
         self._approval_ids: list[str] = []
         self._final_paths: dict[str, str] = {}  # apple id -> final file in the library
@@ -267,6 +269,8 @@ class TransfersPage(QWidget):
         self.sources = OtherSourcesPanel(ctx)  # the problem (no trip back to Review)
         self.sources.setVisible(False)
         self.sources.queued.connect(lambda _track: self.refresh())
+        self.sources.replacing.connect(self._begin_replacement)
+        self.sources.replace_failed.connect(self._end_replacement)
         self.attention = QWidget()
         outer = QHBoxLayout(self.attention)
         outer.setContentsMargins(0, 8, 0, 0)
@@ -419,6 +423,7 @@ class TransfersPage(QWidget):
             self.show_library_update(0, "")
             self._blocked, self._archive_errors = {}, {}
             self._waiting_since = {}
+            self._replacing.clear()
             self._shown_import_id = self.ctx.import_id
         if not self.ctx.approval_id:
             self.info.setText("No approved downloads yet. Confirm a review first.")
@@ -548,8 +553,29 @@ class TransfersPage(QWidget):
         self._waiting_since = {k: v for k, v in self._waiting_since.items() if k in seen}
         return statuses
 
+    def _begin_replacement(self, track_id: str) -> None:
+        """The user confirmed a replacement: the track leaves Needs attention immediately, not on the next poll."""
+        payload = self._last_payload
+        if payload is None:
+            return
+        relevant = payload[-1]
+        if track_id not in relevant:
+            return
+        self._replacing[track_id] = relevant[track_id]
+        busy = self._inflight
+        self._refreshed(payload)  # redraw from the last poll with the track marked
+        self._inflight = busy
+
+    def _end_replacement(self, track_id: str) -> None:
+        """Queuing the replacement failed: the track is listed under Needs attention again."""
+        if self._replacing.pop(track_id, None) is not None and self._last_payload is not None:
+            busy = self._inflight
+            self._refreshed(self._last_payload)
+            self._inflight = busy
+
     def _refreshed(self, payload: tuple) -> None:
         self._inflight = False
+        self._last_payload = payload
         err, indexed, results, archives, reports, proc_err, aids, fps, declined, relevant = payload
         records = [rec for _n, rec in indexed]
         if reports:
@@ -571,9 +597,20 @@ class TransfersPage(QWidget):
         statuses = {t: describe_track(by_transfer.get((relevant[t], t)), result_by_track.get(t), auto_import=auto)
                     for t in order}
         statuses = self._with_long_waits(order, relevant, statuses)
+        for track_id, replaced in list(self._replacing.items()):
+            if relevant.get(track_id) != replaced:
+                del self._replacing[track_id]  # the replacement exists: its own status (even a failure) shows normally
+            elif track_id in statuses:  # confirmed, not recorded yet: it already left Needs attention
+                statuses[track_id] = TrackStatus("Replacing…", "info", DOWNLOADING)
         self._statuses = statuses
-        self._fill_table(order, relevant, by_transfer, attempt_no, statuses)
-        self._fill_problems(order, relevant, statuses)
+        for table in (self.table, self.problems):
+            table.setUpdatesEnabled(False)  # one repaint for the whole update, not row by row (no flicker)
+        try:
+            self._fill_table(order, relevant, by_transfer, attempt_no, statuses)
+            self._fill_problems(order, relevant, statuses)
+        finally:
+            for table in (self.table, self.problems):
+                table.setUpdatesEnabled(True)
 
         counts = {g: sum(1 for st in statuses.values() if st.group == g)
                   for g in (FOLDER, DOWNLOADING, WAITING, ATTENTION, IDLE)}

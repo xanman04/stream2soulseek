@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Downloads: when you confirm a replacement file for a track under Needs attention, the track leaves that list at
+  once (no flicker or wait for the next refresh) and shows "Replacing…". If the new download fails or cannot be
+  queued, the track appears under Needs attention again.
 - Free search is much quicker: it ends as soon as answers have stopped arriving (4 seconds of quiet) or after 15
   seconds at most, instead of always waiting out the full search timeout. Quick search and playlist searches are
   unchanged.
