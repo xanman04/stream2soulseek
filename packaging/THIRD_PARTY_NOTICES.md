@@ -13,6 +13,7 @@ texts are in this `licenses` folder.
 | FFmpeg `ffmpeg` and `ffprobe` (unmodified builds, run as separate programs) | macOS: GPL-3.0 build of FFmpeg (`GPL-3.0.txt`); Windows: LGPL-2.1-or-later shared build (`ffmpeg/LICENSE.txt`) | https://ffmpeg.org/download.html; macOS builds by Martin Riedl (https://ffmpeg.martin-riedl.de), Windows builds by BtbN (https://github.com/BtbN/FFmpeg-Builds) |
 | Qt 6 and PySide6 (dynamically linked, replaceable) | LGPL-3.0 (`LGPL-3.0.txt`, `GPL-3.0.txt`) | https://download.qt.io/official_releases/QtForPython/ and https://code.qt.io |
 | Qt WebEngine (Chromium) | LGPL-3.0 with Chromium's third-party licences | https://code.qt.io/cgit/qt/qtwebengine.git |
+| Clash Display (headings; unmodified files in `ui/assets/fonts`) | ITF Free Font License, Indian Type Foundry (`ClashDisplay-FFL.txt`) | https://www.fontshare.com/fonts/clash-display |
 | Python | PSF License (`python/LICENSE`) | https://www.python.org |
 | Python packages (httpx, curl_cffi, spotapi and their dependencies) | see `python-packages/<name>/` | https://pypi.org |
 
