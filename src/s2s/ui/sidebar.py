@@ -1,4 +1,4 @@
-"""Stable-density native navigation, with scrollable sections and a pinned connection/settings footer."""
+"""Stable-density native navigation. It never scrolls: it steps down a ladder of tighter layouts as the window gets shorter."""
 
 from __future__ import annotations
 
@@ -32,6 +32,15 @@ STEP_HEIGHT = 34
 SERVICE_HEIGHT = 44
 TRANSFER_HEIGHT = 68  # a saved session: three lines and a progress line
 TRANSFER_ROWS_SHOWN = 2  # whole rows only; more sessions scroll inside the panel instead of pushing the groups below
+# The sidebar never scrolls. When the window is too short for everything, it steps down this ladder until it fits:
+# tighter rows, then one saved transfer as a single line, then the playlist steps in a menu instead of a list.
+_MODES = (
+    dict(step=34, service=44, transfers=2, compact=False, gap=8, popup=False),
+    dict(step=31, service=38, transfers=1, compact=False, gap=6, popup=False),
+    dict(step=28, service=34, transfers=1, compact=True, gap=5, popup=False),
+    dict(step=28, service=34, transfers=1, compact=True, gap=4, popup=True),
+)
+TRANSFER_COMPACT_HEIGHT = 34
 _STEP_TEXT = re.compile(r"^(✓ )?(\d+)\. (.*)$")
 _BADGE = 26  # diameter of a step's number badge at scale 1
 MAX_SCALE = 1.8  # the sidebar never grows past this; taller windows keep a little air between the two groups
@@ -76,6 +85,7 @@ def _disclosure_icon(expanded: bool) -> QIcon:
 
 class _ScaledDelegate(QStyledItemDelegate):
     scale = 1.0  # set by the sidebar whenever its scale changes
+    row_height: int | None = None  # set by the sidebar's layout mode; None keeps the default row height
 
 
 class _WorkflowButton(QPushButton):
@@ -91,7 +101,7 @@ class _StepDelegate(_ScaledDelegate):
     so a done step's name lines up with every other step's. The current step is a filled, outlined row."""
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
-        return QSize(0, round(STEP_HEIGHT * self.scale))
+        return QSize(0, self.row_height or round(STEP_HEIGHT * self.scale))
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         match = _STEP_TEXT.match(index.data(Qt.ItemDataRole.DisplayRole) or "")
@@ -156,7 +166,7 @@ class _ServiceDelegate(_ScaledDelegate):
     """A streaming service: its logo, its name, and its connection status on a second, smaller line."""
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
-        return QSize(0, round(SERVICE_HEIGHT * self.scale))
+        return QSize(0, self.row_height or round(SERVICE_HEIGHT * self.scale))
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         full = index.data(Qt.ItemDataRole.DisplayRole) or ""
@@ -202,10 +212,53 @@ class _TransferDelegate(_ScaledDelegate):
 
     Painted like the service rows (same inset, radius and selection) so the sidebar reads as one family."""
 
+    compact = False  # one line (name and count) when the window is short
+
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
-        return QSize(0, round(TRANSFER_HEIGHT * self.scale))
+        return QSize(0, TRANSFER_COMPACT_HEIGHT if self.compact else round(TRANSFER_HEIGHT * self.scale))
+
+    def _paint_compact(self, painter: QPainter, option, index) -> None:
+        current = bool(option.state & QStyle.StateFlag.State_Selected)
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver) and not current
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        row = QRectF(option.rect).adjusted(2, 1, -2, -1)
+        if current or hover:
+            painter.setPen(QPen(_color("focus", "#81a9c9"), 1) if current else Qt.PenStyle.NoPen)
+            painter.setBrush(_color("selection", "#304b63") if current else _color("hover", "#2b343f"))
+            painter.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
+        name = (index.data(Qt.ItemDataRole.DisplayRole) or "").split("\n")[0]
+        progress = index.data(Qt.ItemDataRole.UserRole + 2) or (0, 0)
+        font = QFont(option.font)
+        font.setPointSizeF(max(8.0, option.font.pointSizeF() * 0.9))
+        font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(font)
+        count = f"{progress[0]}/{progress[1]}" if progress[1] else ""
+        count_w = painter.fontMetrics().horizontalAdvance(count) + 6
+        left, width = row.left() + 11, row.width() - 22
+        painter.setPen(_color("selected", "#f1f6fc") if current else _color("text", "#e1e6ec"))
+        painter.drawText(QRectF(left, row.top(), width - count_w, row.height() - 4),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                         painter.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, int(width - count_w)))
+        painter.setPen(theme.accent("ok") if index.data(Qt.ItemDataRole.UserRole + 1) else _color("muted", "#9aa6b4"))
+        painter.drawText(QRectF(left, row.top(), width, row.height() - 4),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, count)
+        if progress[1]:
+            track = QRectF(left, row.bottom() - 6, width, 3)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(_color("border", "#37414c"))
+            painter.drawRoundedRect(track, 1.5, 1.5)
+            if progress[0]:
+                filled = QRectF(track)
+                filled.setWidth(max(3.0, track.width() * min(1.0, progress[0] / progress[1])))
+                painter.setBrush(theme.accent("ok") if progress[0] >= progress[1] else _color("primary", "#416f94"))
+                painter.drawRoundedRect(filled, 1.5, 1.5)
+        painter.restore()
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
+        if self.compact:
+            self._paint_compact(painter, option, index)
+            return
         current = bool(option.state & QStyle.StateFlag.State_Selected)
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver) and not current
         focus = bool(option.state & QStyle.StateFlag.State_HasFocus) and current
@@ -387,27 +440,21 @@ class Sidebar(QWidget):
 
         lay = self._lay = QVBoxLayout(self)
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
-        body = QWidget()
-        body.setObjectName("sidebarBody")
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(8)
         for widget in (brand, self.home_btn, self.workflow_toggle, steps_card, self.track_search_btn,
                        self.transfer_panel):
-            body_layout.addWidget(widget)
-        body_layout.addStretch(1)
-        scroll = QScrollArea()
-        scroll.setObjectName("sidebarScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(body)
-        lay.addWidget(scroll, 1)  # only this upper part scrolls; the accounts and connection below never do
+            lay.addWidget(widget)
+        lay.addStretch(1)  # free height sits here, between the navigation and the accounts, never as a scroll bar
         lay.addWidget(accounts_card)
         lay.addWidget(connection)
         lay.addWidget(self.settings_btn)
-        self._apply_scale(1.0)
-        self._base_height = lay.totalMinimumSize().height()  # the height the sidebar needs at scale 1
+        self._mode = 0
+        self._steps_menu_mode = False
+        self._min_height = 0
+        self._fitting = False
+        self._apply_mode(len(_MODES) - 1)
+        self._invalidate()
+        self._min_height = lay.totalMinimumSize().height()  # what the tightest layout needs
+        self._apply_mode(0)
 
         # React to deliberate clicks / Enter only. currentRowChanged also fires when a list merely receives
         # focus (Qt selects row 0 on focus-in), which used to open the Apple page - and start its embedded
@@ -425,19 +472,66 @@ class Sidebar(QWidget):
     # ------------------------------------------------------------ scaling
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
-        """Always the scale-1 size, so a scaled-up sidebar never stops the window from being made smaller."""
-        return QSize(BASE_WIDTH, min(500, self._base_height))
+        """The tightest layout: the window cannot be made shorter than what the sidebar needs to show everything."""
+        return QSize(BASE_WIDTH, self._min_height)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._rescale()
+        self._fit()
 
-    def _rescale(self) -> None:
-        # Stable density: a taller window must not enlarge the entire navigation rail.
-        wanted = 1.0
-        stepped = round(round(wanted / SCALE_STEP) * SCALE_STEP, 2)
-        if stepped != self._scale:
-            self._apply_scale(stepped)
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._fit()
+
+    def _fit(self) -> None:
+        """Use the roomiest layout that fits the height we have. Nothing ever scrolls."""
+        if self._fitting:
+            return
+        if not self.isVisible():  # not on screen yet (no real height to fit): the roomiest layout until it is shown
+            if self._mode != 0:
+                self._apply_mode(0)
+            return
+        self._fitting = True
+        try:
+            chosen = len(_MODES) - 1
+            for mode in range(len(_MODES)):
+                self._apply_mode(mode)
+                self._invalidate()  # the rows just changed height: measure the new layout, not the cached one
+                if self._lay.totalMinimumSize().height() <= self.height():
+                    chosen = mode
+                    break
+            else:
+                self._apply_mode(chosen)
+        finally:
+            self._fitting = False
+
+    def _invalidate(self) -> None:
+        """Forget every cached size (the cards' own layouts too) so the next measurement sees the new row heights."""
+        for layout in (self._steps_layout, self._accounts_layout, self._transfer_layout, self._connection_layout,
+                       self._brand_row):
+            layout.invalidate()
+            layout.activate()  # recompute now: a card's minimum height would otherwise lag behind its rows
+        self._lay.invalidate()
+
+    def _apply_mode(self, mode: int) -> None:
+        self._mode = mode
+        spec = _MODES[mode]
+        self._step_h, self._service_h, self._gap = spec["step"], spec["service"], spec["gap"]
+        self._transfer_rows, self._transfer_compact = spec["transfers"], spec["compact"]
+        self._steps_menu_mode = spec["popup"]
+        self._step_delegate.row_height, self._service_delegate.row_height = self._step_h, self._service_h
+        self._apply_scale(1.0)
+        self._steps_card.setVisible(self._workflow_expanded and not self._steps_menu_mode)
+        self.steps.setVisible(self._workflow_expanded and not self._steps_menu_mode)
+        self._update_workflow_label()
+
+    def _update_workflow_label(self) -> None:
+        """In the tightest layout the toggle names the current step and opens the steps as a menu."""
+        row = self.steps.currentRow()
+        if self._steps_menu_mode and 0 <= row < len(STEPS):
+            self.workflow_toggle.setText(f"{row + 1}. {STEPS[row][0]}".replace("&", "&&"))  # "&" would mark a shortcut
+        else:
+            self.workflow_toggle.setText("Playlist transfer")
 
     def _apply_scale(self, scale: float) -> None:
         """Size everything for `scale`: rows, badges, type, padding and gaps together."""
@@ -447,14 +541,15 @@ class Sidebar(QWidget):
         px = lambda base: max(1, round(base * scale))  # noqa: E731 - a measurement that grows with the sidebar
         for delegate in (self._step_delegate, self._service_delegate, self._transfer_delegate):
             delegate.scale = scale
-        self._lay.setContentsMargins(px(14), px(14), px(14), px(14))
-        self._lay.setSpacing(px(10))
+        pad = 14 if self._mode < 2 else 10
+        self._lay.setContentsMargins(px(pad), px(pad), px(pad), px(pad))
+        self._lay.setSpacing(self._gap)
         for button in (self.home_btn, self.track_search_btn, self.workflow_toggle):
-            button.setMinimumHeight(px(38))
+            button.setMinimumHeight(38 if self._mode < 2 else 34)
             button.setIconSize(QSize(20, 20))
-        self._brand_row.setContentsMargins(px(6), px(4), px(6), px(12))
+        self._brand_row.setContentsMargins(px(6), px(4), px(6), px(12 if self._mode < 2 else 6))
         self._brand_row.setSpacing(px(10))
-        mark = round(34 * (1 + (scale - 1) * 0.8))
+        mark = 34 if self._mode < 2 else 28
         self._mark.setPixmap(self._icon.scaled(mark, mark, Qt.AspectRatioMode.KeepAspectRatio,
                                                Qt.TransformationMode.SmoothTransformation))
         self._name.setStyleSheet(f"font-size: {round(23 * t)}px;")
@@ -464,11 +559,13 @@ class Sidebar(QWidget):
                                 (self._transfer_layout, (6, 4, 6, 6)), (self._connection_layout, (10, 10, 10, 10))):
             layout.setContentsMargins(*(px(m) for m in margins))
             layout.setSpacing(px(2) if layout is not self._connection_layout else px(9))
-        for lst, rows, row_height in ((self.steps, len(STEPS), STEP_HEIGHT), (self.services, len(SERVICES), SERVICE_HEIGHT)):
+        for lst, rows, row_height in ((self.steps, len(STEPS), self._step_h), (self.services, len(SERVICES), self._service_h)):
             height = px(row_height)
             for i in range(lst.count()):
                 lst.item(i).setSizeHint(QSize(0, height))
             lst.setFixedHeight((height + lst.spacing() * 2) * rows + 6)
+            lst.doItemsLayout()  # the view caches row sizes: lay the rows out again at their new height
+            lst.updateGeometry()
         font = QFont(self.font())
         font.setPointSizeF(font.pointSizeF() * t)
         for widget in (self.soulseek_label, self.soulseek_btn, self.settings_btn):
@@ -480,13 +577,19 @@ class Sidebar(QWidget):
         self.updateGeometry()
 
     def _fit_transfers(self) -> None:
-        """Row heights and the list's own height: up to a few sessions show in full, more scroll."""
-        height = round(TRANSFER_HEIGHT * self._scale)
+        """Saved transfers: whole rows only. The tightest layouts show the first one, on one line, with a count."""
+        self._transfer_delegate.compact = self._transfer_compact
+        height = TRANSFER_COMPACT_HEIGHT if self._transfer_compact else round(TRANSFER_HEIGHT * self._scale)
         for i in range(self.transfers.count()):
             self.transfers.item(i).setSizeHint(QSize(0, height))
         count = self.transfers.count()
         row = height + self.transfers.spacing() * 2
-        self.transfers.setFixedHeight(min(count, TRANSFER_ROWS_SHOWN) * row + 6 if count else 0)
+        self.transfers.setFixedHeight(min(count, self._transfer_rows) * row + 6 if count else 0)
+        self.transfers.doItemsLayout()
+        self.transfers.updateGeometry()
+        self.transfers.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.transfers_header.setText(f"Transfers · {count}" if count > self._transfer_rows else "Transfers")
+        self.transfers.viewport().update()
 
     # ------------------------------------------------------------ user input
 
@@ -507,7 +610,28 @@ class Sidebar(QWidget):
         self.track_search_requested.emit()
 
     def _toggle_workflow(self, expanded: bool) -> None:
+        if self._steps_menu_mode:
+            self.workflow_toggle.setChecked(self._workflow_expanded)  # the button does not expand here: it opens a menu
+            self._show_steps_menu()
+            return
         self._set_workflow_expanded(expanded)
+
+    def _show_steps_menu(self) -> None:
+        """The steps as a menu, for windows too short to list them in the sidebar."""
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        current = self.steps.currentRow()
+        for i in range(self.steps.count()):
+            item = self.steps.item(i)
+            action = QAction(item.text().replace("&", "&&"), menu)
+            action.setCheckable(True)
+            action.setChecked(i == current)
+            action.setEnabled(bool(item.flags() & Qt.ItemFlag.ItemIsEnabled))
+            action.triggered.connect(lambda _checked=False, row=i: self._step_row(row))
+            menu.addAction(action)
+        menu.exec(self.workflow_toggle.mapToGlobal(self.workflow_toggle.rect().bottomLeft()))
 
     def _set_workflow_expanded(self, expanded: bool) -> None:
         expanded = bool(expanded)
@@ -519,15 +643,9 @@ class Sidebar(QWidget):
         self.workflow_toggle.setAccessibleName(
             "Collapse playlist transfer steps" if expanded else "Expand playlist transfer steps"
         )
-        self.steps.setVisible(expanded)
-        self._steps_card.setVisible(expanded)
-        self._recalculate_base_height()
-
-    def _recalculate_base_height(self) -> None:
-        """Measure the current disclosure state once at scale 1, then fit to the actual window height."""
-        self._apply_scale(1.0)
-        self._base_height = self._lay.totalMinimumSize().height()
-        self._rescale()
+        self.steps.setVisible(expanded and not self._steps_menu_mode)
+        self._steps_card.setVisible(expanded and not self._steps_menu_mode)
+        self._fit()
 
     def _step_row(self, row: int) -> None:
         if row < 0:
@@ -563,7 +681,7 @@ class Sidebar(QWidget):
         self._fit_transfers()
         if visible != bool(sessions) or rows != min(len(sessions), TRANSFER_ROWS_SHOWN):
             # This optional group changed size: measure the sidebar again at scale 1, then scale it to the window.
-            self._recalculate_base_height()
+            self._fit()
         self.updateGeometry()
 
     def show_service(self, key: str) -> None:
@@ -583,6 +701,7 @@ class Sidebar(QWidget):
         self._quiet(self.steps, index)
         self._quiet(self.services, -1)
         self._bold_current()
+        self._update_workflow_label()
 
     def show_home(self) -> None:
         self._quiet(self.steps, -1)
