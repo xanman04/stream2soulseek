@@ -168,7 +168,7 @@ the interval you choose, which defaults to 45 seconds. Available backup counts v
 
 ## Updates and problem reports
 
-S2S checks for updates at startup and through **Help → Check for updates**. It downloads the installer for
+S2S checks for updates at startup and through **More → Check for updates**. It downloads the installer for
 your computer, verifies its update signature, installs it and restarts. Settings, saved sessions and
 history are kept. Updates are not offered while downloads are running.
 
@@ -177,11 +177,12 @@ window open while S2S closes and reopens. The installer preserves unchanged runt
 1.2.0 still uses its older updater; install the current release manually to avoid that older experience.
 Versions 1.1.2 and earlier need a manual installation.
 
-**Help → Report a problem** prepares a message in your email app with your description, app/system
-versions and a recent log with recognized account details and folder paths removed. A report file is saved
-for attachment; nothing is sent until you send the email. You can also open a
-[GitHub issue](https://github.com/xanman04/stream2soulseek/issues). Review reports and screenshots before
-sharing them, and never attach credentials or the application's data folder.
+**Report a Bug** in the sidebar prepares a GitHub issue draft with your description, reproduction steps,
+expected result and app/system versions. A recent scrubbed log is optional and off by default. Review the
+report inside S2S, then open the draft in your browser; nothing is submitted automatically. You can copy
+or save the report locally. Long reports are shortened for the draft and saved separately for manual
+attachment. Reports posted to [GitHub issues](https://github.com/xanman04/stream2soulseek/issues) are public;
+review screenshots and attachments before sharing, and never attach credentials or the application's data folder.
 
 ## Privacy and local data
 
@@ -237,6 +238,11 @@ separate from these automated checks.
 
 See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
 [release process](docs/RELEASING.md) for version history and maintenance details.
+
+## Support development
+
+S2S is free to use, with no paid features. Optional sponsorship is coming soon; the app's
+**More → Support S2S** entry will become available when sponsorship setup is complete.
 
 ## License
 

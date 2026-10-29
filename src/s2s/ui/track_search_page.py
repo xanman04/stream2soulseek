@@ -250,6 +250,7 @@ class TrackSearchPage(QWidget):
     """Reusable manual search surface. It emits a chosen file for review and never queues it."""
 
     download_requested = Signal(object, str, str, str, str)
+    search_cancelled = Signal()
 
     def __init__(self, ctx, parent: QWidget | None = None, *, embedded: bool = False) -> None:
         super().__init__(parent)
@@ -420,7 +421,7 @@ class TrackSearchPage(QWidget):
         self.artist_input.returnPressed.connect(self.search)
         self.version_input.returnPressed.connect(self.search)
         self.query_input.returnPressed.connect(self.search)
-        self.cancel_button.clicked.connect(self.cancel)
+        self.cancel_button.clicked.connect(self.request_cancel)
         self.review_button.clicked.connect(self.review_selection)
         self.table.itemSelectionChanged.connect(self._update_selection)
         self.table.itemDoubleClicked.connect(lambda _item: self.review_selection())
@@ -542,6 +543,23 @@ class TrackSearchPage(QWidget):
             self._say(self.ctx.describe(exc))
 
         run_async(self, work, done, failed)
+
+    def ask_cancel(self) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(QMessageBox.Icon.Question, "Cancel this search?",
+                          "Stop searching? Existing downloads and saved transfers will keep running.", parent=self)
+        stop = box.addButton("Cancel search", QMessageBox.ButtonRole.DestructiveRole)
+        stay = box.addButton("Keep searching", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is stop
+
+    def request_cancel(self) -> None:
+        if self._busy and self.ask_cancel():
+            self.cancel()
+            self.search_cancelled.emit()
 
     def cancel(self) -> None:
         if self._cancel_event is not None:

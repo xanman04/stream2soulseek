@@ -224,26 +224,6 @@ class PlaylistPage(QWidget):
             record = None
         return (record.playlist_name if record else "") or "the current playlist"
 
-    def ask_switch_playlist(self, current_name: str, new_name: str) -> bool:
-        """Modal question when leaving an import whose downloads were confirmed. True only for Switch.
-        Replaceable in tests (like ReviewPage.ask_confirmation)."""
-        box = QMessageBox(QMessageBox.Icon.Question, "Switch playlist?",
-                          f"Downloads for {current_name} are still running. Switch to {new_name}?\n\n"
-                          "They keep downloading in Soulseek, but S2S stops following them, so they are not "
-                          "copied into your folder.", parent=self)
-        switch = box.addButton("Switch", QMessageBox.ButtonRole.AcceptRole)
-        stay = box.addButton("Stay", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(stay)
-        box.setEscapeButton(stay)
-        box.exec()
-        return box.clickedButton() is switch
-
-    def _confirm_leaving_import(self, new_name: str) -> bool:
-        """True when nothing is running, or the user chose to switch. Asked once per switch."""
-        if not self.ctx.approval_id:
-            return True
-        return bool(self.ask_switch_playlist(self.active_import_name(), new_name or "this playlist"))
-
     def _playlist_selected(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
         if self._restoring:
             return
@@ -252,33 +232,9 @@ class PlaylistPage(QWidget):
             active = self.ctx.playlist
             if active is not None and getattr(pl, "id", None) == active.id:
                 return  # the playlist whose downloads are running: nothing to switch, keep the import attached
-            if not self._confirm_leaving_import(getattr(pl, "name", "") or current.text()):
-                self._restoring = True  # Stay: put the old selection back without any side effect
-                try:
-                    self.playlist_list.blockSignals(True)
-                    if previous is not None:
-                        self.playlist_list.setCurrentItem(previous)
-                    else:
-                        self.playlist_list.setCurrentRow(-1)
-                        self.playlist_list.clearSelection()
-                    self.playlist_list.blockSignals(False)
-                finally:
-                    self._restoring = False
-                return
         self.preview_tracks()
 
     def _source_changed(self, _index: int) -> None:
-        if not self._restoring and self.ctx.approval_id:
-            new_name = self.source_combo.currentText()
-            if not self._confirm_leaving_import(f"a playlist from {new_name}" if new_name else ""):
-                self._restoring = True
-                try:
-                    self.source_combo.blockSignals(True)
-                    self.source_combo.setCurrentIndex(self._source_index)
-                    self.source_combo.blockSignals(False)
-                finally:
-                    self._restoring = False
-                return
         self._source_index = self.source_combo.currentIndex()
         self._source_generation += 1
         self._set_link_mode(False)
@@ -514,9 +470,6 @@ class PlaylistPage(QWidget):
             self.stack.setCurrentIndex(1)
 
     def _link_loaded(self, pl: Playlist, tracks: TrackList) -> None:
-        if not self._confirm_leaving_import(pl.name or "this playlist"):
-            set_banner(self.link_status, "", "info")  # Stay: the running import and its selection are untouched
-            return
         self._set_link_mode(True)
         self.playlist_list.blockSignals(True)
         self.playlist_list.setCurrentRow(-1)

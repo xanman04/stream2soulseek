@@ -323,6 +323,7 @@ class Sidebar(QWidget):
     step_selected = Signal(int)
     soulseek_login_requested = Signal()
     settings_requested = Signal()
+    report_requested = Signal()
     transfer_selected = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -333,12 +334,16 @@ class Sidebar(QWidget):
 
         self._scale = 1.0
         self._icon = QPixmap(str(Path(__file__).with_name("assets") / "s2s-icon.png"))
-        brand = QWidget()
+        brand = self.brand_btn = QPushButton()
         brand.setObjectName("appBrand")
+        brand.setAccessibleName("S2S — Home")
+        brand.setCursor(Qt.CursorShape.PointingHandCursor)
         self._brand_row = QHBoxLayout(brand)
         self._mark = QLabel()
         self._name = QLabel("S2S")
         self._name.setObjectName("appWordmark")
+        self._mark.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._name.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._brand_row.addWidget(self._mark)
         self._brand_row.addWidget(self._name)
         self._brand_row.addStretch(1)
@@ -404,6 +409,19 @@ class Sidebar(QWidget):
         self.settings_btn = QPushButton("Settings...")
         set_icon(self.settings_btn, "settings")
         self.settings_btn.setObjectName("sidebarSettings")
+        footer = QWidget()
+        footer.setObjectName("sidebarFooter")
+        self._support_layout = QHBoxLayout(footer)
+        self._support_layout.setContentsMargins(0, 4, 0, 0)
+        self._support_layout.setSpacing(6)
+        self.report_btn = QPushButton("Report a Bug")
+        self.report_btn.setAccessibleName("Report a bug on GitHub")
+        self.report_btn.setObjectName("sidebarSupport")
+        self.tools_btn = QPushButton("More")
+        self.tools_btn.setAccessibleName("More app actions")
+        self.tools_btn.setObjectName("sidebarSupport")
+        self._support_layout.addWidget(self.report_btn, 1)
+        self._support_layout.addWidget(self.tools_btn)
 
         steps_card, self._steps_layout = _card("stepsCard")
         self._steps_card = steps_card
@@ -447,6 +465,7 @@ class Sidebar(QWidget):
         lay.addWidget(accounts_card)
         lay.addWidget(connection)
         lay.addWidget(self.settings_btn)
+        lay.addWidget(footer)
         self._mode = 0
         self._steps_menu_mode = False
         self._min_height = 0
@@ -466,6 +485,8 @@ class Sidebar(QWidget):
         self.soulseek_btn.clicked.connect(self.soulseek_login_requested)
         self.settings_btn.clicked.connect(self.settings_requested)
         self.home_btn.clicked.connect(self._home)
+        self.brand_btn.clicked.connect(self._home)
+        self.report_btn.clicked.connect(self.report_requested)
         self.track_search_btn.clicked.connect(self._track_search)
         self.workflow_toggle.clicked.connect(self._toggle_workflow)
 
@@ -508,7 +529,7 @@ class Sidebar(QWidget):
     def _invalidate(self) -> None:
         """Forget every cached size (the cards' own layouts too) so the next measurement sees the new row heights."""
         for layout in (self._steps_layout, self._accounts_layout, self._transfer_layout, self._connection_layout,
-                       self._brand_row):
+                       self._brand_row, self._support_layout):
             layout.invalidate()
             layout.activate()  # recompute now: a card's minimum height would otherwise lag behind its rows
         self._lay.invalidate()
@@ -553,6 +574,9 @@ class Sidebar(QWidget):
         self._mark.setPixmap(self._icon.scaled(mark, mark, Qt.AspectRatioMode.KeepAspectRatio,
                                                Qt.TransformationMode.SmoothTransformation))
         self._name.setStyleSheet(f"font-size: {round(23 * t)}px;")
+        # QPushButton's native size hint does not include its child logo layout.
+        self._brand_row.invalidate()
+        self.brand_btn.setFixedHeight(self._brand_row.minimumSize().height())
         self.services_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
         self.transfers_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
         for layout, margins in ((self._steps_layout, (4, 2, 4, 2)), (self._accounts_layout, (2, 6, 2, 2)),

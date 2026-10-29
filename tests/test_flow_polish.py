@@ -101,29 +101,20 @@ def test_step6_dashboard_selection_and_expansion_only_for_local_files(tmp_path, 
 
 # ------------------------------------------------------------------ item 3 and 4: Step 5
 
-def test_start_another_always_available_but_asks_while_anything_is_active(env, tmp_path, monkeypatch):  # noqa: F811
+def test_start_another_preserves_background_transfers_without_warning(env, tmp_path, monkeypatch):
     win, *_ = env
     page = win.transfers
     page.ctx.approval_id = "ap"
     page._names = {"a": "A", "b": "B"}
-    asked, emitted = [], []
-    answers = iter([False, True])
-    monkeypatch.setattr(page, "ask_start_another", lambda name, n: asked.append((name, n)) or next(answers))
+    emitted = []
     page.new_import_requested.connect(lambda: emitted.append(1))
-
-    recs = [(0, rec(TransferState.SUCCEEDED, track="a")), (0, rec(TransferState.QUEUED, "Queued, Remotely", track="b"))]
+    recs = [(0, rec(TransferState.SUCCEEDED, track="a")),
+            (0, rec(TransferState.QUEUED, "Queued, Remotely", track="b"))]
     page._refreshed(payload(recs, [imported("a")]))
-    start_another = win.frames[-1].next_btn  # it lives on Step 6 now
+    start_another = win.frames[-1].next_btn
     assert start_another.text() == "Done" and start_another.isEnabled()
     start_another.click()
-    assert asked == [("this playlist", 1)] and emitted == []  # Stay
-    start_another.click()
-    assert emitted == [1]  # Start another
-
-    recs = [(0, rec(TransferState.SUCCEEDED, track="a")), (0, rec(TransferState.SUCCEEDED, track="b"))]
-    page._refreshed(payload(recs, [imported("a"), imported("b")]))
-    start_another.click()
-    assert len(asked) == 2 and emitted == [1, 1]  # nothing active: no question
+    assert emitted == [1]
     page.stop()
 
 
@@ -161,54 +152,28 @@ def page_env(tmp_path, monkeypatch):
     page.startup()
     page.playlist_list.setCurrentRow(0)
     assert ctx.playlist.id == "p1"
-    questions: list = []
-    answer = {"switch": False}
-
-    def ask(current, new):
-        questions.append((current, new))
-        return answer["switch"]
-
-    monkeypatch.setattr(page, "ask_switch_playlist", ask)
-    yield page, ctx, questions, answer
+    yield page, ctx
     page.close()
     store.close()
 
 
-def test_no_question_without_confirmed_downloads(page_env):
-    page, ctx, questions, _ = page_env
-    page.playlist_list.setCurrentRow(1)
-    assert questions == [] and ctx.playlist.id == "p2"
-
-
-def test_stay_keeps_selection_and_the_running_import(page_env):
-    page, ctx, questions, answer = page_env
+def test_switching_playlist_detaches_foreground_without_stopping_saved_transfer(page_env):
+    page, ctx = page_env
     ctx.import_id, ctx.approval_id = "imp", "ap"
     page.playlist_list.setCurrentRow(1)
-    assert questions == [("Liquid Sunday", "Night Drive")]
-    assert page.playlist_list.currentRow() == 0 and ctx.playlist.id == "p1"
-    assert ctx.approval_id == "ap" and ctx.import_id == "imp" and page.track_title.text() == "Liquid Sunday"
-    answer["switch"] = True
-    page.playlist_list.setCurrentRow(1)
-    assert page.playlist_list.currentRow() == 1 and ctx.playlist.id == "p2"
+    assert ctx.playlist.id == "p2"
     assert ctx.approval_id is None and ctx.import_id is None
-    assert len(questions) == 2  # asked once per switch, not again for the same click
 
 
-def test_changing_source_or_opening_a_link_asks_too(page_env):
-    page, ctx, questions, answer = page_env
+def test_changing_source_or_opening_link_does_not_warn_about_saved_downloads(page_env):
+    page, ctx = page_env
     ctx.import_id, ctx.approval_id = "imp", "ap"
-    page.source_combo.setCurrentIndex(1)  # Spotify
-    assert len(questions) == 1 and page.source_combo.currentIndex() == 0 and ctx.approval_id == "ap"
-    assert ctx.playlist.id == "p1" and page.playlist_list.count() == 2
-
+    page.source_combo.setCurrentIndex(1)
+    assert page.source_combo.currentIndex() == 1
+    assert ctx.approval_id is None
     page._public_fetch = lambda ident: (Playlist("spotify:playlist:x", "From Link"),
                                         [AppleTrack("t1", "Song", "A", position=0)], [])
     page.link_edit.setText("37i9dQZF1DXcBWIGoYBM5M")
-    page.open_link()
-    assert questions[-1] == ("Liquid Sunday", "From Link")
-    assert ctx.playlist.id == "p1" and ctx.approval_id == "ap"  # Stay: untouched
-
-    answer["switch"] = True
     page.open_link()
     assert ctx.playlist.id == "spotify:playlist:x" and ctx.approval_id is None
 
@@ -230,12 +195,10 @@ def test_reselecting_the_running_playlist_neither_asks_nor_resets(monkeypatch, t
     ctx = AppContext(store, SecretStore(tmp_path / "s", protect=lambda b: b, unprotect=lambda b: b),
                      Settings(slskd_downloads_dir=str(tmp_path / "dl")))
     page = PlaylistPage(ctx)
-    asked = []
-    monkeypatch.setattr(page, "ask_switch_playlist", lambda *a: asked.append(a) or True)
     pl = Playlist("p.1", "Running")
     page._playlists_loaded([pl, Playlist("p.2", "Other")])
     ctx.playlist, ctx.tracks = pl, [AppleTrack("i.1", "Song", "Artist")]
     ctx.import_id, ctx.approval_id = "imp", "appr"
     page.playlist_list.setCurrentRow(0)  # same playlist as the running import
-    assert asked == [] and ctx.approval_id == "appr" and ctx.import_id == "imp"
+    assert ctx.approval_id == "appr" and ctx.import_id == "imp"
     store.close()
