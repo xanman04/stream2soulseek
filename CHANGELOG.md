@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- If an older S2S meets data that a newer S2S already upgraded, it now says so in plain words (and where to get the
+  latest version) instead of showing a technical error. Nothing is changed.
+
 ## 1.6.0 — 2026-10-29
 
 - A redesigned look. Page titles, section headings and the S2S wordmark use Clash Display, shipped unmodified with

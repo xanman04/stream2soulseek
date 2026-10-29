@@ -66,3 +66,21 @@ def test_bundled_clash_display_files_are_unmodified_and_ship_with_their_licence(
     assert files == ["ClashDisplay-Bold.otf", "ClashDisplay-Medium.otf", "ClashDisplay-Regular.otf", "ClashDisplay-Semibold.otf"]
     for p in folder.glob("*.otf"):
         assert p.read_bytes()[:4] == b"OTTO"  # the foundry's own OpenType files, not converted or subset
+
+
+def test_an_older_s2s_explains_a_database_upgraded_by_a_newer_one(tmp_path, monkeypatch):
+    import sqlite3
+
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from s2s import app
+
+    QApplication.instance() or QApplication([])
+    path = tmp_path / "state.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA user_version=99")
+    shown = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda _p, title, text: shown.append((title, text)))
+    assert app.open_store(path) is None
+    assert shown and "newer version of S2S" in shown[0][1] and "releases/latest" in shown[0][1]
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == 99  # left untouched
