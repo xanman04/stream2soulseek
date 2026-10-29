@@ -17,6 +17,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QMenu, QProgressBar, QPushButton, QSplitter,
                                QVBoxLayout, QWidget)
 
+from .theme import display_label as _display_label
 from .. import workflow
 from ..models import ImportOutcome, TransferState
 from ..organize import checker_failed
@@ -247,6 +248,7 @@ class TransfersPage(QWidget):
         font = self.attention_title.font()
         font.setBold(True)
         self.attention_title.setFont(font)
+        _display_label(self.attention_title)
         self.problems = make_table(["#", "Track", "What happened"])
         ph = self.problems.horizontalHeader()
         ph.setStretchLastSection(True)

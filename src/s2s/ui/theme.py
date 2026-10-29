@@ -172,6 +172,16 @@ def display_font_family() -> str:
     return DISPLAY_FONT if DISPLAY_FONT in QFontDatabase.families() else ""
 
 
+def display_label(label: QLabel) -> QLabel:
+    """Use the heading typeface for this label (a section or card heading), keeping its size and weight."""
+    family = display_font_family()
+    if family:
+        font = label.font()
+        font.setFamily(family)
+        label.setFont(font)
+    return label
+
+
 def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None) -> None:
     """A quiet, consistent native-widget theme, following the current system's light/dark palette."""
     app = app or QApplication.instance()
@@ -210,7 +220,7 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     existing = app.styleSheet().replace(previous, "") if previous else app.styleSheet()
     c = colors
     display = display_font_family()
-    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle {{ font-family: "{display}"; }}' + chr(10)
+    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#sectionTitle {{ font-family: "{display}"; }}' + chr(10)
                      if display else "")
     stylesheet = display_rules + f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}

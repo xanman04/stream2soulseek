@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
 )
 
+from .theme import display_label as _display_label
 from . import theme
 from .util import fmt_mib, fmt_seconds
 
@@ -26,6 +27,7 @@ class SingleDownloadDialog(QDialog):
         font.setPointSizeF(font.pointSizeF() + 2)
         font.setBold(True)
         name.setFont(font)
+        _display_label(name)
         path = theme.subtle(QLabel(file.filename))
         details = QLabel(f"Uploader: {file.username}\n"
                          f"{(file.extension or 'Unknown format').upper()} · "

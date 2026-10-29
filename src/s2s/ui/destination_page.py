@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
+from .theme import display_label as _display_label
 from ..approval import ApprovalError, check_destination
 from .context import AppContext
 from .theme import set_banner, subtle
@@ -59,6 +60,7 @@ class DestinationPage(QWidget):
         font.setBold(True)
         font.setPointSizeF(font.pointSizeF() * 1.25)
         heading.setFont(font)
+        _display_label(heading)
         self.intro = subtle(QLabel(
             "The finished tracks are copied into this one folder, as plain files with no subfolders."))
         self.intro.setWordWrap(True)
