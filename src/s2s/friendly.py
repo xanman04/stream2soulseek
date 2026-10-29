@@ -1,6 +1,6 @@
 """Plain-language wording for technical file-check results.
 
-The screen gets one short sentence; the exact technical detail goes to S2S's own log (Help > Report a problem
+The screen gets one short sentence; the exact technical detail goes to S2S's own log (Report a Bug
 includes it), once per track and reason."""
 
 from __future__ import annotations

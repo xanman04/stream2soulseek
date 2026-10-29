@@ -1,11 +1,11 @@
-"""Help > Report a problem: the user describes it, reviews the details, and sends it from their own email app."""
+"""Prepare and review a public GitHub issue draft; never submit it from the app."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTextEdit,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel, QPlainTextEdit,
+                               QPushButton, QTextEdit, QVBoxLayout, QWidget)
 
 from .. import feedback
 from . import theme
@@ -14,76 +14,116 @@ from . import theme
 class FeedbackDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Report a problem")
-        self.resize(640, 560)
-        intro = QLabel("Describe what happened and what you were doing. S2S opens your email app with a message "
-                       f"to the developer ({feedback.REPORT_EMAIL}); you can read and change everything before "
-                       "sending. Nothing is sent by S2S itself. The S2S version, your system and a recent log "
-                       "are included, with logins and folder names removed.")
+        self.setWindowTitle("Report a Bug")
+        self.resize(720, 760)
+        intro = QLabel(
+            "This opens a public GitHub issue draft. Review the preview carefully before opening it; "
+            "anything you submit there will be visible to everyone. S2S never submits or uploads a report. "
+            "No account credentials are requested by S2S."
+        )
         intro.setWordWrap(True)
         self.description = QTextEdit()
         self.description.setAcceptRichText(False)
-        self.description.setPlaceholderText("For example: I pressed Sign in to Apple Music and S2S closed.")
-        self.details = QPlainTextEdit()
-        self.details.setReadOnly(True)
-        self.show_details = QPushButton("Show details")
-        self.show_details.setCheckable(True)
-        self.details.setVisible(False)
+        self.description.setPlaceholderText("What happened? Include the action you took and any error shown.")
+        self.steps = QPlainTextEdit()
+        self.steps.setPlaceholderText("1. Open…\n2. Select…\n3. Click…")
+        self.expected = QPlainTextEdit()
+        self.expected.setPlaceholderText("What did you expect S2S to do?")
+        self.include_log = QCheckBox("Include a scrubbed recent log (optional)")
+        self.include_log.setChecked(False)
+        self.preview = QPlainTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setPlaceholderText("Your report preview")
         self.status = theme.subtle(QLabel(""))
         self.status.setWordWrap(True)
-        self.send_btn = theme.primary(QPushButton("Open email…"))
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.send_btn = theme.primary(QPushButton("Open GitHub draft…"))
         self.copy_btn = QPushButton("Copy report")
+        self.save_btn = QPushButton("Save report…")
         cancel = QPushButton("Cancel")
 
         lay = QVBoxLayout(self)
         lay.addWidget(intro)
+        lay.addWidget(QLabel("What happened"))
         lay.addWidget(self.description, 2)
-        lay.addWidget(self.show_details, 0)
-        lay.addWidget(self.details, 3)
+        lay.addWidget(QLabel("Steps to reproduce"))
+        lay.addWidget(self.steps, 1)
+        lay.addWidget(QLabel("Expected result"))
+        lay.addWidget(self.expected, 1)
+        lay.addWidget(self.include_log)
+        lay.addWidget(QLabel("Report preview — review before opening the public draft"))
+        lay.addWidget(self.preview, 3)
         lay.addWidget(self.status)
         row = QHBoxLayout()
         row.addWidget(self.copy_btn)
+        row.addWidget(self.save_btn)
         row.addStretch(1)
         row.addWidget(cancel)
         row.addWidget(self.send_btn)
         lay.addLayout(row)
 
-        self.show_details.toggled.connect(self._toggle_details)
+        self.description.textChanged.connect(self._refresh_preview)
+        self.steps.textChanged.connect(self._refresh_preview)
+        self.expected.textChanged.connect(self._refresh_preview)
+        self.include_log.toggled.connect(self._refresh_preview)
         self.send_btn.clicked.connect(self.send)
         self.copy_btn.clicked.connect(self.copy)
+        self.save_btn.clicked.connect(self.save)
         cancel.clicked.connect(self.reject)
-
-    def _toggle_details(self, on: bool) -> None:
-        self.details.setVisible(on)
-        self.show_details.setText("Hide details" if on else "Show details")
-        self._refresh_details()
-
-    def _refresh_details(self) -> None:
-        if self.details.isVisible():
-            self.details.setPlainText(self.report_text())
+        self._refresh_preview()
 
     def report_text(self) -> str:
-        return feedback.build_report(self.description.toPlainText(), include_log=True)  # always: the developer needs them
+        return feedback.build_report(
+            self.description.toPlainText(), steps=self.steps.toPlainText(),
+            expected=self.expected.toPlainText(), include_log=self.include_log.isChecked(),
+        )
+
+    def _refresh_preview(self, *_args: object) -> None:
+        self.preview.setPlainText(self.report_text())
+        self.send_btn.setEnabled(all(field.toPlainText().strip() for field in
+                                     (self.description, self.steps, self.expected)))
 
     def open_url(self, url: str) -> bool:
         """Replaceable in tests."""
         return QDesktopServices.openUrl(QUrl(url))
 
     def send(self) -> None:
-        report = self.report_text()
-        path = feedback.save_report(report)
-        body = feedback.mail_body(self.description.toPlainText(), path)
-        subject = f"S2S problem report ({feedback.system_summary().split(' · ')[0]})"
-        opened = self.open_url(feedback.mailto_url(subject, body))
-        self.open_url(QUrl.fromLocalFile(str(path.parent)).toString())  # so the file can be attached
-        if opened:
-            self.status.setText(f"Your email app should now show the message. Please attach {path.name} "
-                                "(its folder was opened) and press Send.")
-        else:
+        if not all(field.toPlainText().strip() for field in (self.description, self.steps, self.expected)):
+            self.status.setText("Describe what happened, the steps to reproduce it and the expected result first.")
+            return
+        report = self.preview.toPlainText()
+        from ..applog import scrub
+        title = "[Bug] " + scrub(self.description.toPlainText().strip().splitlines()[0])[:100]
+        body, truncated = feedback.issue_body(report, title=title)
+        path = None
+        if truncated:
+            try:
+                path = feedback.save_report(report)
+            except OSError:
+                QGuiApplication.clipboard().setText(report)
+        opened = self.open_url(feedback.issue_url(title, body))
+        if not opened:
             QGuiApplication.clipboard().setText(report)
-            self.status.setText(f"No email app opened. The report was copied: paste it into an email to "
-                                f"{feedback.REPORT_EMAIL}.")
+            self.status.setText("GitHub could not be opened. The report was copied; you can save it or paste it "
+                                "into a new issue at github.com/xanman04/stream2soulseek/issues.")
+        elif truncated and path is not None:
+            self.status.setText(f"A GitHub draft is open with a shortened report. Review it, then attach the "
+                                f"full saved report manually if you want to share it. Saved to: {path}")
+        elif truncated:
+            self.status.setText("A shortened GitHub draft is open. The full report could not be saved, so it "
+                                "was copied to your clipboard. Review it before pasting it into GitHub.")
+        else:
+            self.status.setText("A GitHub issue draft is open. Review its public content and submit it yourself "
+                                "only if you choose.")
 
     def copy(self) -> None:
-        QGuiApplication.clipboard().setText(self.report_text())
-        self.status.setText(f"Report copied. Paste it into an email to {feedback.REPORT_EMAIL}.")
+        QGuiApplication.clipboard().setText(self.preview.toPlainText())
+        self.status.setText("Report copied to the clipboard.")
+
+    def save(self) -> None:
+        try:
+            path = feedback.save_report(self.preview.toPlainText())
+        except OSError:
+            self.status.setText("The report could not be saved. Use Copy report to keep a copy.")
+            return
+        self.status.setText(f"Report saved locally to: {path}")
