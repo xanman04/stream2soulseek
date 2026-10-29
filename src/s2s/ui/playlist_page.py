@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QSplitter, QStackedWidget, QTableView, QVBoxLayout, QWidget,
 )
 
+from .theme import display_label as _display_label
 from ..models import AppleTrack, Playlist
 from ..sources import PlaylistSource, SourceAuthError
 from ..sources.base import TrackList
@@ -99,6 +100,7 @@ class PlaylistPage(QWidget):
         font.setBold(True)
         font.setPointSizeF(font.pointSizeF() * 1.25)
         self.track_title.setFont(font)
+        _display_label(self.track_title)
         self.track_title.setWordWrap(True)
         self.track_info = subtle(QLabel("Choose a playlist to preview its tracks."))
         self.track_info.setWordWrap(True)

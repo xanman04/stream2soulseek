@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QMessageBox
+from .theme import display_label as _display_label
 from .. import workflow
 from ..models import Candidate, SelectionItem, Tier
 from ..track_search import free_search
@@ -27,6 +28,7 @@ class OtherSourcesPanel(TrackSearchPage):
         font = self.title.font()
         font.setBold(True)
         self.title.setFont(font)
+        _display_label(self.title)
         self.layout().insertWidget(0, self.title)
         self.query = self.query_input
         self.search_btn = self.search_button

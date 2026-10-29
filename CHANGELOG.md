@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Page headings and the S2S wordmark use Clash Display, shipped unmodified with S2S under the ITF Free Font License
-  (its text is included). Body text keeps the system font.
+- Page titles, section headings (Home sections, card titles, "Needs attention", the track name in Review) and the
+  S2S wordmark use Clash Display, shipped unmodified with S2S under the ITF Free Font License (its text is included).
+  Body text, buttons and tables keep the system font.
 - You only choose one folder: your tracklist folder. S2S now creates Soulseek's own download folder for you in its
   per-user data folder ("Soulseek downloads"). It can still be changed, under the new Settings > Advanced tab, which
   also holds the archive subfolder, ffprobe path and slskd connection settings. Existing choices are kept.

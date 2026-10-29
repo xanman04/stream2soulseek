@@ -10,6 +10,7 @@ from PySide6.QtCore import QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout
 
+from .theme import display_label as _display_label
 from .. import __version__, updater
 from . import theme
 from .workers import run_async
@@ -51,6 +52,7 @@ class UpdateDialog(QDialog):
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
         head.setFont(f)
+        _display_label(head)
         head.setMinimumWidth(400)  # the layout has a fixed size; this sets the popup's width
         current = theme.subtle(QLabel(f"You have {__version__}."))
         lay = QVBoxLayout(self)

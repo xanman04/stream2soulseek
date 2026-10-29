@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QTableView, QVBoxLayout, QWidget,
 )
 
+from .theme import display_label as _display_label
 from .. import config, organize, workflow
 from ..approval import create_approval
 from ..matching.formats import ext_of
@@ -531,6 +532,7 @@ class ConfirmDialog(QDialog):
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
         head.setFont(f)
+        _display_label(head)
         lay.addWidget(head)
         self.summary = QLabel(f"{len(primary)} file{'s' if len(primary) != 1 else ''} · {mib(primary):.1f} MiB "
                               f"· copied into {destination}")
@@ -603,6 +605,7 @@ class QueuingDialog(QDialog):
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
         head.setFont(f)
+        _display_label(head)
         head.setMinimumWidth(360)
         bar = QProgressBar()
         bar.setRange(0, 0)
@@ -730,6 +733,7 @@ class ReviewPage(QWidget):
         tf.setBold(True)
         tf.setPointSizeF(tf.pointSizeF() * 1.3)
         self.detail_title.setFont(tf)
+        _display_label(self.detail_title)
         self.detail_artist = theme.subtle(QLabel(""))
         self.detail_artist.setWordWrap(True)
         self.detail_artist.setVisible(False)
