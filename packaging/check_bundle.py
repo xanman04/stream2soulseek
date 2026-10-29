@@ -4,7 +4,7 @@ from pathlib import Path, PurePosixPath
 
 PRIVATE_DIRECTORIES = {
     ".git", ".auth", "secrets", "sessions", "browser-profile", "user-data",
-    "downloads", "incomplete", "exports", "reviews", "runs", "logs", "tracks",
+    "downloads", "incomplete", "exports", "reviews", "runs", "logs", "tracks", "artwork-cache",
 }
 PRIVATE_FILENAMES = {
     "settings.json", "state.sqlite3", "slskd.yml", "cookies", "login data", "web data",

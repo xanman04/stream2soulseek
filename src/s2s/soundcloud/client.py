@@ -385,8 +385,22 @@ class SoundCloudClient:
         if not isinstance(title, str):
             raise SoundCloudError("SoundCloud returned a playlist without a title.")
         count = body.get("track_count")
+        from ..artwork import safe_cover_url
+        art = body.get("artwork_url")
+        if not isinstance(art, str):
+            # Playlists without a custom cover can use their first supplied track image.
+            tracks = body.get("tracks")
+            if isinstance(tracks, list):
+                art = next((t.get("artwork_url") for t in tracks if isinstance(t, Mapping)
+                            and isinstance(t.get("artwork_url"), str)), None)
+        if isinstance(art, str):
+            # SoundCloud's documented playlist image variant uses t500x500 in place of large.
+            art = art.replace("-large.", "-t500x500.").replace("/large.", "/t500x500.")
+        else:
+            art = None
         return Playlist(id=f"soundcloud:playlist:{ident}", name=title.strip() or "Untitled playlist",
-                        track_count=count if isinstance(count, int) and count >= 0 else None)
+                        track_count=count if isinstance(count, int) and count >= 0 else None,
+                        artwork_url=safe_cover_url(art))
 
     @staticmethod
     def _has_track_metadata(body: Any) -> bool:

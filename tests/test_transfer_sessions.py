@@ -268,7 +268,8 @@ def test_completed_unread_session_mark_seen_cursor_and_later_event_persist(store
     try:
         persisted = sessions(reopened)
         assert len(persisted) == 1 and persisted[0].unseen_added == 1
-        assert reopened._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        from s2s.store import SCHEMA_VERSION
+        assert reopened._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     finally:
         reopened.close()
 

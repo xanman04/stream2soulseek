@@ -57,7 +57,7 @@ def same_recording(approved, other) -> bool:
 def proposed_backups(result, selected: SelectionItem, limit: int = 5) -> tuple[SelectionItem, ...]:
     """Other uploaders of the same recording as the approved file (see same_recording), at most `limit`."""
     limit = min(5, max(0, int(limit)))
-    if not limit or selected.local_sha256 is not None:
+    if not limit or selected.local_sha256 is not None or selected.manual_free:
         return ()
     pool = ([result.best] if result.best else []) + list(result.alternatives)
     approved = next((c for c in pool if _key(c.file) == _key(selected)), None)
@@ -109,6 +109,8 @@ def approve_backups(store, approval, backups, settings, *, wait_seconds=45, max_
     plans = []
     for primary in approval.items:
         proposed = backups.get(primary.apple_id, ())
+        if primary.manual_free or any(item.manual_free for item in proposed):
+            raise ApprovalError("Manual Free selections cannot use automatic download backups")
         if not proposed:
             continue
         if primary.local_sha256 is not None or any(i.local_sha256 is not None for i in proposed):

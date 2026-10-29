@@ -76,10 +76,18 @@ class AppleMusicClient:
     # ------------------------------------------------------------------ public
 
     def list_playlists(self) -> list[Playlist]:
+        from ..artwork import safe_cover_url
         out: list[Playlist] = []
         for item in self._paged("/v1/me/library/playlists?limit=100"):
             attrs = item.get("attributes") or {}
-            out.append(Playlist(id=str(item["id"]), name=attrs.get("name") or ""))
+            art = attrs.get("artwork")
+            art_url = art.get("url") if isinstance(art, dict) else None
+            if isinstance(art_url, str):
+                # Apple supplies a URL template; fill only the documented size placeholders.
+                art_url = art_url.replace("{w}", "512").replace("{h}", "512")
+            else:
+                art_url = None
+            out.append(Playlist(id=str(item["id"]), name=attrs.get("name") or "", artwork_url=safe_cover_url(art_url)))
         return out
 
     def get_playlist_tracks(self, playlist_id: str) -> list[AppleTrack]:

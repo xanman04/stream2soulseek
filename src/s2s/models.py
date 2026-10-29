@@ -22,6 +22,7 @@ class Playlist:
     id: str  # provider ID; Spotify IDs are prefixed with "spotify:playlist:"
     name: str
     track_count: int | None = None  # may be unknown until tracks are fetched
+    artwork_url: str | None = None  # provider-supplied playlist cover URL; never credentials
 
 
 @dataclass(frozen=True)
@@ -239,6 +240,7 @@ class SelectionItem:
     size: int
     destination: str  # absolute path of the chosen flat library, e.g. C:\\Music\\House
     local_sha256: str | None = None  # binds an approved local copy to its reviewed contents
+    manual_free: bool = False  # explicit per-file approval to copy without recording/format policy
 
 
 @dataclass(frozen=True)

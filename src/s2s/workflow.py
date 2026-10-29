@@ -796,9 +796,10 @@ def import_completed(
     import_record = store.get_import(approval.import_id)
     from .track_search import import_manual_file, is_standalone_free_import
     standalone_free = bool(import_record and is_standalone_free_import(import_record.playlist_id))
-    if standalone_free:
-        from .approval import verify_approval
-        approval = verify_approval(store, approval_id, approval.fingerprint)
+    # Verify every item before deciding which policy applies: a changed manual flag
+    # must not escape validation by being toggled back to the ordinary path.
+    from .approval import verify_approval
+    approval = verify_approval(store, approval_id, approval.fingerprint)
     # named after the recording that was looked for: a DJ-mixed entry under the song's own name, unless the mix
     # was chosen in Review
     notes = {r.track.apple_id: r.note for r in store.load_match_results(approval.import_id)}
@@ -829,9 +830,9 @@ def import_completed(
                                "stored track or candidate is missing; cannot verify")
         else:
             try:
-                if standalone_free:
-                    # This persisted namespace opts one standalone Free import out of playlist
-                    # recording/format policy after restart. The helper still requires a successful
+                if standalone_free or item.manual_free:
+                    # Explicit manual Free selections opt only this file out of playlist
+                    # recording/format policy. The helper still requires a successful
                     # transfer, a size-matched file under the approved peer folder, safe raw name,
                     # and an atomic no-overwrite copy. Audio probing is informational.
                     status = rec.status
@@ -843,6 +844,9 @@ def import_completed(
                             track=track, transfer=status, downloads_dir=settings.slskd_downloads_dir,
                             destination=item.destination, ffprobe_path=settings.ffprobe_path,
                             runner=runner, archive_name=settings.archive_dir_name,
+                            final_name=None if standalone_free else organize.build_final_name(
+                                track, cand.tier if cand.tier != Tier.REJECTED else Tier.EXACT,
+                                cand.detected_version, Path(item.filename.replace("\\", "/")).suffix.lstrip(".")),
                         )
                 else:
                     res = organize.import_file(

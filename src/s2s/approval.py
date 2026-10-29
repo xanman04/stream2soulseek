@@ -30,7 +30,8 @@ def _key(i: SelectionItem) -> tuple:
 def fingerprint(items: Iterable[SelectionItem]) -> str:
     rows = [
         {"apple_id": i.apple_id, "username": i.username, "filename": i.filename, "size": i.size,
-         "destination": i.destination, **({"local_sha256": i.local_sha256} if i.local_sha256 is not None else {})}
+         "destination": i.destination, **({"local_sha256": i.local_sha256} if i.local_sha256 is not None else {}),
+         **({"manual_free": True} if i.manual_free else {})}
         for i in sorted(items, key=_key)
     ]
     blob = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -110,6 +111,10 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
     dests: set[str] = set()
     resolved_items: list[SelectionItem] = []
     for it in items:
+        if type(it.manual_free) is not bool:
+            raise ApprovalError("manual Free approval flag must be a boolean")
+        if it.manual_free and it.local_sha256 is not None:
+            raise ApprovalError("local copies cannot use manual Free approval")
         if it.apple_id in seen:
             raise ApprovalError(f"more than one file selected for track {it.apple_id}")
         seen.add(it.apple_id)
@@ -126,9 +131,9 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
                 validate_source(it.filename, downloads_dir, it.size, it.local_sha256)
             except (OSError, ValueError) as exc:
                 raise ApprovalError(f"Local file unavailable or changed; search again: {exc}") from exc
-        if cand.tier == Tier.REJECTED or cand.format_rank == 9:
+        if (cand.tier == Tier.REJECTED or cand.format_rank == 9) and not it.manual_free:
             raise ApprovalError(f"candidate for track {it.apple_id} is not eligible")
-        if (it.apple_id, it.username.casefold()) in declined:
+        if (it.apple_id, it.username.casefold()) in declined and not it.manual_free:
             raise ApprovalError(f"{it.username} already declined this track; choose another source "
                                 "(or retry the original transfer)")
         dest = _validate_destination(it.destination, downloads_dir, archive_name)

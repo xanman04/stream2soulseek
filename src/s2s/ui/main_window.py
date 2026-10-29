@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self.transfers = TransfersPage(self.ctx)
         self.finish = FinishPage(self.ctx)
         self.home = HomePage(self.ctx)
+        self.playlists.metadata_loaded.connect(self.home.refresh)
         self.track_search = TrackSearchPage(self.ctx)
         self.transfer_monitor = TransferMonitor(self.ctx, connected=lambda: self.soulseek.is_connected,
             skip_import=lambda: self.ctx.import_id if self.transfers.timer.isActive() else None,

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Downloads: a track that is stuck or failed can now be repaired from the same panel using Free search, which returns
+  every file Soulseek finds with no recording or format rules applied. Choosing one asks you to confirm it, warns that
+  the recording, version and format are yours to judge, and then copies it for that same track. It can never be part
+  of an automatic backup, and it is recorded as a manual choice.
+- Refreshed the native sidebar, Home and individual-track search pages with consistent line icons, clear
+  navigation states, compact Home actions and grouped search controls. Sidebar sections scroll at smaller
+  heights while connection and Settings controls remain available.
+- Home displays provider-supplied playlist artwork with a local cache and a service-mark fallback. Existing
+  saved playlists can acquire artwork from connected services without changing their transfers. Cached
+  images and account data are excluded from release bundles.
+
+- Free search supports selecting multiple formats together. Active formats and filters appear as removable
+  chips beside Filters, wrapping on smaller windows. Removing a chip clears only that setting; all filtering
+  stays local to the returned results.
+- The updater download bar is tall enough to display its percentage without clipping.
+
 ## 1.5.0 — 2026-10-29
 
 - Home provides a recent-playlist carousel and separate entry points for playlist transfers and individual

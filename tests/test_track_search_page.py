@@ -145,6 +145,93 @@ def test_sort_header_cycles_ascending_descending_and_source_order(page):
     assert page.table.horizontalHeader().sortIndicatorSection() == -1
 
 
+def test_multiple_formats_are_combined_and_other_filters_still_apply(monkeypatch, page):
+    from dataclasses import replace
+
+    files = [_file("One.mp3"), replace(_file("Two.flac"), extension="flac"),
+             replace(_file("Three.wav"), extension="wav"), _file("Four.mp3", user="other")]
+    calls = []
+    _fake_backend(monkeypatch, free=lambda *_a, **_kw: calls.append(1) or files)
+    page.set_mode("free")
+    page.query_input.setText("one search")
+    page.search()
+    page._toggle_format("mp3", True)
+    page._toggle_format("flac", True)
+    assert page._visible_files == [files[0], files[1], files[3]]
+    assert set(page._filter_chips) == {"format:mp3", "format:flac"}
+    assert page.format_filter.text() == "2 selected"
+    page._filters = _Filters(uploader="peer")
+    page._apply_local_filters()
+    assert page._visible_files == files[:2]
+    assert "uploader" in page._filter_chips
+    assert page._files == files
+    assert calls == [1]  # all changes are local
+
+
+def test_chips_remove_only_their_own_filter_and_last_format_restores_all(page):
+    page.set_mode("free")
+    page._files = [_file("One.mp3", bitrate=320), _file("Two.mp3", bitrate=192)]
+    page._filters = _Filters(filename="One", min_bitrate=320)
+    page._toggle_format("mp3", True)
+    page._filter_chips["filename"].click()
+    assert page._filters.filename == ""
+    assert page._filters.min_bitrate == 320
+    assert page._selected_formats == {"mp3"}
+    page._filter_chips["min_bitrate"].click()
+    assert page.table.rowCount() == 2
+    page._filter_chips["format:mp3"].click()
+    assert page._selected_formats == set()
+    assert page.format_filter.text() == "All formats"
+    assert not page._filter_chips
+
+
+def test_format_popup_keeps_multiple_checks_and_clear_resets_chips(page):
+    page.set_mode("free")
+    page._available_formats = {"mp3", "flac"}
+    page._open_formats()
+    popup = page._format_popup
+    popup.choices["mp3"].click()
+    popup.choices["flac"].click()
+    assert popup.choices["mp3"].isChecked()
+    assert page._selected_formats == {"mp3", "flac"}
+    popup.close()
+    page._open_filters()
+    page._filter_popup.clear_button.click()
+    assert not page._selected_formats
+    assert not page._filter_chips
+    assert page._filters == _Filters()
+    page._filter_popup.close()
+
+
+def test_every_active_filter_has_a_removable_chip_and_wraps(page):
+    page.set_mode("free")
+    page._filters = _Filters(filename="track", uploader="peer", min_bitrate=256,
+                            min_duration=100, max_duration=500, min_size_mib=1,
+                            max_size_mib=50, free_slots="Free slots only", keep_unknown=False)
+    page._apply_local_filters()
+    assert set(page._filter_chips) == set(_Filters.__dataclass_fields__)
+    assert page._tools_row.heightForWidth(350) > page._tools_row.heightForWidth(1200)
+    for key in list(page._filter_chips):
+        page._filter_chips[key].click()
+    assert page._filters == _Filters()
+    assert not page._filter_chips
+
+
+def test_selected_format_missing_from_new_results_remains_visible_and_removable(page):
+    page.set_mode("free")
+    page._toggle_format("flac", True)
+    page._files = [_file("One.mp3")]
+    page._update_format_choices()
+    page._fill_table()
+    assert page.table.rowCount() == 0
+    assert "format:flac" in page._filter_chips
+    page._open_formats()
+    assert page._format_popup.choices["flac"].isChecked()
+    page._format_popup.close()
+    page._filter_chips["format:flac"].click()
+    assert page.table.rowCount() == 1
+
+
 def test_mode_change_cancels_active_generation_and_drops_stale_result(monkeypatch, page):
     import threading
 

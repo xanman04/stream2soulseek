@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import importlib
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PureWindowsPath
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QProgressBar, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QLabel, QLayout, QLineEdit, QProgressBar, QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..matching.formats import describe_policy, ext_of
@@ -18,6 +18,7 @@ from ..models import Candidate, RemoteFile, Tier
 from . import theme
 from .util import SORT_ROLE, fmt_mib, fmt_seconds, item, make_table
 from .workers import run_async
+from .icons import set_icon
 
 
 _UNKNOWN_FORMAT = "Unknown"
@@ -47,6 +48,107 @@ class _Filters:
     max_size_mib: float = 0
     free_slots: str = "Any"
     keep_unknown: bool = True
+
+
+class _FilterBarLayout(QLayout):
+    """Keep controls and active chips together, wrapping without widening the page."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._items = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(8)
+
+    def addItem(self, item):  # noqa: N802
+        self._items.append(item)
+        self.invalidate()
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):  # noqa: N802
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):  # noqa: N802
+        if 0 <= index < len(self._items):
+            item = self._items.pop(index)
+            self.invalidate()
+            return item
+        return None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):  # noqa: N802
+        return True
+
+    def heightForWidth(self, width):  # noqa: N802
+        return self._arrange(QRect(0, 0, width, 0), False)
+
+    def sizeHint(self):  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):  # noqa: N802
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def setGeometry(self, rect):  # noqa: N802
+        super().setGeometry(rect)
+        self._arrange(rect, True)
+
+    def _arrange(self, rect, apply):
+        rows, row, used, height = [], [], 0, 0
+        for item in self._items:
+            size = item.sizeHint()
+            width = min(size.width(), max(1, rect.width()))
+            if row and used + self.spacing() + width > rect.width():
+                rows.append((row, height))
+                row, used, height = [], 0, 0
+            x = used + (self.spacing() if row else 0)
+            row.append((item, x, width, size.height()))
+            used = x + width
+            height = max(height, size.height())
+        if row:
+            rows.append((row, height))
+        y = rect.y()
+        for row, height in rows:
+            if apply:
+                for item, x, width, h in row:
+                    item.setGeometry(QRect(rect.x() + x, y + (height - h) // 2, width, h))
+            y += height + self.spacing()
+        return y - rect.y() - (self.spacing() if rows else 0)
+
+
+class _FormatPopup(QFrame):
+    def __init__(self, page):
+        super().__init__(page, Qt.WindowType.Popup)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.addWidget(QLabel("Formats"))
+        all_formats = QPushButton("All formats")
+        root.addWidget(all_formats)
+        self.choices = {}
+        for ext in sorted(page._available_formats | page._selected_formats):
+            check = QCheckBox(ext.upper())
+            check.setChecked(ext in page._selected_formats)
+            check.toggled.connect(lambda checked, ext=ext: page._toggle_format(ext, checked))
+            root.addWidget(check)
+            self.choices[ext] = check
+        if not self.choices:
+            root.addWidget(theme.subtle(QLabel("Search to see available formats.")))
+
+        def clear():
+            page._selected_formats.clear()
+            for check in self.choices.values():
+                check.blockSignals(True)
+                check.setChecked(False)
+                check.blockSignals(False)
+            page._apply_local_filters()
+
+        all_formats.clicked.connect(clear)
 
 
 class _FilterPopup(QFrame):
@@ -130,7 +232,7 @@ class _FilterPopup(QFrame):
         self.max_size.setValue(0)
         self.free_slots.setCurrentText("Any")
         self.keep_unknown.setChecked(True)
-        self.page.format_filter.setCurrentIndex(0)
+        self.page._selected_formats.clear()
         self.page._apply_local_filters()
 
     def apply_filters(self) -> None:
@@ -149,8 +251,9 @@ class TrackSearchPage(QWidget):
 
     download_requested = Signal(object, str, str, str, str)
 
-    def __init__(self, ctx, parent: QWidget | None = None) -> None:
+    def __init__(self, ctx, parent: QWidget | None = None, *, embedded: bool = False) -> None:
         super().__init__(parent)
+        self._embedded = embedded
         self.ctx = ctx
         self._mode = "quick"
         self._busy = False
@@ -161,6 +264,10 @@ class TrackSearchPage(QWidget):
         self._visible_files: list[RemoteFile] = []
         self._visible_candidates: list[Candidate] = []
         self._filters = _Filters()
+        self._selected_formats: set[str] = set()
+        self._available_formats: set[str] = set()
+        self._format_popup: _FormatPopup | None = None
+        self._filter_chips: dict[str, QPushButton] = {}
         self._result_snapshot: tuple[str, str, str, str, str] | None = None
         self._result_policy: str | None = None
         self._filter_popup: _FilterPopup | None = None
@@ -172,11 +279,16 @@ class TrackSearchPage(QWidget):
         font.setBold(True)
         font.setPointSize(font.pointSize() + 2)
         heading.setFont(font)
+        heading.setVisible(not embedded)
         self.mode_tabs = QWidget(self)
+        self.mode_tabs.setVisible(not embedded)
         tabs = QHBoxLayout(self.mode_tabs)
         tabs.setContentsMargins(0, 0, 0, 0)
+        tabs.setSpacing(0)
         self.quick_tab = QPushButton("Quick search")
         self.free_tab = QPushButton("Free search")
+        set_icon(self.quick_tab, "quick", 18, checked_primary=True)
+        set_icon(self.free_tab, "search", 18, checked_primary=True)
         for button in (self.quick_tab, self.free_tab):
             button.setCheckable(True)
         self.quick_tab.setChecked(True)
@@ -192,6 +304,7 @@ class TrackSearchPage(QWidget):
         self.artist_group, self.artist_input = self._labeled_input("Artist", "Artist")
         self.version_group, self.version_input = self._labeled_input("Version", "Version (optional)")
         self.search_button = theme.primary(QPushButton("Search"))
+        set_icon(self.search_button, "search", 18, primary=True)
         quick_row.addWidget(self.title_group, 2)
         quick_row.addWidget(self.artist_group, 2)
         quick_row.addWidget(self.version_group, 1)
@@ -203,24 +316,28 @@ class TrackSearchPage(QWidget):
         self.query_input = QLineEdit()
         self.query_input.setPlaceholderText("Search Soulseek")
         self.query_input.setAccessibleName("Raw Soulseek search")
+        self.query_input.setClearButtonEnabled(True)
         free_row.addWidget(self.query_input, 1)
 
         self.policy_label = theme.subtle(QLabel(""))
         self.policy_label.setWordWrap(True)
         self.policy_label.setText(describe_policy(ctx.settings.match_policy))
         self.free_tools = QWidget(self)
-        tools_row = QHBoxLayout(self.free_tools)
+        self._tools_row = _FilterBarLayout(self.free_tools)
+        controls = QWidget()
+        tools_row = QHBoxLayout(controls)
         tools_row.setContentsMargins(0, 0, 0, 0)
         tools_row.addWidget(QLabel("Format"))
-        self.format_filter = QComboBox()
-        self.format_filter.addItem("All formats", "")
-        self.format_filter.setAccessibleName("Filter by format")
+        self.format_filter = QPushButton("All formats")
+        self.format_filter.setAccessibleName("Choose formats")
         tools_row.addWidget(self.format_filter)
         self.filters_button = QPushButton("Filters")
+        set_icon(self.filters_button, "filter", 16)
         tools_row.addWidget(self.filters_button)
-        tools_row.addStretch(1)
+        self._tools_row.addWidget(controls)
 
         self.result_count = theme.subtle(QLabel("No results"))
+        self.result_count.setObjectName("resultSummary")
         self.status_label = QLabel("")
         self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.status_label.setWordWrap(True)
@@ -258,19 +375,27 @@ class TrackSearchPage(QWidget):
         self.progress.hide()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 26, 28, 18)
-        layout.setSpacing(16)
+        layout.setContentsMargins(*(0, 0, 0, 0) if embedded else (28, 26, 28, 18))
+        layout.setSpacing(8 if embedded else 16)
         layout.addWidget(heading)
-        layout.addWidget(self.mode_tabs)
-        layout.addWidget(self.quick_form)
-        layout.addWidget(self.free_form)
-        layout.addWidget(self.policy_label)
+        query_panel = QFrame()
+        query_panel.setObjectName("embeddedSearchControls" if embedded else "searchControls")
+        query_layout = QVBoxLayout(query_panel)
+        query_layout.setContentsMargins(*(0, 0, 0, 0) if embedded else (18, 16, 18, 16))
+        query_layout.setSpacing(14)
+        query_layout.addWidget(self.mode_tabs)
+        query_layout.addWidget(self.quick_form)
+        query_layout.addWidget(self.free_form)
+        query_layout.addWidget(self.policy_label)
+        layout.addWidget(query_panel)
         layout.addWidget(self.free_tools)
         layout.addWidget(self.result_count)
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress)
-        layout.addWidget(self.empty_label)
-        layout.addWidget(self.table, 1)
+        self._results_stack = QStackedWidget()
+        self._results_stack.addWidget(self.table)
+        self._results_stack.addWidget(self.empty_label)
+        layout.addWidget(self._results_stack, 1)
         layout.addWidget(self.details)
         actions = QHBoxLayout()
         actions.addWidget(self.cancel_button)
@@ -290,10 +415,10 @@ class TrackSearchPage(QWidget):
         self.table.itemSelectionChanged.connect(self._update_selection)
         self.table.itemDoubleClicked.connect(lambda _item: self.review_selection())
         self.filters_button.clicked.connect(self._open_filters)
-        self.format_filter.currentIndexChanged.connect(self._apply_local_filters)
+        self.format_filter.clicked.connect(self._open_formats)
         for field in (self.title_input, self.artist_input, self.version_input, self.query_input):
             field.textChanged.connect(lambda _text: self._update_selection())
-        self.set_mode("quick")
+        self.set_mode("free" if embedded else "quick")
 
     @staticmethod
     def _labeled_input(label_text: str, placeholder: str) -> tuple[QWidget, QLineEdit]:
@@ -425,6 +550,8 @@ class TrackSearchPage(QWidget):
     def hideEvent(self, event) -> None:  # noqa: N802
         if self._filter_popup is not None:
             self._filter_popup.close()
+        if self._format_popup is not None:
+            self._format_popup.close()
         if self._busy:
             self._invalidate()
         super().hideEvent(event)
@@ -436,26 +563,83 @@ class TrackSearchPage(QWidget):
         self.progress.setVisible(busy)
         self.search_button.setEnabled(not busy)
         self.review_button.setEnabled(not busy and self._selected_file() is not None and self._snapshot_is_current())
+        if self._embedded:
+            self.query_input.setEnabled(not busy)
+            self.table.setEnabled(not busy)
 
     def _say(self, message: str) -> None:
         self.status_label.setText(message)
         self.status_label.setVisible(bool(message))
-        self.empty_label.setVisible(not self._files)
+        self._results_stack.setCurrentWidget(self.table if self._visible_files else self.empty_label)
         if not self._files:
             self.empty_label.setText(message or ("Search for a track to see results." if self._mode == "quick"
                                                   else "Search to see returned files."))
 
     def _update_format_choices(self) -> None:
-        current = self.format_filter.currentData() or ""
-        extensions = sorted({_file_format(file) for file in self._files})
-        self.format_filter.blockSignals(True)
-        self.format_filter.clear()
-        self.format_filter.addItem("All formats", "")
-        for ext in extensions:
-            self.format_filter.addItem(ext, ext.casefold())
-        index = self.format_filter.findData(current)
-        self.format_filter.setCurrentIndex(max(0, index))
-        self.format_filter.blockSignals(False)
+        self._available_formats = {_file_format(file).casefold() for file in self._files}
+        if self._format_popup is not None:
+            self._format_popup.close()
+        self._refresh_filter_chips()
+
+    def _open_formats(self) -> None:
+        if self._format_popup is not None:
+            self._format_popup.close()
+        popup = _FormatPopup(self)
+        self._format_popup = popup
+        popup.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        popup.destroyed.connect(lambda: setattr(self, "_format_popup", None)
+                                if self._format_popup is popup else None)
+        popup.adjustSize()
+        popup.move(self.format_filter.mapToGlobal(QPoint(0, self.format_filter.height())))
+        popup.show()
+
+    def _toggle_format(self, ext: str, checked: bool) -> None:
+        if checked:
+            self._selected_formats.add(ext)
+        else:
+            self._selected_formats.discard(ext)
+        self._apply_local_filters()
+
+    def _refresh_filter_chips(self) -> None:
+        self.format_filter.setText("All formats" if not self._selected_formats else
+                                   f"{len(self._selected_formats)} selected")
+        for button in self._filter_chips.values():
+            self._tools_row.removeWidget(button)
+            button.hide()
+            button.deleteLater()
+        self._filter_chips.clear()
+        f = self._filters
+        entries = [("format:" + ext, ext.upper()) for ext in sorted(self._selected_formats)]
+        entries += [(key, label) for key, value, label in (
+            ("filename", f.filename, f"Filename: {f.filename}"),
+            ("uploader", f.uploader, f"Uploader: {f.uploader}"),
+            ("min_bitrate", f.min_bitrate, f"Bitrate ≥ {f.min_bitrate} kbps"),
+            ("min_duration", f.min_duration, f"Length ≥ {fmt_seconds(f.min_duration)}"),
+            ("max_duration", f.max_duration, f"Length ≤ {fmt_seconds(f.max_duration)}"),
+            ("min_size_mib", f.min_size_mib, f"Size ≥ {f.min_size_mib:g} MiB"),
+            ("max_size_mib", f.max_size_mib, f"Size ≤ {f.max_size_mib:g} MiB"),
+            ("free_slots", f.free_slots != "Any", f.free_slots),
+            ("keep_unknown", not f.keep_unknown, "Exclude unknown details"),
+        ) if value]
+        for key, label in entries:
+            button = QPushButton()
+            button.setText(button.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, 220).replace("&", "&&"))
+            button.setAccessibleName(f"Remove filter: {label}")
+            set_icon(button, "close", 16)
+            button.setStyleSheet("QPushButton {" + theme.chip_style("info") +
+                                " min-height: 20px; padding: 4px 9px; }"
+                                " QPushButton:hover, QPushButton:focus { border-color: palette(highlight); }")
+            button.clicked.connect(lambda _checked=False, key=key: self._remove_filter(key))
+            self._filter_chips[key] = button
+            self._tools_row.addWidget(button)
+        self.free_tools.updateGeometry()
+
+    def _remove_filter(self, key: str) -> None:
+        if key.startswith("format:"):
+            self._selected_formats.discard(key.split(":", 1)[1])
+        else:
+            self._filters = replace(self._filters, **{key: getattr(_Filters(), key)})
+        self._apply_local_filters()
 
     def _open_filters(self) -> None:
         if self._filter_popup is not None:
@@ -478,8 +662,7 @@ class TrackSearchPage(QWidget):
         if f.uploader and f.uploader.casefold() not in uploader:
             return False
         ext = _file_format(file)
-        chosen = self.format_filter.currentData() or ""
-        if chosen and ext.casefold() != chosen:
+        if self._selected_formats and ext.casefold() not in self._selected_formats:
             return False
         if file.bitrate is None:
             if f.min_bitrate and not f.keep_unknown:
@@ -507,6 +690,7 @@ class TrackSearchPage(QWidget):
         return True
 
     def _apply_local_filters(self, *_args) -> None:
+        self._refresh_filter_chips()
         if self._mode == "free":
             self._fill_table()
 
@@ -519,7 +703,7 @@ class TrackSearchPage(QWidget):
             self._visible_files = [file for file in self._files if self._matches_filter(file)]
             self._visible_candidates = []
         self.result_count.setText(f"{len(self._files)} returned · {len(self._visible_files)} shown")
-        self.empty_label.setVisible(not self._visible_files)
+        self._results_stack.setCurrentWidget(self.table if self._visible_files else self.empty_label)
         if not self._visible_files:
             self.empty_label.setText("No files match these filters." if self._files else
                                      ("Search for a track to see results." if self._mode == "quick"
@@ -611,7 +795,9 @@ class TrackSearchPage(QWidget):
             self._say("")
         if not enabled:
             self.details.setText("")
+            self.details.hide()
             return
+        self.details.show()
         file = self._selected_file()
         if file is None:
             return
@@ -640,7 +826,7 @@ class TrackSearchPage(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        compact = self.width() < 900
+        compact = self.width() < 900 and not self._embedded
         self.table.setColumnHidden(5, compact)
         self.table.setColumnHidden(6, compact)
         self.table.setColumnWidth(0, max(230, self.table.columnWidth(0)))

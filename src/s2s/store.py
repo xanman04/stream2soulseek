@@ -32,7 +32,7 @@ from .models import (
     TransferStatus,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 9
 
 _SCHEMA = """
 CREATE TABLE imports (
@@ -239,6 +239,9 @@ CREATE TABLE library_additions (
 );
 """
 
+_SCHEMA_V8 = "ALTER TABLE imports ADD COLUMN artwork_url TEXT;"
+_SCHEMA_V9 = "ALTER TABLE approval_items ADD COLUMN manual_free INTEGER NOT NULL DEFAULT 0;"
+
 
 class StoreError(Exception):
     pass
@@ -251,6 +254,7 @@ class ImportRecord:
     playlist_name: str
     destination: str
     created_at: str
+    artwork_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -302,10 +306,11 @@ class Store:
         if version == SCHEMA_VERSION:
             return
         steps = {0: _SCHEMA, 1: _SCHEMA_V2, 2: _SCHEMA_V3, 3: _SCHEMA_V4, 4: _SCHEMA_V5,
-                 5: _SCHEMA_V6, 6: _SCHEMA_V7}
+                 5: _SCHEMA_V6, 6: _SCHEMA_V7, 7: _SCHEMA_V8, 8: _SCHEMA_V9}
         with self._conn:
             if version == 0:
-                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7]
+                scripts = [_SCHEMA, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6,
+                           _SCHEMA_V7, _SCHEMA_V8, _SCHEMA_V9]
             else:
                 scripts = [steps[v] for v in range(version, SCHEMA_VERSION)]
             for script in scripts:
@@ -317,13 +322,28 @@ class Store:
     # ------------------------------------------------------------ imports / tracks
 
     def create_import(self, playlist: Playlist, destination: str) -> str:
+        from .artwork import safe_cover_url
         import_id = uuid.uuid4().hex
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO imports VALUES (?,?,?,?,?)",
-                (import_id, playlist.id, playlist.name, destination, utc_now()),
+                "INSERT INTO imports (id,playlist_id,playlist_name,destination,created_at,artwork_url) "
+                "VALUES (?,?,?,?,?,?)",
+                (import_id, playlist.id, playlist.name, destination, utc_now(), safe_cover_url(playlist.artwork_url)),
             )
         return import_id
+
+    def update_playlist_artwork(self, playlists: list[Playlist]) -> int:
+        """Backfill artwork metadata for prior imports, matching exact provider playlist IDs."""
+        from .artwork import safe_cover_url
+        updates = [(url, p.id, url) for p in playlists if (url := safe_cover_url(p.artwork_url))]
+        if not updates:
+            return 0
+        with self._lock, self._conn:
+            before = self._conn.total_changes
+            self._conn.executemany(
+                "UPDATE imports SET artwork_url=? WHERE playlist_id=? AND (artwork_url IS NULL OR artwork_url!=?)", updates
+            )
+            return self._conn.total_changes - before
 
     def get_import(self, import_id: str) -> ImportRecord | None:
         with self._lock:
@@ -433,6 +453,39 @@ class Store:
             ).fetchone()
         return _candidate(r) if r else None
 
+    def remember_manual_candidate(self, import_id: str, track: AppleTrack, file: RemoteFile) -> Candidate:
+        """Add a manual Free choice to the rejected set without replacing existing results."""
+        if (not isinstance(track, AppleTrack) or not isinstance(track.apple_id, str) or not track.apple_id.strip()
+                or not isinstance(file, RemoteFile) or not isinstance(file.username, str)
+                or not file.username.strip() or not isinstance(file.filename, str) or not file.filename.strip()
+                or type(file.size) is not int or file.size < 0 or file.local_sha256 is not None):
+            raise ValueError("manual candidate must have a valid remote identity")
+        if self.get_import(import_id) is None:
+            raise ValueError("unknown import")
+        existing = self.find_candidate(import_id, track.apple_id, file.username, file.filename, file.size)
+        if existing is not None:
+            return existing
+        candidate = Candidate(file, Tier.REJECTED, 9, None,
+                              ("Manual Free identity is unverified.",), flagged=True)
+        with self._lock, self._conn:
+            if self._conn.execute("SELECT 1 FROM tracks WHERE import_id=? AND apple_id=?",
+                                  (import_id, track.apple_id)).fetchone() is None:
+                self._upsert_track(import_id, track)
+            row = self._conn.execute(
+                "SELECT status FROM match_results WHERE import_id=? AND apple_id=?",
+                (import_id, track.apple_id),
+            ).fetchone()
+            if row is None:
+                self._conn.execute("INSERT INTO match_results VALUES (?,?,?,?)",
+                                   (import_id, track.apple_id, MatchStatus.UNRESOLVED.value,
+                                    "Manual Free identity is unverified."))
+            ordinal = self._conn.execute(
+                "SELECT COALESCE(MAX(ordinal)+1,0) FROM candidates WHERE import_id=? AND apple_id=?",
+                (import_id, track.apple_id),
+            ).fetchone()[0]
+            self._insert_candidate(import_id, track.apple_id, candidate, "rejected", ordinal)
+        return candidate
+
     # ------------------------------------------------------------ approvals
 
     def save_approval(self, approval: Approval) -> None:
@@ -443,8 +496,10 @@ class Store:
             )
             for it in approval.items:
                 self._conn.execute(
-                    "INSERT INTO approval_items VALUES (?,?,?,?,?,?,?)",
-                    (approval.id, it.apple_id, it.username, it.filename, it.size, it.destination, it.local_sha256),
+                    "INSERT INTO approval_items (approval_id,apple_id,username,filename,size,destination,local_sha256,manual_free) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (approval.id, it.apple_id, it.username, it.filename, it.size, it.destination, it.local_sha256,
+                     int(it.manual_free)),
                 )
 
     def get_approval(self, approval_id: str) -> Approval | None:
@@ -457,7 +512,8 @@ class Store:
                 (approval_id,),
             ).fetchall()
         items = tuple(
-            SelectionItem(r["apple_id"], r["username"], r["filename"], r["size"], r["destination"], r["local_sha256"])
+            SelectionItem(r["apple_id"], r["username"], r["filename"], r["size"], r["destination"],
+                          r["local_sha256"], bool(r["manual_free"]))
             for r in rows
         )
         return Approval(a["id"], a["import_id"], a["fingerprint"], items, a["created_at"])
