@@ -359,6 +359,16 @@ class TrackSearchPage(QWidget):
         for col, width in ((1, 145), (3, 120), (4, 65), (5, 85), (6, 100), (7, 185)):
             self.table.setColumnWidth(col, width)
         self.table.setWordWrap(False)
+        if embedded:
+            # The repair panel is a narrow column: the filename must stay readable, so the table keeps only the file
+            # and who has it; length, size and availability are in the details line under the table.
+            for col in (4, 5, 6):
+                self.table.setColumnHidden(col, True)
+            self.table.setColumnWidth(1, 110)
+            self.table.setColumnWidth(3, 100)
+            self.table.setMinimumHeight(170)
+            header.setMinimumSectionSize(60)
+            self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.details = theme.subtle(QLabel(""))
         self.details.setWordWrap(True)
         self.details.setTextFormat(Qt.TextFormat.PlainText)
@@ -826,7 +836,9 @@ class TrackSearchPage(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        compact = self.width() < 900 and not self._embedded
+        compact = self._embedded or self.width() < 900  # the repair panel is always a narrow column
         self.table.setColumnHidden(5, compact)
         self.table.setColumnHidden(6, compact)
+        if self._embedded:
+            self.table.setColumnHidden(4, True)
         self.table.setColumnWidth(0, max(230, self.table.columnWidth(0)))

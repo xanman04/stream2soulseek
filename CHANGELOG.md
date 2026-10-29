@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- You only choose one folder: your tracklist folder. S2S now creates Soulseek's own download folder for you in its
+  per-user data folder ("Soulseek downloads"). It can still be changed, under the new Settings > Advanced tab, which
+  also holds the archive subfolder, ffprobe path and slskd connection settings. Existing choices are kept.
+- Home: every recent playlist is a tile in its service's colour with the service's mark. S2S no longer fetches or
+  expects playlist cover art, and "No cover available" is gone.
+- Downloads: the Free search list in the repair panel keeps the file name readable in a narrow window (length, size
+  and availability are in the line under the list), and the "Needs attention" list no longer cuts off "What happened".
 - Sidebar: it never scrolls. On shorter windows it steps down through tighter layouts (smaller rows, one saved
   transfer on a single line, then the playlist steps in a menu) so Streaming services, the Soulseek connection and
   Settings are always fully visible.

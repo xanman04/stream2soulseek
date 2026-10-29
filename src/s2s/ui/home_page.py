@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -21,11 +21,12 @@ def _provider(playlist_id):
 
 
 class _RecentPlaylistButton(QPushButton):
-    """A real cached cover, with a service-mark fallback when the provider has no image."""
+    """A recent playlist: a tile in its service's colour with the service's mark, then its name and track count.
+
+    S2S never shows playlist cover art, so every tile reads the same way and the service is recognised at a glance."""
     def __init__(self, record, count, parent=None):
         super().__init__(record.playlist_name, parent)
         self.record, self.count = record, count
-        self.cover = QPixmap()
         self._service = _provider(record.playlist_id)
         self._logo = logo_renderer(self._service)
         self.setAccessibleName(f"Open recently used playlist {record.playlist_name}")
@@ -36,34 +37,26 @@ class _RecentPlaylistButton(QPushButton):
     def sizeHint(self):  # noqa: N802
         return QSize(184, 264)
 
-    def set_cover(self, data):
-        image = QImage.fromData(data)
-        if not image.isNull():
-            self.cover = QPixmap.fromImage(image)
-            self.update()
-
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         colors = QApplication.instance().property("s2sColors") or {}
-        cover = QRectF(2, 2, 180, 180)
-        clip = QPainterPath()
-        clip.addRoundedRect(cover, 10, 10)
-        p.save()
-        p.setClipPath(clip)
+        tile = QRectF(2, 2, 180, 180)
+        brand = QColor(BRANDS[self._service][1])
+        panel = QColor(colors.get("panel", self.palette().color(QPalette.ColorRole.Base).name()))
+        wash = QColor(brand)
+        wash.setAlpha(34 if self.underMouse() or self.hasFocus() else 22)  # the service colour, softly, over the panel
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(colors.get("panel", self.palette().color(QPalette.ColorRole.Base).name())))
-        p.drawRect(cover)
-        if not self.cover.isNull():
-            scaled = self.cover.scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                       Qt.TransformationMode.SmoothTransformation)
-            p.drawPixmap(cover, scaled, QRectF((scaled.width() - 180) / 2, (scaled.height() - 180) / 2, 180, 180))
-        else:
-            self._logo.render(p, QRectF(64, 54, 56, 56))
-            p.setPen(QColor(colors.get("muted", "#9aa6b4")))
-            p.drawText(QRectF(10, 128, 164, 22), Qt.AlignmentFlag.AlignCenter, "No cover available")
-        p.restore()
+        p.setBrush(panel)
+        p.drawRoundedRect(tile, 10, 10)
+        p.setBrush(wash)
+        p.drawRoundedRect(tile, 10, 10)
+        edge = QColor(brand)
+        edge.setAlpha(110 if self.hasFocus() else 60)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(edge, 1.5 if self.hasFocus() else 1))
+        p.drawRoundedRect(tile.adjusted(0.5, 0.5, -0.5, -0.5), 10, 10)
+        self._logo.render(p, QRectF(54, 54, 80, 80))
         font = QFont(self.font())
         font.setWeight(QFont.Weight.Medium)
         p.setFont(font)
@@ -76,10 +69,6 @@ class _RecentPlaylistButton(QPushButton):
         p.setFont(font)
         subtitle = service + (f" · {self.count} tracks" if self.count is not None else "")
         p.drawText(QRectF(2, 238, self.width() - 4, 22), Qt.AlignmentFlag.AlignLeft, subtitle)
-        if self.hasFocus() or self.underMouse():
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(QColor(colors.get("focus", "#81a9c9")), 1.5))
-            p.drawRoundedRect(cover, 10, 10)
 
 
 class HomePage(QWidget):
@@ -94,9 +83,6 @@ class HomePage(QWidget):
         self._refresh_generation = 0
         self._imports = []
         self._counts = {}
-        self._cover_buttons = {}
-        self._artwork_providers_checked = set()
-        self._hydrating = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -237,7 +223,6 @@ class HomePage(QWidget):
                 seen.add(record.playlist_id)
                 self._imports.append(record)
             self._render_recent()
-            self._hydrate_artwork()
 
         def failed(_exc) -> None:
             if generation != self._refresh_generation:
@@ -249,7 +234,6 @@ class HomePage(QWidget):
         run_async(self, work, loaded, failed)
 
     def _render_recent(self) -> None:
-        self._cover_buttons.clear()
         for widget in (self.recent_scroll, self.previous_button, self.next_button):
             widget.setVisible(bool(self._imports))
         while self.recent_layout.count():
@@ -274,69 +258,8 @@ class HomePage(QWidget):
             button.setAccessibleName(f"Open recently used playlist {record.playlist_name}")
             button.clicked.connect(lambda _checked=False, iid=record.id: self.recent_requested.emit(iid))
             self.recent_layout.addWidget(button)
-            self._cover_buttons[record.id] = button
         self.recent_layout.addStretch(1)
         self._update_arrows()
-        self._load_covers()
-
-    def _load_covers(self):
-        urls = {r.id: getattr(r, "artwork_url", None) for r in self._imports[:8]
-                if getattr(r, "artwork_url", None)}
-        if not urls:
-            return
-        generation = self._refresh_generation
-
-        def work():
-            from concurrent.futures import ThreadPoolExecutor
-            from ..artwork import load_cover
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                data = list(pool.map(load_cover, urls.values()))
-            return dict(zip(urls, data))
-
-        def done(covers):
-            if generation == self._refresh_generation:
-                for iid, data in covers.items():
-                    if data and iid in self._cover_buttons:
-                        self._cover_buttons[iid].set_cover(data)
-
-        run_async(self, work, done, lambda _exc: None)
-
-    def _hydrate_artwork(self):
-        """Backfill old saved imports from connected services once per provider/session."""
-        if self._hydrating or getattr(self.ctx, "secrets", None) is None:
-            return
-        missing = {_provider(r.playlist_id) for r in self._imports[:8] if not getattr(r, "artwork_url", None)}
-        missing -= self._artwork_providers_checked
-        if not missing:
-            return
-        self._hydrating = True
-
-        def work():
-            changed, checked = False, set()
-            for source in self.ctx.playlist_sources():
-                key = next((key for key, brand in BRANDS.items() if brand[0] == source.name), None)
-                if key not in missing or not source.is_connected():
-                    continue
-                checked.add(key)
-                try:
-                    playlists = source.list_playlists()
-                    self.ctx.store.update_playlist_artwork(playlists)
-                    changed |= any(getattr(p, "artwork_url", None) for p in playlists)
-                except Exception:  # artwork cannot interrupt transfers or sign-in
-                    pass
-            return changed, checked
-
-        def done(payload):
-            self._hydrating = False
-            changed, checked = payload
-            self._artwork_providers_checked.update(checked)
-            if changed:
-                self.refresh()
-
-        def failed(_exc):
-            self._hydrating = False
-
-        run_async(self, work, done, failed)
 
     def _update_arrows(self):
         bar = self.recent_scroll.horizontalScrollBar()
