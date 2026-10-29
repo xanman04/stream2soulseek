@@ -28,8 +28,8 @@ SERVICES = [
     (SOUNDCLOUD_KEY, "SoundCloud", True),
 ]
 
-STEP_HEIGHT = 38
-SERVICE_HEIGHT = 48
+STEP_HEIGHT = 34
+SERVICE_HEIGHT = 44
 TRANSFER_HEIGHT = 68  # a saved session: three lines and a progress line
 TRANSFER_ROWS_SHOWN = 2  # whole rows only; more sessions scroll inside the panel instead of pushing the groups below
 _STEP_TEXT = re.compile(r"^(✓ )?(\d+)\. (.*)$")
@@ -393,7 +393,7 @@ class Sidebar(QWidget):
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(8)
         for widget in (brand, self.home_btn, self.workflow_toggle, steps_card, self.track_search_btn,
-                       self.transfer_panel, accounts_card):
+                       self.transfer_panel):
             body_layout.addWidget(widget)
         body_layout.addStretch(1)
         scroll = QScrollArea()
@@ -402,7 +402,8 @@ class Sidebar(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(body)
-        lay.addWidget(scroll, 1)
+        lay.addWidget(scroll, 1)  # only this upper part scrolls; the accounts and connection below never do
+        lay.addWidget(accounts_card)
         lay.addWidget(connection)
         lay.addWidget(self.settings_btn)
         self._apply_scale(1.0)

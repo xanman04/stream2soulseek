@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sidebar: Streaming services, the Soulseek connection and Settings are always fully visible at the bottom; only the
+  upper part (Home, steps, Find a track, Transfers) scrolls on short windows. Rows are slightly more compact.
 - Downloads: a track that is stuck or failed can now be repaired from the same panel using Free search, which returns
   every file Soulseek finds with no recording or format rules applied. Choosing one asks you to confirm it, warns that
   the recording, version and format are yours to judge, and then copies it for that same track. It can never be part
