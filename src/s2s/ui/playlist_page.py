@@ -33,6 +33,7 @@ def summarize_tracks(tracks: list[AppleTrack]) -> str:
 
 
 class PlaylistPage(QWidget):
+    metadata_loaded = Signal()
     tracks_changed = Signal()  # ctx.tracks / ctx.playlist changed
     open_service_requested = Signal()
     open_spotify_requested = Signal()
@@ -338,6 +339,10 @@ class PlaylistPage(QWidget):
             return  # the user switched source meanwhile
         self.reload_btn.setEnabled(True)
         self._playlists = playlists
+        saver = getattr(self.ctx.store, "update_playlist_artwork", None)
+        if callable(saver):
+            saver(playlists)
+            self.metadata_loaded.emit()
         self.playlist_list.clear()
         for p in playlists:
             it = QListWidgetItem(p.name or "(unnamed)")

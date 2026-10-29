@@ -192,9 +192,11 @@ QWidget#sidebar {{ background: {c['side']}; border-right: 1px solid {c['border']
 QLabel#appWordmark {{ font-size: 23px; font-weight: 700; letter-spacing: 1px; }}
 QLabel#navHeading {{ color: {c['muted']}; font-size: 11px; font-weight: 600;
     margin: 10px 4px 3px 4px; }}
-QFrame#connectionPanel, QFrame#navCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QFrame#connectionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QFrame#navCard {{ background: transparent; border: none; }}
+QWidget#sidebarBody, QScrollArea#sidebarScroll {{ background: {c['side']}; border: none; }}
 QFrame#connectionPanel QLabel, QFrame#navCard QLabel {{ background: transparent; border: none; }}
-QFrame#stepsCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QFrame#stepsCard {{ background: transparent; border: none; }}
 QListWidget#stepList {{ background: transparent; border: none; outline: 0; }}
 QListWidget#stepList::item {{ padding: 4px 8px; border: 1px solid transparent; border-radius: 7px; }}
 QListWidget#stepList::item:hover {{ background: {c['hover']}; }}
@@ -206,6 +208,8 @@ QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
 QLabel#sectionTitle {{ font-size: 17px; font-weight: 600; }}
 QLabel#mutedText {{ color: {c['muted']}; }}
 QFrame#homeActionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; }}
+QFrame#searchControls {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QLabel#resultSummary {{ font-weight: 600; }}
 QWidget#pageFooter {{ border-top: 1px solid {c['border']}; }}
 QPushButton {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px;
               padding: 6px 14px; min-height: 20px; }}
@@ -216,9 +220,11 @@ QPushButton:disabled {{ color: {c['disabled']}; border-color: {c['border']}; bac
 QPushButton:flat {{ background: transparent; border-color: transparent; }}
 QPushButton:flat:hover {{ background: {c['hover']}; }}
 QPushButton:checked {{ background: {c['selection']}; color: {c['selected']}; border-color: {c['focus']}; }}
-QPushButton#primaryNavigation {{ text-align: left; background: transparent; border-color: transparent; }}
-QPushButton#primaryNavigation:hover {{ background: {c['hover']}; }}
-QPushButton#primaryNavigation:checked {{ background: {c['selection']}; color: {c['selected']}; }}
+QPushButton#primaryNavigation {{ text-align: left; background: {c['panel']}; border: 1px solid {c['border']};
+    padding: 9px 12px; font-weight: 600; border-radius: 9px; }}
+QPushButton#primaryNavigation:hover {{ background: {c['hover']}; border-color: {c['muted']}; }}
+QPushButton#primaryNavigation:checked {{ background: {c['selection']}; color: {c['selected']}; border-color: {c['focus']}; }}
+QPushButton#sidebarSettings {{ text-align: left; background: transparent; padding: 8px 12px; }}
 QPushButton[segment] {{ padding: 6px 16px; }}
 QPushButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
 QPushButton[segment="mid"] {{ border-radius: 0; border-left: none; }}
@@ -247,8 +253,7 @@ QListWidget::item {{ padding: 7px 10px; border: 1px solid transparent; border-ra
 QListWidget::item:hover {{ background: {c['hover']}; }}
 QListWidget::item:selected {{ background: {c['selection']}; color: {c['selected']}; }}
 QListWidget#navigation {{ background: transparent; border: none; }}
-QListWidget#navigation::item {{ padding: 6px 9px; border-left: 3px solid transparent; border-radius: 5px; }}
-QListWidget#navigation::item:selected {{ border-left-color: {c['focus']}; }}
+QListWidget#navigation::item {{ padding: 6px 9px; border: none; border-radius: 6px; }}
 QListWidget#navigation::item:disabled {{ color: {c['disabled']}; }}
 QGroupBox {{ border: 1px solid {c['border']}; border-radius: 10px; margin-top: 12px; padding: 12px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {c['muted']}; }}
@@ -279,3 +284,8 @@ QToolTip {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['
 """
     app.setProperty("s2sStylesheet", stylesheet)
     app.setStyleSheet(existing + stylesheet)
+    from .icons import icon
+    for widget in app.allWidgets():
+        spec = widget.property("s2sIcon")
+        if spec and isinstance(widget, QPushButton):
+            widget.setIcon(icon(*spec))

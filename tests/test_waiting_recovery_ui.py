@@ -63,7 +63,7 @@ def test_waiting_track_has_visible_search_when_no_alternatives_exist(waiting_pag
     assert page.sources.query.text() == "Artist Song"
     assert page.sources.query.isEnabled() and page.sources.search_btn.isEnabled()
     assert page.sources._destination == ctx.destination
-    assert "Search again below" in page.sources.note.text()
+    assert "Search Soulseek above" in page.sources.note.text()
     assert "search Soulseek" in page.problem_help.text()
     assert events == []
 
@@ -77,8 +77,8 @@ def test_waiting_alternatives_can_be_reviewed_cancelled_then_replaced(waiting_pa
     panel = page.sources
     panel.refresh()
     assert panel.table.rowCount() == 1
-    assert panel.table.item(0, 0).text() == "other-peer"
-    assert "File:" in panel.file_detail.text()
+    assert panel.table.item(0, 1).text() == "other-peer"
+    assert other.file.filename in panel.file_detail.text()
     monkeypatch.setattr(panel, "ask_download", lambda *_: False)
     panel.download_selected()
     assert events == []
@@ -93,8 +93,8 @@ def test_fresh_search_for_waiting_track_never_cancels_or_queues(waiting_page, mo
     page, ctx, _result, events = waiting_page
     from s2s.ui import other_sources
     queries = []
-    monkeypatch.setattr(other_sources.workflow, "search_track_custom",
-                        lambda *a, **_k: queries.append(a[4]))
+    monkeypatch.setattr(other_sources, "free_search",
+                        lambda *a, **_k: queries.append(a[1]) or [])
     page.sources.query.setText("Artist Song extended")
     page.sources.search_custom()
     assert queries == ["Artist Song extended"]

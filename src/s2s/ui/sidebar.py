@@ -1,9 +1,4 @@
-"""Left sidebar. Primary navigation, the numbered steps, sits at the top under the brand; accounts and status
-(streaming services, the Soulseek connection, Settings) are pinned to the bottom.
-
-The whole column scales with the window's height so it stays full and proportional on any normal screen: rows,
-badges, type, padding and gaps all grow together (never just the padding), in small discrete steps so nothing
-drifts while the window is dragged. Both groups stay anchored to their own edge."""
+"""Stable-density native navigation, with scrollable sections and a pinned connection/settings footer."""
 
 from __future__ import annotations
 
@@ -13,13 +8,14 @@ from pathlib import Path
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QStyle,
+    QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QStyle,
     QStyledItemDelegate, QVBoxLayout, QWidget,
 )
 
 from . import theme
 from .steps import STEPS
 from .service_identity import logo_renderer
+from .icons import set_icon
 
 APPLE_KEY = "apple"
 SPOTIFY_KEY = "spotify"
@@ -32,14 +28,14 @@ SERVICES = [
     (SOUNDCLOUD_KEY, "SoundCloud", True),
 ]
 
-STEP_HEIGHT = 46  # row heights at scale 1 (the smallest the sidebar is ever drawn)
-SERVICE_HEIGHT = 50
+STEP_HEIGHT = 38
+SERVICE_HEIGHT = 48
 TRANSFER_HEIGHT = 68  # a saved session: three lines and a progress line
 TRANSFER_ROWS_SHOWN = 2  # whole rows only; more sessions scroll inside the panel instead of pushing the groups below
 _STEP_TEXT = re.compile(r"^(✓ )?(\d+)\. (.*)$")
 _BADGE = 26  # diameter of a step's number badge at scale 1
 MAX_SCALE = 1.8  # the sidebar never grows past this; taller windows keep a little air between the two groups
-BASE_WIDTH = 288  # the column's width at scale 1; it widens a little with the scale so larger type still fits
+BASE_WIDTH = 264
 SCALE_STEP = 0.05  # sizes change in these steps while the window is resized, not continuously
 
 
@@ -58,7 +54,8 @@ def _color(key: str, fallback: str) -> QColor:
 
 
 def _disclosure_icon(expanded: bool) -> QIcon:
-    pixmap = QPixmap(18, 18)
+    pixmap = QPixmap(36, 36)
+    pixmap.setDevicePixelRatio(2)
     pixmap.fill(Qt.GlobalColor.transparent)
     with QPainter(pixmap) as painter:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -79,6 +76,14 @@ def _disclosure_icon(expanded: bool) -> QIcon:
 
 class _ScaledDelegate(QStyledItemDelegate):
     scale = 1.0  # set by the sidebar whenever its scale changes
+
+
+class _WorkflowButton(QPushButton):
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        with QPainter(self) as painter:
+            _disclosure_icon(self.isChecked()).paint(painter, self.width() - 27,
+                                                    (self.height() - 18) // 2, 18, 18)
 
 
 class _StepDelegate(_ScaledDelegate):
@@ -290,15 +295,17 @@ class Sidebar(QWidget):
         self.home_btn.setAccessibleName("Home")
         self.home_btn.setMinimumHeight(38)
         self.home_btn.setObjectName("primaryNavigation")
+        set_icon(self.home_btn, "home")
         self.track_search_btn = QPushButton("Find a track")
         self.track_search_btn.setAccessibleName("Find a track")
         self.track_search_btn.setMinimumHeight(38)
         self.track_search_btn.setObjectName("primaryNavigation")
-        self.workflow_toggle = QPushButton("Playlist transfer")
+        set_icon(self.track_search_btn, "search")
+        self.workflow_toggle = _WorkflowButton("Playlist transfer")
         self.workflow_toggle.setAccessibleName("Expand playlist transfer steps")
         self.workflow_toggle.setCheckable(True)
         self.workflow_toggle.setObjectName("primaryNavigation")
-        self.workflow_toggle.setIcon(_disclosure_icon(False))
+        set_icon(self.workflow_toggle, "playlist")
         self.workflow_toggle.setMinimumHeight(38)
 
         # ---- steps: the primary navigation, at the top
@@ -340,7 +347,10 @@ class Sidebar(QWidget):
         self.soulseek_label = QLabel("Soulseek: Not logged in")
         self.soulseek_label.setWordWrap(True)
         self.soulseek_btn = QPushButton("Log in...")
+        set_icon(self.soulseek_btn, "connection")
         self.settings_btn = QPushButton("Settings...")
+        set_icon(self.settings_btn, "settings")
+        self.settings_btn.setObjectName("sidebarSettings")
 
         steps_card, self._steps_layout = _card("stepsCard")
         self._steps_card = steps_card
@@ -374,19 +384,27 @@ class Sidebar(QWidget):
         connection, self._connection_layout = _card("connectionPanel")
         self._connection_layout.addWidget(self.soulseek_label)
         self._connection_layout.addWidget(self.soulseek_btn)
-        self._connection_layout.addWidget(self.settings_btn)
 
         lay = self._lay = QVBoxLayout(self)
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
-        lay.addWidget(brand)
-        lay.addWidget(self.home_btn)
-        lay.addWidget(self.workflow_toggle)
-        lay.addWidget(steps_card)
-        lay.addWidget(self.track_search_btn)
-        lay.addWidget(self.transfer_panel)  # as tall as its rows (a whole number of them), never half a row
-        lay.addStretch(1)  # what is left once the scale is capped: space between the two anchored groups
-        lay.addWidget(accounts_card)
+        body = QWidget()
+        body.setObjectName("sidebarBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(8)
+        for widget in (brand, self.home_btn, self.workflow_toggle, steps_card, self.track_search_btn,
+                       self.transfer_panel, accounts_card):
+            body_layout.addWidget(widget)
+        body_layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setObjectName("sidebarScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(body)
+        lay.addWidget(scroll, 1)
         lay.addWidget(connection)
+        lay.addWidget(self.settings_btn)
         self._apply_scale(1.0)
         self._base_height = lay.totalMinimumSize().height()  # the height the sidebar needs at scale 1
 
@@ -407,16 +425,15 @@ class Sidebar(QWidget):
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         """Always the scale-1 size, so a scaled-up sidebar never stops the window from being made smaller."""
-        return QSize(BASE_WIDTH, self._base_height)
+        return QSize(BASE_WIDTH, min(500, self._base_height))
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._rescale()
 
     def _rescale(self) -> None:
-        wanted = min(MAX_SCALE, max(1.0, self.height() / self._base_height))
-        if not self._workflow_expanded:
-            wanted = 1.0  # collapsed workflow must save space, not inflate the accounts/navigation rows
+        # Stable density: a taller window must not enlarge the entire navigation rail.
+        wanted = 1.0
         stepped = round(round(wanted / SCALE_STEP) * SCALE_STEP, 2)
         if stepped != self._scale:
             self._apply_scale(stepped)
@@ -433,7 +450,8 @@ class Sidebar(QWidget):
         self._lay.setSpacing(px(10))
         for button in (self.home_btn, self.track_search_btn, self.workflow_toggle):
             button.setMinimumHeight(px(38))
-        self._brand_row.setContentsMargins(px(4), px(6), px(4), px(14))
+            button.setIconSize(QSize(20, 20))
+        self._brand_row.setContentsMargins(px(6), px(4), px(6), px(12))
         self._brand_row.setSpacing(px(10))
         mark = round(34 * (1 + (scale - 1) * 0.8))
         self._mark.setPixmap(self._icon.scaled(mark, mark, Qt.AspectRatioMode.KeepAspectRatio,
@@ -441,8 +459,8 @@ class Sidebar(QWidget):
         self._name.setStyleSheet(f"font-size: {round(23 * t)}px;")
         self.services_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
         self.transfers_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
-        for layout, margins in ((self._steps_layout, (8, 8, 8, 8)), (self._accounts_layout, (8, 4, 8, 8)),
-                                (self._transfer_layout, (8, 4, 8, 8)), (self._connection_layout, (12, 12, 12, 12))):
+        for layout, margins in ((self._steps_layout, (4, 2, 4, 2)), (self._accounts_layout, (2, 6, 2, 2)),
+                                (self._transfer_layout, (6, 4, 6, 6)), (self._connection_layout, (10, 10, 10, 10))):
             layout.setContentsMargins(*(px(m) for m in margins))
             layout.setSpacing(px(2) if layout is not self._connection_layout else px(9))
         for lst, rows, row_height in ((self.steps, len(STEPS), STEP_HEIGHT), (self.services, len(SERVICES), SERVICE_HEIGHT)):
@@ -496,7 +514,7 @@ class Sidebar(QWidget):
             return
         self._workflow_expanded = expanded
         self.workflow_toggle.setChecked(expanded)
-        self.workflow_toggle.setIcon(_disclosure_icon(expanded))
+        set_icon(self.workflow_toggle, "playlist")
         self.workflow_toggle.setAccessibleName(
             "Collapse playlist transfer steps" if expanded else "Expand playlist transfer steps"
         )
@@ -609,7 +627,7 @@ class Sidebar(QWidget):
             for i in range(lst.count()):
                 f = QFont(lst.font())
                 if lst is self.steps:  # steps are larger and bolder than the rest; the current one boldest
-                    f.setPointSizeF(f.pointSizeF() * 1.12 * type_scale(self._scale))
+                    f.setPointSizeF(f.pointSizeF() * type_scale(self._scale))
                     f.setWeight(QFont.Weight.Bold if i == cur else QFont.Weight.DemiBold)
                 else:
                     f.setBold(i == cur)

@@ -137,6 +137,13 @@ def free_search(ctx, query: str, cancel=None) -> list[RemoteFile]:
     return _search_files(ctx, query, cancel=cancel, raw=True)
 
 
+def remember_manual_candidate(store, import_id: str, track: AppleTrack, file: RemoteFile) -> Candidate:
+    """Persist a raw remote choice as rejected unless its exact identity already exists."""
+    if not isinstance(track, AppleTrack):
+        raise ValueError("manual candidate requires its requested track")
+    return store.remember_manual_candidate(import_id, track, file)
+
+
 def _safe_basename(remote_path: str) -> str:
     base = str(remote_path or "").replace("/", "\\").rsplit("\\", 1)[-1]
     if base in ("", ".", ".."):
@@ -219,6 +226,7 @@ def import_manual_file(
     archive_name: str = "OLD",
     ffprobe_path: str = "",
     runner=None,
+    final_name: str | None = None,
 ) -> ImportResult:
     """Copy a manually selected Free file without playlist matching/format-policy checks.
 
@@ -247,7 +255,7 @@ def import_manual_file(
             return invalid("partial download files cannot be imported", src)
         if src.stat().st_size != transfer.size:
             return invalid("size mismatch", src)
-        raw_name = _safe_basename(transfer.filename)
+        raw_name = _safe_basename(final_name if final_name is not None else transfer.filename)
     except (OSError, ValueError, organize.OrganizeError) as exc:
         return invalid(str(exc))
 

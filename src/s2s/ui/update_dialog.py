@@ -69,6 +69,11 @@ class UpdateDialog(QDialog):
         self.status = theme.subtle(QLabel(""))
         self.status.setWordWrap(True)
         self.progress = QProgressBar()
+        # The app's slim bars hide their text; this one displays a percentage.
+        bar_height = self.progress.fontMetrics().height() + 8
+        self.progress.setStyleSheet(
+            f"QProgressBar {{ min-height: {bar_height}px; max-height: {bar_height}px; }}"
+        )
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)

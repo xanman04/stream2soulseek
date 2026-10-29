@@ -13,6 +13,7 @@ spec.loader.exec_module(privacy)
 @pytest.mark.parametrize("name", [
     "secrets/session.dpapi", "config/settings.json", "profile/Cookies", "profile/History",
     "state.sqlite3", "slskd/slskd.yml", "playlists/set.m3u8", "music/song.flac", ".env.production",
+    "artwork-cache/cover.img",
 ])
 def test_private_state_is_rejected(tmp_path, name):
     path = tmp_path / name

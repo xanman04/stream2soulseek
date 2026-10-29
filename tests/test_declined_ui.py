@@ -186,7 +186,9 @@ def test_downloads_page_offers_other_files_in_place_and_queues_only_after_yes(de
     QApplication.processEvents()
     panel = t.sources
     assert not panel.isHidden()
-    assert [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())] == ["u3"]  # not the decliner
+    assert panel.table.item(0, 1).text() == "u3"
+    assert "radio.mp3" in [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())]
+    assert "u1" not in [panel.table.item(r, 1).text() for r in range(panel.table.rowCount())]  # current attempt excluded
     assert win.stack.currentWidget() is not win.frames[3]  # still on Downloads
     monkeypatch.setattr(type(panel), "ask_download", lambda self, name, cand: False)
     panel.download_selected()

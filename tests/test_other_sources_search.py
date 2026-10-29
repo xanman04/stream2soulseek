@@ -66,7 +66,7 @@ def test_search_is_inline_and_available_with_no_candidates(panel):
     done(work())
 
     assert widget.table.rowCount() == 0
-    assert widget.query_label.buddy() is widget.query
+    assert widget.query.accessibleName() == "Raw Soulseek search"
     assert widget.query.isEnabled() and widget.search_btn.isEnabled()
     assert widget.query.text() == "Artist Track"
 
@@ -90,8 +90,8 @@ def test_manual_search_keeps_old_alternatives_until_success_then_replans(panel):
     old, fresh = candidate("old-peer"), candidate("new-peer")
     widget._fill([old], "D:/Library")
     calls = []
-    monkeypatch.setattr(other_sources.workflow, "search_track_custom",
-                        lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(other_sources, "free_search",
+                        lambda *args, **kwargs: calls.append((args, kwargs)) or [fresh.file])
     monkeypatch.setattr(other_sources.workflow, "build_replacement_plan",
                         lambda *_a, **_k: plan(track, fresh, destination="D:/Library"))
     widget.query.setText("  Artist   Track   (Extended Mix) ")
@@ -104,11 +104,11 @@ def test_manual_search_keeps_old_alternatives_until_success_then_replans(panel):
     payload = work()
     done(payload)
 
-    assert calls[0][0][1] is client
-    assert calls[0][0][4] == "Artist Track (Extended Mix)"
+    assert calls[0][0][0] is ctx
+    assert calls[0][0][1] == "Artist Track (Extended Mix)"
     assert calls[0][1]["cancel"].is_set() is False
-    assert client.closed
-    assert widget._candidates == [fresh]
+    assert [c.file for c in widget._candidates] == [fresh.file]
+    assert widget._candidates[0].tier == Tier.REJECTED  # never claimed as a verified match
     assert widget.query.isEnabled() and widget.table.isEnabled()
 
 
@@ -120,7 +120,7 @@ def test_failed_search_preserves_alternatives_and_shows_error(panel, monkeypatch
     def fail(*_args, **_kwargs):
         raise RuntimeError("service unavailable")
 
-    monkeypatch.setattr(other_sources.workflow, "search_track_custom", fail)
+    monkeypatch.setattr(other_sources, "free_search", fail)
     widget.query.setText("new words")
     widget.search_custom()
     work, _done, failed = jobs.pop(0)
@@ -137,7 +137,7 @@ def test_failed_search_preserves_alternatives_and_shows_error(panel, monkeypatch
 def test_stale_search_callback_after_clear_is_ignored(panel, monkeypatch):
     widget, _ctx, _track, _client, jobs, _ = panel
     widget.query.setText("new words")
-    monkeypatch.setattr(other_sources.workflow, "search_track_custom", lambda *_a, **_k: None)
+    monkeypatch.setattr(other_sources, "free_search", lambda *_a, **_k: [candidate("late-peer").file])
     monkeypatch.setattr(other_sources.workflow, "build_replacement_plan",
                         lambda *_a, **_k: plan(_track, candidate("late-peer")))
     widget.search_custom()

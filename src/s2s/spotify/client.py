@@ -392,9 +392,41 @@ class SpotifyClient:
         ident = cls._playlist_id(uri)
         data = entry.get("data") if isinstance(entry.get("data"), Mapping) else {}  # the newer reply nests the name
         name = entry.get("name") or entry.get("title") or data.get("name") or data.get("title") or ""
+        artwork_url = cls._playlist_artwork(entry, data)
         if not name:
             _log_nameless(item)
-        return Playlist(id=f"spotify:playlist:{ident}", name=str(name) or "Untitled playlist")
+        return Playlist(id=f"spotify:playlist:{ident}", name=str(name) or "Untitled playlist",
+                        artwork_url=artwork_url)
+
+    @staticmethod
+    def _playlist_artwork(*containers: Mapping[str, Any]) -> str | None:
+        """Read the first provider image URL from known Spotify playlist image fields."""
+        from ..artwork import safe_cover_url
+
+        def find(value, depth=0):
+            if depth > 5:
+                return None
+            if isinstance(value, Mapping):
+                url = safe_cover_url(value.get("url"))
+                if url:
+                    return url
+                for key in ("sources", "items", "images"):
+                    found = find(value.get(key), depth + 1)
+                    if found:
+                        return found
+            elif isinstance(value, list):
+                for image in value[:30]:
+                    found = find(image, depth + 1)
+                    if found:
+                        return found
+            return None
+
+        for container in containers:
+            for key in ("images", "image", "coverArt"):
+                found = find(container.get(key))
+                if found:
+                    return found
+        return None
 
     @staticmethod
     def _library_page(body: Any) -> tuple[list[Any], int]:

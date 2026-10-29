@@ -110,6 +110,7 @@ def _fetch(ident: str, client_factory: Callable[[str], Any] | None
     tracks: list[AppleTrack] = []
     skipped: list[str] = []
     name = ""
+    artwork_url: str | None = None
     try:
         source = (client_factory or _default_factory)(ident)
         offset = 0
@@ -119,6 +120,7 @@ def _fetch(ident: str, client_factory: Callable[[str], Any] | None
             playlist = _check_body(body)
             if offset == 0:
                 name = str(playlist.get("name") or "")
+                artwork_url = SpotifyClient._playlist_artwork(playlist)
             content = playlist["content"]
             if total is None:
                 total = SpotifyClient._integer(content.get("totalCount"), "playlist track count")
@@ -144,4 +146,4 @@ def _fetch(ident: str, client_factory: Callable[[str], Any] | None
         if any(w in text for w in ("403", "404", "forbidden", "not found", "private")):
             raise PlaylistPrivateError(PRIVATE_MESSAGE) from None
         raise PlaylistNetworkError(NETWORK_MESSAGE) from None
-    return Playlist(id=f"spotify:playlist:{ident}", name=name), tracks, skipped
+    return Playlist(id=f"spotify:playlist:{ident}", name=name, artwork_url=artwork_url), tracks, skipped

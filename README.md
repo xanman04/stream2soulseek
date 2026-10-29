@@ -71,6 +71,8 @@ permissions, library access and unavailable tracks can affect the playlist data 
 S2S opens on **Home**, with recently used S2S playlists and entry points for playlist
 transfers and individual tracks. The playlist steps expand beneath **Playlist transfer** in the sidebar;
 returning Home preserves the current session. Saved unfinished transfers remain available in the sidebar.
+Playlist covers come from the connected services and are cached locally. If a service has no cover or its
+image cannot be loaded, S2S shows that service's mark instead. Artwork does not affect track matching.
 
 1. **Choose playlist.** Select a source and playlist, then inspect its tracks. Filtering and sorting the
    preview do not modify the original playlist. Sortable lists cycle through ascending, descending and
@@ -117,9 +119,11 @@ and optional version, then ranks files using the normal matching rules. **Free s
 files in response order, including formats and versions that Quick search would exclude. It makes no claim
 that a returned file matches a particular recording.
 
-Free search starts with **All formats** and no active filters. The Format shortcut and **Filters** dropdown
-let you narrow filename, uploader, bitrate, duration, size and upload-slot availability locally. Clearing the
-filters restores the returned list; column headings cycle ascending, descending and original order.
+Free search starts with **All formats** and no active filters. The Format dropdown accepts multiple formats;
+**Filters** narrows filename, uploader, bitrate, duration, size and upload-slot availability locally. Active
+formats and filters appear as removable chips beside the controls, wrapping when needed. Remove a chip to
+clear that setting, or clear all filters to restore the returned list. Column headings cycle ascending,
+descending and original order.
 
 **Review selection** shows the exact file and asks for its final folder before confirmation. Confirmed
 individual downloads get their own saved transfer, without replacing the active playlist. Free search keeps

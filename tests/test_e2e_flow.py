@@ -446,7 +446,7 @@ def test_whole_app_flow(app_env, monkeypatch):
     # ---------------- another file for the declined track, chosen right on the Downloads page
     wt.problems.selectRow(0)
     panel = wt.sources
-    offered = [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())]
+    offered = [panel.table.item(r, 1).text() for r in range(panel.table.rowCount())]
     assert offered[0] == "goodpeer" and "rejecter" not in offered
     n_before = len(fake.enqueued)
     shown.clear()
