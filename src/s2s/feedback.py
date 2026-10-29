@@ -1,7 +1,4 @@
-"""Problem reports: a plain-text report the user reviews and sends from their own email app.
-
-Nothing is sent by S2S itself (an app cannot send email without a password built into it, and S2S ships none).
-"""
+"""Build public GitHub issue drafts for user-reviewed S2S problem reports."""
 
 from __future__ import annotations
 
@@ -9,10 +6,11 @@ import platform
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlencode
 
-REPORT_EMAIL = "xnc2301+S2S@gmail.com"
-MAILTO_BODY_LIMIT = 1800  # longer mailto: links are cut off by Windows and some mail apps
+ISSUE_URL = "https://github.com/xanman04/stream2soulseek/issues/new"
+ISSUE_BODY_LIMIT = 5000
+ISSUE_URL_LIMIT = 7500
 
 
 def system_summary() -> str:
@@ -33,29 +31,40 @@ def system_summary() -> str:
             f"Python {platform.python_version()} · Qt for Python {pyside}")
 
 
-def build_report(description: str, *, include_log: bool) -> str:
-    """The full report: what happened, the system, and (optionally) the recent log with secrets removed."""
+def build_report(description: str, *, steps: str = "", expected: str = "",
+                  include_log: bool = False) -> str:
+    """Create report text; logs are included only after explicit opt-in."""
     from .applog import recent_log, scrub
 
-    lines = ["What happened:", scrub(description.strip()) or "(not described)", "", "System:", system_summary()]
+    lines = [
+        "What happened:", scrub(description.strip()) or "(not described)",
+        "", "Steps to reproduce:", scrub(steps.strip()) or "(not provided)",
+        "", "Expected result:", scrub(expected.strip()) or "(not provided)",
+        "", "Version and platform:", system_summary(),
+    ]
     if include_log:
         lines += ["", "Recent log (logins and personal folders removed):", recent_log() or "(empty)"]
     return "\n".join(lines) + "\n"
 
 
-def mail_body(description: str, report_file: Path | None) -> str:
-    """A short email body; the full report is in a file the user can attach."""
-    from .applog import scrub
+def issue_body(report: str, *, title: str = "S2S bug report") -> tuple[str, bool]:
+    """Bound issue body size; return (body, truncated)."""
+    if len(report) <= ISSUE_BODY_LIMIT and len(issue_url(title, report)) <= ISSUE_URL_LIMIT:
+        return report, False
+    marker = "\n\n[Report shortened to fit GitHub's draft URL. Save the full report locally and attach it after reviewing.]\n"
+    low, high = 0, min(len(report), ISSUE_BODY_LIMIT - len(marker))
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(issue_url(title, report[:middle].rstrip() + marker)) <= ISSUE_URL_LIMIT:
+            low = middle
+        else:
+            high = middle - 1
+    return report[:low].rstrip() + marker, True
 
-    body = [scrub(description.strip()) or "(Describe what happened.)", "", "---", system_summary()]
-    if report_file is not None:
-        body.append(f"Full report (please attach): {report_file.name}")
-    text = "\n".join(body)
-    return text[:MAILTO_BODY_LIMIT]
 
-
-def mailto_url(subject: str, body: str, to: str = REPORT_EMAIL) -> str:
-    return f"mailto:{to}?subject={quote(subject)}&body={quote(body)}"
+def issue_url(title: str, body: str) -> str:
+    """Encode a user-reviewed report into GitHub's new-issue draft URL."""
+    return f"{ISSUE_URL}?{urlencode({'title': title, 'body': body})}"
 
 
 def save_report(text: str) -> Path:

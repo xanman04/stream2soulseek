@@ -1,7 +1,7 @@
 """Navigation policy and a privacy-safe diagnostic trail for the embedded sign-in browsers.
 
 Spotify's and SoundCloud's sign-in pages run inside S2S. When one fails ("Something went wrong") the cause is
-invisible, so a few facts go to S2S's own log (Help > Report a problem includes it): the browser's warnings and
+invisible, so a few facts go to S2S's own log (Report a Bug includes it): the browser's warnings and
 errors with query strings removed, any navigation the policy refused (scheme and frame only), and which of a short
 list of known error phrases the page shows. Never page text, form values, cookies or tokens.
 """
