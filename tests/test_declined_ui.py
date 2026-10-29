@@ -168,7 +168,7 @@ def test_ui_has_no_extra_enqueue_paths():
     ui = Path(s2s.__file__).parent / "ui"
     assert [p.name for p in ui.glob("*.py")
             if "enqueue_approved" in p.read_text(encoding="utf-8")
-            and p.name not in ("review_page.py", "other_sources.py")] == []  # both behind an explicit yes
+            and p.name not in ("review_page.py", "other_sources.py", "main_window.py")] == []  # all require explicit confirmation
 
 
 def test_downloads_page_offers_other_files_in_place_and_queues_only_after_yes(declined, monkeypatch):

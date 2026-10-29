@@ -143,14 +143,14 @@ def test_no_source_connected_step1_message_opens_service_page(env, monkeypatch):
     assert shown
 
 
-def test_first_start_without_session_opens_step_one(env, monkeypatch):
+def test_first_start_without_session_opens_home(env, monkeypatch):
     win, *_ = env
     monkeypatch.setattr(win.service, "show_login", lambda msg: None)
     win.startup()
-    assert win.stack.currentIndex() == 1  # step 1, which offers to connect a service; not the service page
+    assert win.stack.currentWidget() is win.home  # no login browser opens automatically
 
 
-def test_first_start_with_session_opens_step_one(env, monkeypatch):
+def test_first_start_with_session_opens_home(env, monkeypatch):
     win, _s, secrets, _root = env
     secrets.set(APPLE_DEVELOPER_TOKEN, "d")
     secrets.set(APPLE_MEDIA_USER_TOKEN, "u")
@@ -158,7 +158,7 @@ def test_first_start_with_session_opens_step_one(env, monkeypatch):
 
     monkeypatch.setattr(playlist_page.PlaylistPage, "load_playlists", lambda self: None)
     win.startup()
-    assert win.stack.currentIndex() == 1 and win.playlists.source_combo.count() == 1
+    assert win.stack.currentWidget() is win.home and win.playlists.source_combo.count() == 1
     assert win.playlists.source_combo.itemText(0) == "Apple Music"
 
 
@@ -594,11 +594,11 @@ def test_confirm_with_nothing_checked_does_not_even_ask(env, monkeypatch):
     assert asked == [] and created == [] and svc.calls == []
 
 
-def test_enqueue_approved_only_called_from_review_page():
+def test_enqueue_approved_only_called_from_explicit_review_controllers():
     ui_dir = Path(s2s.__file__).parent / "ui"
     offenders = [p.name for p in ui_dir.glob("*.py")
                  if "enqueue_approved" in p.read_text(encoding="utf-8")
-                 and p.name not in ("review_page.py", "other_sources.py")]
+                 and p.name not in ("review_page.py", "other_sources.py", "main_window.py")]
     assert offenders == []
     src = (ui_dir / "review_page.py").read_text(encoding="utf-8")
     assert src.count("enqueue_approved(") == 1

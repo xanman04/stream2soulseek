@@ -415,9 +415,9 @@ def test_keep_downloading_changes_nothing(win, monkeypatch):
     assert cancelled == [] and win.ctx.approval_id == "ap"
 
 
-def test_app_opens_on_step_one_without_running_downloads(win):
+def test_app_opens_on_home_without_running_downloads(win):
     win.startup()
-    assert win.stack.currentIndex() == 1 and not hasattr(win.playlists, "resume_btn")
+    assert win.stack.currentWidget() is win.home and not hasattr(win.playlists, "resume_btn")
 
 
 def test_the_version_is_shown_in_the_corner(win):
