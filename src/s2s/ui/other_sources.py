@@ -16,6 +16,8 @@ from .workers import run_async
 
 class OtherSourcesPanel(TrackSearchPage):
     queued = Signal(str)
+    replacing = Signal(str)  # the user confirmed a replacement: the old failed row can leave the list now
+    replace_failed = Signal(str)  # queuing the replacement failed: the track needs attention again
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent, embedded=True)
@@ -216,6 +218,7 @@ class OtherSourcesPanel(TrackSearchPage):
         ctx, track, generation = self.ctx, self._track, self._generation
         item_ = SelectionItem(apple_id, cand.file.username, cand.file.filename, cand.file.size, self._destination,
                               cand.file.local_sha256, manual_free=cand.file.local_sha256 is None)
+        self.replacing.emit(apple_id)
         self._set_busy(True)
         self.cancel_button.hide()
         self._say("Queuing…")
@@ -239,15 +242,15 @@ class OtherSourcesPanel(TrackSearchPage):
             return approval
 
         def done(_approval):
+            self._set_busy(False)  # the list may already show another track (this one left Needs attention)
             if self._current(generation, import_id) and self._key == key:
-                self._set_busy(False)
                 self.clear()
-                self.queued.emit(apple_id)
+            self.queued.emit(apple_id)
 
         def failed(exc):
-            if self._current(generation, import_id) and self._key == key:
-                self._set_busy(False)
-                self._say("")
-                show_error(self, "Could not queue the download", ctx.describe(exc))
+            self.replace_failed.emit(apple_id)  # the track goes back to Needs attention at once
+            self._set_busy(False)
+            self._say("")
+            show_error(self, "Could not queue the download", ctx.describe(exc))
 
         run_async(self, work, done, failed)
