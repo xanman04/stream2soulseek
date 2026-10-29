@@ -55,3 +55,14 @@ def test_clash_display_is_used_for_headings_only_when_it_is_installed(monkeypatc
     assert "QLabel#navHeading" not in app.styleSheet().split("Clash Display")[1].split("}")[0]  # headings only
     monkeypatch.undo()
     theme.apply_app_style(app, dark=True)
+
+
+def test_bundled_clash_display_files_are_unmodified_and_ship_with_their_licence():
+    from s2s.ui import theme
+
+    folder = theme._FONT_DIR
+    assert (folder / "ClashDisplay-FFL.txt").is_file()
+    files = sorted(p.name for p in folder.glob("*.otf"))
+    assert files == ["ClashDisplay-Bold.otf", "ClashDisplay-Medium.otf", "ClashDisplay-Regular.otf", "ClashDisplay-Semibold.otf"]
+    for p in folder.glob("*.otf"):
+        assert p.read_bytes()[:4] == b"OTTO"  # the foundry's own OpenType files, not converted or subset

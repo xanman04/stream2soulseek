@@ -7,6 +7,7 @@ both Windows light and dark mode (a solid pale-yellow row with the default white
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFontDatabase, QPalette
@@ -149,14 +150,25 @@ def update_appearance() -> dict:
     return colors
 
 
-DISPLAY_FONT = "Clash Display"  # headings only, and only where the user has installed it: S2S does not ship it
+DISPLAY_FONT = "Clash Display"  # headings and the wordmark only; body text keeps the system font
+_FONT_DIR = Path(__file__).with_name("assets") / "fonts"
+_fonts_loaded = False
+
+
+def load_bundled_fonts() -> None:
+    """Register the unmodified Clash Display files shipped in assets/fonts (ITF Free Font License; its text sits next
+    to them and in the release licences). Safe to call more than once."""
+    global _fonts_loaded
+    if _fonts_loaded:
+        return
+    _fonts_loaded = True
+    for path in sorted(_FONT_DIR.glob("*.otf")):
+        QFontDatabase.addApplicationFont(str(path))
 
 
 def display_font_family() -> str:
-    """The heading typeface when it is installed on this computer, else "" (headings keep the system font).
-
-    Clash Display's licence does not let S2S redistribute the font files in its source or installers, so it is used
-    only when the user has installed it themselves."""
+    """The heading typeface when it is available (bundled, or installed on this computer), else ""."""
+    load_bundled_fonts()
     return DISPLAY_FONT if DISPLAY_FONT in QFontDatabase.families() else ""
 
 
