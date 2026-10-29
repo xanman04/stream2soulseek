@@ -35,6 +35,9 @@ from .sidebar import APPLE_KEY, SPOTIFY_KEY, SOUNDCLOUD_KEY, SOURCE_NAMES, Sideb
 from .soulseek_login import SoulseekSession
 from .steps import STEPS, StepFrame
 from .finish_page import FinishPage
+from .home_page import HomePage
+from .track_search_page import TrackSearchPage
+from .single_download_dialog import SingleDownloadDialog
 from .transfers_page import TransfersPage
 from .transfer_monitor import TransferMonitor
 from .util import show_error
@@ -72,6 +75,7 @@ class MainWindow(QMainWindow):
         self._tray = None
         self._navigation_generation = 0
         self._replacement_open = False  # a "Find another source" review is open: Review may be shown again
+        self._last_manual_destination = ""
         self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
 
         self.sidebar = Sidebar()
@@ -86,6 +90,8 @@ class MainWindow(QMainWindow):
         self.review = ReviewPage(self.ctx)
         self.transfers = TransfersPage(self.ctx)
         self.finish = FinishPage(self.ctx)
+        self.home = HomePage(self.ctx)
+        self.track_search = TrackSearchPage(self.ctx)
         self.transfer_monitor = TransferMonitor(self.ctx, connected=lambda: self.soulseek.is_connected,
             skip_import=lambda: self.ctx.import_id if self.transfers.timer.isActive() else None,
             busy=lambda: self._queueing or self._closing, parent=self)
@@ -99,6 +105,8 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(f)
         self.stack.addWidget(self.spotify_service)
         self.stack.addWidget(self.soundcloud_service)
+        self.stack.addWidget(self.home)
+        self.stack.addWidget(self.track_search)
 
         central = QWidget()
         h = QHBoxLayout(central)
@@ -147,6 +155,13 @@ class MainWindow(QMainWindow):
         self.sidebar.soulseek_login_requested.connect(lambda: self.soulseek.prompt())
         self.sidebar.settings_requested.connect(self.open_settings)
         self.sidebar.transfer_selected.connect(self.resume_import)
+        self.sidebar.home_requested.connect(self.show_home)
+        self.sidebar.track_search_requested.connect(self.open_track_search)
+        self.home.playlist_requested.connect(self.start_playlist_from_home)
+        self.home.quick_search_requested.connect(lambda: self.open_track_search("quick"))
+        self.home.free_search_requested.connect(lambda: self.open_track_search("free"))
+        self.home.recent_requested.connect(self.resume_import)
+        self.track_search.download_requested.connect(self.review_individual_download)
         # Review has no Next: "Confirm selection" is the only way on (it opens Downloads by itself).
         self.frames[STEP_REVIEW].next_btn.setVisible(False)
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
@@ -198,10 +213,86 @@ class MainWindow(QMainWindow):
 
         self.go_step(STEP_PLAYLIST)
         if autostart:
+            self.show_home()
             QTimer.singleShot(0, self.startup)
             QTimer.singleShot(0, self.startup_checks)
 
     # ------------------------------------------------------------ navigation
+
+    def show_home(self) -> None:
+        if self._closing or self._queueing:
+            return
+        self._navigation_generation += 1
+        self.spotify_service.leave()
+        self.soundcloud_service.leave()
+        self.transfers.stop()
+        self.stack.setCurrentWidget(self.home)
+        self.sidebar.show_home()
+        self.home.refresh()
+
+    def open_track_search(self, mode: str = "quick") -> None:
+        if self._closing or self._queueing:
+            return
+        self._navigation_generation += 1
+        self.spotify_service.leave()
+        self.soundcloud_service.leave()
+        self.transfers.stop()
+        self.track_search.set_mode(mode)
+        self.stack.setCurrentWidget(self.track_search)
+        self.sidebar.show_track_search()
+
+    def start_playlist_from_home(self) -> None:
+        if self._closing or self._queueing:
+            return
+        if self.search._running:
+            self.go_step(STEP_SEARCH)
+            self.statusBar().showMessage("Finish or cancel the current playlist search before choosing another playlist.")
+        elif self.ctx.approval_id:
+            self.transfers.request_new_import()
+        else:
+            self.go_step(STEP_PLAYLIST)
+
+    def ask_individual_download(self, file, mode: str) -> str | None:
+        """Return the destination only after the user confirms this exact file."""
+        recent = self.ctx.settings.recent_destinations
+        dialog = SingleDownloadDialog(file, mode=mode, destination=self._last_manual_destination or
+                                      (recent[0] if recent else ""), parent=self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        destination = dialog.destination if accepted else None
+        dialog.deleteLater()
+        return destination
+
+    def review_individual_download(self, file, mode: str, title: str, artist: str, version: str) -> None:
+        if self._closing or self._queueing:
+            return
+        destination = self.ask_individual_download(file, mode)
+        if not destination or self._closing or self._queueing:
+            return
+        self._last_manual_destination = destination
+        self._queueing_changed(True)
+        self.track_search.review_button.setEnabled(False)
+        ctx = self.ctx
+
+        def work():
+            from ..track_search import prepare_download
+            prepared = prepare_download(ctx, file, destination, mode=mode, title=title, artist=artist, version=version)
+            with ctx.download_service() as service:
+                service.enqueue_approved(prepared.approval.id, prepared.approval.fingerprint)
+            return prepared.import_id
+
+        def done(import_id):
+            self._queueing_changed(False)
+            self.track_search._update_selection()
+            self.statusBar().showMessage("Selection submitted. Open its saved transfer in the sidebar to check progress.")
+            self.transfer_monitor.refresh()
+
+        def failed(exc):
+            self._queueing_changed(False)
+            self.track_search._update_selection()
+            self.transfer_monitor.refresh()
+            show_error(self, "Could not start the download", ctx.describe(exc))
+
+        self._run_job(work, done, failed)
 
     def _run_job(self, work, done, failed) -> None:
         """Drain controller-owned work before closing the store/engine; callbacks cannot reopen a closing UI."""
@@ -358,11 +449,8 @@ class MainWindow(QMainWindow):
         if self._closing:
             return
         self.refresh_navigation()
-        self.go_step(STEP_PLAYLIST)
+        self.show_home()
         self.playlists.startup()
-        pending = next((s for s in transfer_sessions.sessions(self.ctx.store) if s.incomplete), None)
-        if pending is not None:
-            self.resume_import(pending.import_id)
         self.transfer_monitor.start()
         if getattr(sys, "frozen", False):  # only the packaged app updates itself; source runs use git
             self._report_failed_update()
@@ -459,10 +547,11 @@ class MainWindow(QMainWindow):
         return False
 
     def _search_finished(self, cancelled: bool) -> None:
+        viewing_search = self.stack.currentWidget() is self.frames[STEP_SEARCH]
         self.review.load(self.ctx.results, self.ctx.destination or "")
         self.refresh_navigation()
         # Stay on Search while some searches could not run: its "Retry failed searches" button is there.
-        if not cancelled and not workflow.failed_search_tracks(self.ctx.results):
+        if viewing_search and not cancelled and not workflow.failed_search_tracks(self.ctx.results):
             self.go_step(STEP_REVIEW)
 
     def start_replacement(self, *, include_failed: bool = False) -> None:
@@ -666,6 +755,9 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.ctx, self)
         if dlg.exec():
             self.destination.refresh_destinations()
+            from ..matching.formats import describe_policy
+            self.track_search.policy_label.setText(describe_policy(self.ctx.settings.match_policy))
+            self.track_search._update_selection()
             if self.soulseek.is_connected and slskd_inputs() != before:
                 self.soulseek.connect_on_startup()  # restart slskd so it uses the new folders/shares
 
@@ -798,6 +890,7 @@ class MainWindow(QMainWindow):
         self.transfers.stop()
         self.transfers._shutdown = True
         self.search.cancel()
+        self.track_search.cancel()
         if self.transfers.sources._search_cancel is not None:
             self.transfers.sources._search_cancel.set()
         if (self._pending_jobs or self.transfer_monitor.inflight or self.transfers._inflight

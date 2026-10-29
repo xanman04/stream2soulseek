@@ -57,6 +57,26 @@ def _color(key: str, fallback: str) -> QColor:
     return QColor(_colors().get(key, fallback))
 
 
+def _disclosure_icon(expanded: bool) -> QIcon:
+    pixmap = QPixmap(18, 18)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    with QPainter(pixmap) as painter:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(_color("muted", "#9aa6b4"), 1.7, Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        path = QPainterPath()
+        if expanded:
+            path.moveTo(5, 7)
+            path.lineTo(9, 11)
+            path.lineTo(13, 7)
+        else:
+            path.moveTo(7, 5)
+            path.lineTo(11, 9)
+            path.lineTo(7, 13)
+        painter.drawPath(path)
+    return QIcon(pixmap)
+
+
 class _ScaledDelegate(QStyledItemDelegate):
     scale = 1.0  # set by the sidebar whenever its scale changes
 
@@ -239,6 +259,8 @@ def _card(name: str) -> tuple[QFrame, QVBoxLayout]:
 
 
 class Sidebar(QWidget):
+    home_requested = Signal()
+    track_search_requested = Signal()
     service_selected = Signal(str)
     step_selected = Signal(int)
     soulseek_login_requested = Signal()
@@ -262,6 +284,22 @@ class Sidebar(QWidget):
         self._brand_row.addWidget(self._mark)
         self._brand_row.addWidget(self._name)
         self._brand_row.addStretch(1)
+
+        # ---- top level destinations; the playlist flow is a nested disclosure below.
+        self.home_btn = QPushButton("Home")
+        self.home_btn.setAccessibleName("Home")
+        self.home_btn.setMinimumHeight(38)
+        self.home_btn.setObjectName("primaryNavigation")
+        self.track_search_btn = QPushButton("Find a track")
+        self.track_search_btn.setAccessibleName("Find a track")
+        self.track_search_btn.setMinimumHeight(38)
+        self.track_search_btn.setObjectName("primaryNavigation")
+        self.workflow_toggle = QPushButton("Playlist transfer")
+        self.workflow_toggle.setAccessibleName("Expand playlist transfer steps")
+        self.workflow_toggle.setCheckable(True)
+        self.workflow_toggle.setObjectName("primaryNavigation")
+        self.workflow_toggle.setIcon(_disclosure_icon(False))
+        self.workflow_toggle.setMinimumHeight(38)
 
         # ---- steps: the primary navigation, at the top
         self.steps = QListWidget()
@@ -305,7 +343,11 @@ class Sidebar(QWidget):
         self.settings_btn = QPushButton("Settings...")
 
         steps_card, self._steps_layout = _card("stepsCard")
+        self._steps_card = steps_card
+        steps_card.hide()
         self._steps_layout.addWidget(self.steps)
+        self.steps.hide()
+        self._workflow_expanded = False
 
         self.transfer_panel, self._transfer_layout = _card("navCard")
         self.transfers_header = _header("Transfers")
@@ -337,7 +379,10 @@ class Sidebar(QWidget):
         lay = self._lay = QVBoxLayout(self)
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
         lay.addWidget(brand)
+        lay.addWidget(self.home_btn)
+        lay.addWidget(self.workflow_toggle)
         lay.addWidget(steps_card)
+        lay.addWidget(self.track_search_btn)
         lay.addWidget(self.transfer_panel)  # as tall as its rows (a whole number of them), never half a row
         lay.addStretch(1)  # what is left once the scale is capped: space between the two anchored groups
         lay.addWidget(accounts_card)
@@ -354,6 +399,9 @@ class Sidebar(QWidget):
             lst.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         self.soulseek_btn.clicked.connect(self.soulseek_login_requested)
         self.settings_btn.clicked.connect(self.settings_requested)
+        self.home_btn.clicked.connect(self._home)
+        self.track_search_btn.clicked.connect(self._track_search)
+        self.workflow_toggle.clicked.connect(self._toggle_workflow)
 
     # ------------------------------------------------------------ scaling
 
@@ -367,6 +415,8 @@ class Sidebar(QWidget):
 
     def _rescale(self) -> None:
         wanted = min(MAX_SCALE, max(1.0, self.height() / self._base_height))
+        if not self._workflow_expanded:
+            wanted = 1.0  # collapsed workflow must save space, not inflate the accounts/navigation rows
         stepped = round(round(wanted / SCALE_STEP) * SCALE_STEP, 2)
         if stepped != self._scale:
             self._apply_scale(stepped)
@@ -381,6 +431,8 @@ class Sidebar(QWidget):
             delegate.scale = scale
         self._lay.setContentsMargins(px(14), px(14), px(14), px(14))
         self._lay.setSpacing(px(10))
+        for button in (self.home_btn, self.track_search_btn, self.workflow_toggle):
+            button.setMinimumHeight(px(38))
         self._brand_row.setContentsMargins(px(4), px(6), px(4), px(14))
         self._brand_row.setSpacing(px(10))
         mark = round(34 * (1 + (scale - 1) * 0.8))
@@ -425,6 +477,39 @@ class Sidebar(QWidget):
         self._quiet(self.steps, -1)
         self.service_selected.emit(self.services.item(row).data(Qt.ItemDataRole.UserRole))
 
+    def _home(self) -> None:
+        self._quiet(self.steps, -1)
+        self._quiet(self.services, -1)
+        self.home_requested.emit()
+
+    def _track_search(self) -> None:
+        self._quiet(self.steps, -1)
+        self._quiet(self.services, -1)
+        self.track_search_requested.emit()
+
+    def _toggle_workflow(self, expanded: bool) -> None:
+        self._set_workflow_expanded(expanded)
+
+    def _set_workflow_expanded(self, expanded: bool) -> None:
+        expanded = bool(expanded)
+        if expanded == self._workflow_expanded:
+            return
+        self._workflow_expanded = expanded
+        self.workflow_toggle.setChecked(expanded)
+        self.workflow_toggle.setIcon(_disclosure_icon(expanded))
+        self.workflow_toggle.setAccessibleName(
+            "Collapse playlist transfer steps" if expanded else "Expand playlist transfer steps"
+        )
+        self.steps.setVisible(expanded)
+        self._steps_card.setVisible(expanded)
+        self._recalculate_base_height()
+
+    def _recalculate_base_height(self) -> None:
+        """Measure the current disclosure state once at scale 1, then fit to the actual window height."""
+        self._apply_scale(1.0)
+        self._base_height = self._lay.totalMinimumSize().height()
+        self._rescale()
+
     def _step_row(self, row: int) -> None:
         if row < 0:
             return
@@ -459,22 +544,42 @@ class Sidebar(QWidget):
         self._fit_transfers()
         if visible != bool(sessions) or rows != min(len(sessions), TRANSFER_ROWS_SHOWN):
             # This optional group changed size: measure the sidebar again at scale 1, then scale it to the window.
-            self._apply_scale(1.0)
-            self._base_height = self._lay.totalMinimumSize().height()
-            self._rescale()
+            self._recalculate_base_height()
         self.updateGeometry()
 
     def show_service(self, key: str) -> None:
+        self.home_btn.setChecked(False)
+        self.track_search_btn.setChecked(False)
         for r in range(self.services.count()):
             if self.services.item(r).data(Qt.ItemDataRole.UserRole) == key:
                 self._quiet(self.services, r)
         self._quiet(self.steps, -1)
+        self._set_workflow_expanded(False)
         self._bold_current()
 
     def show_step(self, index: int) -> None:
+        self.home_btn.setChecked(False)
+        self.track_search_btn.setChecked(False)
+        self._set_workflow_expanded(True)
         self._quiet(self.steps, index)
         self._quiet(self.services, -1)
         self._bold_current()
+
+    def show_home(self) -> None:
+        self._quiet(self.steps, -1)
+        self._quiet(self.services, -1)
+        self._set_workflow_expanded(False)
+        self.home_btn.setCheckable(True)
+        self.home_btn.setChecked(True)
+        self.track_search_btn.setChecked(False)
+
+    def show_track_search(self) -> None:
+        self._quiet(self.steps, -1)
+        self._quiet(self.services, -1)
+        self._set_workflow_expanded(False)
+        self.home_btn.setChecked(False)
+        self.track_search_btn.setCheckable(True)
+        self.track_search_btn.setChecked(True)
 
     def set_service_state(self, key: str, text: str) -> None:
         for r in range(self.services.count()):

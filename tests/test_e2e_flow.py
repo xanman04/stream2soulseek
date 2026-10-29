@@ -636,7 +636,9 @@ def test_restart_resumes_downloads_and_rerun_skips_what_is_already_imported(app_
         win2.ctx.playlist_sources = lambda: [FakeSource(tracks)]
         win2.playlists.refresh_sources()
         assert win2._downloads_running_in_last_import()
-        win2.startup()  # opening S2S again lands straight on the running downloads (no Resume button)
+        win2.startup()  # Home keeps saved transfers available without forcing navigation away.
+        assert win2.stack.currentWidget() is win2.home
+        win2.sidebar.transfer_selected.emit(win.ctx.import_id)
         assert win2.stack.currentIndex() == STEP_TRANSFERS + 1 and win2.ctx.approval_id
         assert win2.transfers.timer.isActive()
         tr = transfer_rows(win2)

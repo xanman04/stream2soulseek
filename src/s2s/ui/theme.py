@@ -203,6 +203,9 @@ QListWidget#stepList::item:selected {{ background: {c['selection']}; color: {c['
 QListWidget#stepList::item:disabled {{ color: {c['disabled']}; }}
 QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
 QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
+QLabel#sectionTitle {{ font-size: 17px; font-weight: 600; }}
+QLabel#mutedText {{ color: {c['muted']}; }}
+QFrame#homeActionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; }}
 QWidget#pageFooter {{ border-top: 1px solid {c['border']}; }}
 QPushButton {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px;
               padding: 6px 14px; min-height: 20px; }}
@@ -213,6 +216,9 @@ QPushButton:disabled {{ color: {c['disabled']}; border-color: {c['border']}; bac
 QPushButton:flat {{ background: transparent; border-color: transparent; }}
 QPushButton:flat:hover {{ background: {c['hover']}; }}
 QPushButton:checked {{ background: {c['selection']}; color: {c['selected']}; border-color: {c['focus']}; }}
+QPushButton#primaryNavigation {{ text-align: left; background: transparent; border-color: transparent; }}
+QPushButton#primaryNavigation:hover {{ background: {c['hover']}; }}
+QPushButton#primaryNavigation:checked {{ background: {c['selection']}; color: {c['selected']}; }}
 QPushButton[segment] {{ padding: 6px 16px; }}
 QPushButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
 QPushButton[segment="mid"] {{ border-radius: 0; border-left: none; }}
