@@ -173,6 +173,28 @@ def self_test(report_path: str) -> int:
 
     check("service logos", logos)
 
+    def review_and_search():
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        from PySide6.QtWidgets import QApplication
+
+        from . import track_search
+        from .ui.home_page import HomePage
+        from .ui.single_download_dialog import SingleDownloadDialog
+        from .ui.track_search_page import TrackSearchPage
+        from .ui.track_dashboard import TrackDashboard
+
+        app = QApplication.instance() or QApplication([])
+        player = QMediaPlayer(app)
+        audio = QAudioOutput(app)
+        player.setAudioOutput(audio)
+        player.stop()
+        player.setAudioOutput(None)
+        player.deleteLater()
+        audio.deleteLater()
+        return "search, review dashboard and Qt media controls available"
+
+    check("track search and playback", review_and_search)
+
     def update_verifier():
         from .updater import verify_signature
 
