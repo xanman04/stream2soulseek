@@ -149,6 +149,17 @@ def update_appearance() -> dict:
     return colors
 
 
+DISPLAY_FONT = "Clash Display"  # headings only, and only where the user has installed it: S2S does not ship it
+
+
+def display_font_family() -> str:
+    """The heading typeface when it is installed on this computer, else "" (headings keep the system font).
+
+    Clash Display's licence does not let S2S redistribute the font files in its source or installers, so it is used
+    only when the user has installed it themselves."""
+    return DISPLAY_FONT if DISPLAY_FONT in QFontDatabase.families() else ""
+
+
 def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None) -> None:
     """A quiet, consistent native-widget theme, following the current system's light/dark palette."""
     app = app or QApplication.instance()
@@ -186,7 +197,10 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     previous = app.property("s2sStylesheet") or ""
     existing = app.styleSheet().replace(previous, "") if previous else app.styleSheet()
     c = colors
-    stylesheet = f"""
+    display = display_font_family()
+    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle {{ font-family: "{display}"; }}' + chr(10)
+                     if display else "")
+    stylesheet = display_rules + f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}
 QWidget#sidebar {{ background: {c['side']}; border-right: 1px solid {c['border']}; }}
 QLabel#appWordmark {{ font-size: 23px; font-weight: 700; letter-spacing: 1px; }}
