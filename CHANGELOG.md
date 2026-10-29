@@ -1,35 +1,27 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 — 2026-10-29
 
-- Page titles, section headings (Home sections, card titles, "Needs attention", the track name in Review) and the
-  S2S wordmark use Clash Display, shipped unmodified with S2S under the ITF Free Font License (its text is included).
-  Body text, buttons and tables keep the system font.
-- You only choose one folder: your tracklist folder. S2S now creates Soulseek's own download folder for you in its
-  per-user data folder ("Soulseek downloads"). It can still be changed, under the new Settings > Advanced tab, which
-  also holds the archive subfolder, ffprobe path and slskd connection settings. Existing choices are kept.
-- Home: every recent playlist is a tile in its service's colour with the service's mark. S2S no longer fetches or
-  expects playlist cover art, and "No cover available" is gone.
-- Downloads: the Free search list in the repair panel keeps the file name readable in a narrow window (length, size
-  and availability are in the line under the list), and the "Needs attention" list no longer cuts off "What happened".
-- Sidebar: it never scrolls. On shorter windows it steps down through tighter layouts (smaller rows, one saved
-  transfer on a single line, then the playlist steps in a menu) so Streaming services, the Soulseek connection and
+- A redesigned look. Page titles, section headings and the S2S wordmark use Clash Display, shipped unmodified with
+  S2S under the ITF Free Font License (its text is included); body text keeps the system font. Navigation has
+  consistent line icons and clear active states, and Home shows each recent playlist as a tile in its service's
+  colour with the service's mark (S2S no longer fetches or expects cover art).
+- The sidebar never scrolls. On shorter windows it steps down through tighter layouts (smaller rows, one saved
+  transfer on a single line, then the playlist steps in a menu), so Streaming services, the Soulseek connection and
   Settings are always fully visible.
-- Downloads: a track that is stuck or failed can now be repaired from the same panel using Free search, which returns
+- You only choose one folder: your tracklist folder. S2S creates Soulseek's own download folder for you in its
+  per-user data folder ("Soulseek downloads"). It can still be changed under the new Settings > Advanced tab, which
+  also holds the archive subfolder, ffprobe path and slskd connection settings. Existing choices are kept.
+- Downloads: a track that is stuck or failed can be repaired from the same panel using Free search, which returns
   every file Soulseek finds with no recording or format rules applied. Choosing one asks you to confirm it, warns that
   the recording, version and format are yours to judge, and then copies it for that same track. It can never be part
-  of an automatic backup, and it is recorded as a manual choice.
-- Refreshed the native sidebar, Home and individual-track search pages with consistent line icons, clear
-  navigation states, compact Home actions and grouped search controls. Sidebar sections scroll at smaller
-  heights while connection and Settings controls remain available.
-- Home displays provider-supplied playlist artwork with a local cache and a service-mark fallback. Existing
-  saved playlists can acquire artwork from connected services without changing their transfers. Cached
-  images and account data are excluded from release bundles.
-
-- Free search supports selecting multiple formats together. Active formats and filters appear as removable
-  chips beside Filters, wrapping on smaller windows. Removing a chip clears only that setting; all filtering
-  stays local to the returned results.
+  of an automatic backup, and it is recorded as a manual choice. The list keeps the file name readable in a narrow
+  window, and "Needs attention" no longer cuts off "What happened".
+- Free search supports selecting multiple formats together. Active formats and filters appear as removable chips
+  beside Filters, wrapping on smaller windows. Removing a chip clears only that setting.
 - The updater download bar is tall enough to display its percentage without clipping.
+- Saved data upgrades automatically on first start (schema 8). Going back to an older version afterwards is not
+  supported.
 
 ## 1.5.0 — 2026-10-29
 
