@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Search recognises tracks you added to your tracklist folder yourself, even if they are not named exactly "Title -
+  Artist": a track number, "feat." marker or a plain "Original Mix" in the file name no longer hides the match, and
+  a file with a different name is recognised from its own tags (same title and version, the track's artist, and a
+  length within 3 seconds). A VIP, remix or other version still counts as a different recording. Tags are read once
+  and remembered.
 - Downloads: when you confirm a replacement file for a track under Needs attention, the track leaves that list at
   once (no flicker or wait for the next refresh) and shows "Replacing…". If the new download fails or cannot be
   queued, the track appears under Needs attention again.

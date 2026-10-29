@@ -235,16 +235,77 @@ def find_existing(destination: str, track: AppleTrack) -> list[Path]:
     return out
 
 
+_FEAT = {"feat", "ft", "featuring"}
+
+
+def _clean_words(words: list[str], *, number: bool = False) -> list[str]:
+    """Words that say nothing about WHICH recording: a leading track number (file names only), "feat." markers and
+    a plain "Original Mix". Everything else (VIP, remix, extended, radio edit, live...) is kept, because it does."""
+    if number and len(words) > 1 and words[0].isdigit() and len(words[0]) <= 3:
+        words = words[1:]
+    words = [w for w in words if w not in _FEAT]
+    out, i = [], 0
+    while i < len(words):
+        if words[i:i + 2] == ["original", "mix"]:
+            i += 2
+            continue
+        out.append(words[i])
+        i += 1
+    return out
+
+
 def library_names(destination: str) -> list[list[str]]:
     """Read-only: the word lists of the file names in a library folder, read once for many tracks."""
     d = Path(destination)
     if not d.is_dir():
         return []
     try:
-        return [_norm(p.stem).split() for p in sorted(d.iterdir())
+        return [_clean_words(_norm(p.stem).split(), number=True) for p in sorted(d.iterdir())
                 if p.is_file() and not p.name.endswith(PARTIAL_SUFFIX)]
     except OSError:
         return []
+
+
+def library_tags(destination: str, store, settings, cancel=None, *, runner=None) -> list[tuple[list[str], list[str], float]]:
+    """Read-only: (title words, artist words, seconds) from the tags of each audio file in a library folder.
+
+    Lets a file you added yourself be recognised by what it IS, not only by what it is called. Tags are cached by
+    path and file signature, so a folder is read once. Files that cannot be read are simply left out."""
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .local_files import _probe, _signature
+
+    d = Path(destination)
+    if not d.is_dir() or not getattr(settings, "ffprobe_path", ""):
+        return []
+    run = runner or subprocess.run
+    try:
+        files = [p for p in sorted(d.iterdir()) if p.is_file() and not p.name.endswith(PARTIAL_SUFFIX)
+                 and p.suffix.lower().lstrip(".") in AUDIO_SUFFIXES]
+    except OSError:
+        return []
+
+    def read(path):
+        if cancel is not None and cancel.is_set():
+            return None
+        try:
+            stat = path.stat()
+            signature = f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}"
+            meta = store.cached_local_audio(str(path), signature)
+            if meta is None:
+                meta = _probe(path, settings.ffprobe_path, run)
+                store.cache_local_audio(str(path), signature, meta)
+            title, artist = _clean_words(_norm(meta.get("title", "")).split()), _norm(meta.get("artist", "")).split()
+            return (title, artist, float(meta.get("duration") or 0)) if title and artist else None
+        except (OSError, ValueError, KeyError, TypeError, StopIteration, subprocess.SubprocessError):
+            return None
+
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="library-tags") as pool:
+        return [entry for entry in pool.map(read, files) if entry is not None]
+
+
+AUDIO_SUFFIXES = {"mp3", "flac", "wav", "aiff", "aif", "m4a", "ogg", "opus", "aac", "wma"}
 
 
 def _without(words: list[str], part: list[str]) -> list[str] | None:
@@ -262,13 +323,27 @@ def in_library(track: AppleTrack, names: list[list[str]]) -> bool:
     "Title - Artist", "Artist - Title" and "Title (Version) - Artist" for a track whose title already carries that
     version all match. Any extra word (a VIP, a remix, a second artist, a track number) means it may be a different
     recording, so it does not match: that track is searched as usual rather than skipped on a guess."""
-    title, artist = _norm(track.name).split(), _norm(track.artist).split()
+    title, artist = _clean_words(_norm(track.name).split()), _clean_words(_norm(track.artist).split())
     if not title or not artist:
         return False
     for words in names:
         rest = _without(words, title)
         if rest is not None and _without(rest, artist) == []:
             return True
+    return False
+
+
+def in_library_by_tags(track: AppleTrack, tagged: list[tuple[list[str], list[str], float]]) -> bool:
+    """True when a file's own tags say it is this recording: the same title (version words included), every word of
+    the track's artist among the file's artists, and, when both lengths are known, within 3 seconds."""
+    title, artist = _clean_words(_norm(track.name).split()), _clean_words(_norm(track.artist).split())
+    if not title or not artist:
+        return False
+    wanted = (track.duration_ms or 0) / 1000
+    for tag_title, tag_artist, seconds in tagged:
+        if tag_title == title and all(word in tag_artist for word in artist):
+            if not wanted or not seconds or abs(seconds - wanted) <= 3:
+                return True
     return False
 
 

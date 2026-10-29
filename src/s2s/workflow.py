@@ -232,6 +232,8 @@ def search_and_match(
         cache = _search.SHARED_CACHE  # no query is re-sent while its answer is cached
     done_ids = store.completed_apple_ids(imp.destination)
     folder_names = organize.library_names(imp.destination)
+    on_stage("Checking your tracklist folder…")
+    folder_tags = organize.library_tags(imp.destination, store, settings, cancel)
     from .local_files import LocalIndex
     on_stage("Checking your existing Soulseek downloads…")
     local_index = LocalIndex(store, settings, cancel)
@@ -311,7 +313,7 @@ def search_and_match(
             break
         if t.apple_id in done_ids:
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IMPORTED))
-        elif organize.in_library(t, folder_names):
+        elif organize.in_library(t, folder_names) or organize.in_library_by_tags(t, folder_tags):
             finish(MatchResult(t, MatchStatus.SKIPPED, None, note=ALREADY_IN_FOLDER))
         else:
             local = local_index.find(t)
