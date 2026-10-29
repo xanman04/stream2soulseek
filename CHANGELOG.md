@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Free search is much quicker: it ends as soon as answers have stopped arriving (4 seconds of quiet) or after 15
+  seconds at most, instead of always waiting out the full search timeout. Quick search and playlist searches are
+  unchanged.
 - If an older S2S meets data that a newer S2S already upgraded, it now says so in plain words (and where to get the
   latest version) instead of showing a technical error. Nothing is changed.
 
