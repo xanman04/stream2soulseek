@@ -63,22 +63,34 @@ class SettingsDialog(QDialog):
         self.test_result = QLabel("")
         self.test_result.setWordWrap(True)
 
-        form = QFormLayout()
-        form.addRow("slskd URL (loopback):", self.url)
-        form.addRow("slskd API key:", self.key)
-        form.addRow("", self.clear_key)
-        form.addRow(self.folder_help)
-        form.addRow("Soulseek downloads folder:", self._with_browse(self.downloads, True))
-        form.addRow("Originals archive subfolder:", self.archive)
+        self.folder_help.setText(
+            "Soulseek saves each download in its own user and album folders. S2S keeps those out of the way in a "
+            "folder it creates for you, then copies the finished tracks into your tracklist folder (chosen on the "
+            "Choose tracklist folder step). Change this only if you want the raw downloads somewhere else. "
+            "Originals are kept in the archive subfolder after copying.")
+        self.general_help = QLabel("Your tracklist folder is chosen on the Choose tracklist folder step. "
+                                   "Soulseek's own download folder is under Advanced.")
+        self.general_help.setWordWrap(True)
+        form = QFormLayout()  # General
+        form.addRow(self.general_help)
         form.addRow("", self.auto_import)
-        form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
         form.addRow("Extended search timeout (s):", self.timeout)
-        form.addRow(self.test_btn, self.test_result)
+        advanced_form = QFormLayout()  # Advanced
+        advanced_form.addRow(self.folder_help)
+        advanced_form.addRow("Soulseek download folder:", self._with_browse(self.downloads, True))
+        advanced_form.addRow("Originals archive subfolder:", self.archive)
+        advanced_form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
+        advanced_form.addRow("slskd URL (loopback):", self.url)
+        advanced_form.addRow("slskd API key:", self.key)
+        advanced_form.addRow("", self.clear_key)
+        advanced_form.addRow(self.test_btn, self.test_result)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.accepted.connect(self.save)
         box.rejected.connect(self.reject)
         general = QWidget()
         general.setLayout(form)
+        advanced = QWidget()
+        advanced.setLayout(advanced_form)
         self.rules = MatchingRulesWidget(s.match_policy, layouts=s.rule_layouts)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -109,6 +121,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(general, "General")
         self.tabs.addTab(scroll, "Matching rules")
         self.tabs.addTab(sharing, "Sharing")
+        self.tabs.addTab(advanced, "Advanced")
         if matching:
             self.tabs.setCurrentIndex(1)
         lay = QVBoxLayout(self)
@@ -206,11 +219,11 @@ class SettingsDialog(QDialog):
                 if problem:
                     raise ValueError(f"Sharing: {problem}")
             for value, edit, label in ((new.slskd_url, self.url, "slskd URL"),
-                                       (new.slskd_downloads_dir, self.downloads, "Soulseek downloads folder")):
+                                       (new.slskd_downloads_dir, self.downloads, "Soulseek download folder")):
                 if not value:
-                    self.tabs.setCurrentIndex(0)
+                    self.tabs.setCurrentIndex(self.tabs.count() - 1)  # Advanced
                     edit.setFocus()
-                    raise ValueError(f'The "{label}" field on the General tab is empty. Fill it in, or press '
+                    raise ValueError(f'The "{label}" field on the Advanced tab is empty. Fill it in, or press '
                                      "Cancel to keep your saved settings.")
             if sanitize_component(new.archive_dir_name) != new.archive_dir_name or new.archive_dir_name in (".", ".."):
                 raise ValueError("The archive subfolder must be a plain folder name such as OLD.")

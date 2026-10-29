@@ -79,7 +79,28 @@ def settings_path() -> Path:
     return app_dir() / "settings.json"
 
 
+def default_downloads_dir() -> Path:
+    """Where Soulseek's own download folders go unless the user changes it under Settings > Advanced."""
+    return app_dir_path() / "Soulseek downloads"
+
+
+def _with_default_downloads(s: Settings) -> Settings:
+    """S2S keeps Soulseek's raw download folders out of the way by itself; the user only chooses a tracklist folder."""
+    if not s.slskd_downloads_dir.strip():
+        folder = default_downloads_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # slskd's start-up reports a folder it cannot create
+        s.slskd_downloads_dir = str(folder)
+    return s
+
+
 def load_settings() -> Settings:
+    return _with_default_downloads(_read_settings())
+
+
+def _read_settings() -> Settings:
     path = settings_path()
     if not path.exists():
         return Settings()

@@ -111,7 +111,7 @@ def test_settings_sharing_tab_add_remove_save(layout, tmp_path, monkeypatch):
     store.close()
 
 
-def test_empty_required_field_names_it_and_shows_general_tab(tmp_path, monkeypatch):
+def test_empty_required_field_names_it_and_shows_the_advanced_tab(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
 
     QApplication.instance() or QApplication([])
@@ -127,6 +127,6 @@ def test_empty_required_field_names_it_and_shows_general_tab(tmp_path, monkeypat
     dlg = settings_dialog.SettingsDialog(ctx, matching=True)
     dlg.downloads.setText("")
     dlg.save()
-    assert errors and "Soulseek downloads folder" in errors[0] and dlg.tabs.currentIndex() == 0
+    assert errors and "Soulseek download folder" in errors[0] and dlg.tabs.tabText(dlg.tabs.currentIndex()) == "Advanced"
     assert ctx.settings.slskd_downloads_dir == str(tmp_path / "dl")  # nothing saved
     store.close()

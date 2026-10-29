@@ -22,54 +22,16 @@ def _png():
     return bytes(buffer.data())
 
 
-def test_home_backfills_prior_import_and_displays_cached_cover_without_repeat_requests(monkeypatch):
-    monkeypatch.setattr(workers, "RUN_INLINE", True)
-    image = _png()
-    monkeypatch.setattr("s2s.artwork.load_cover", lambda _url: image)
-    store = Store(":memory:")
-    iid = store.create_import(Playlist("p1", "Recent mix"), "synthetic-destination")
-    calls = []
-    class Source:
-        name = "Apple Music"
-        def is_connected(self):
-            return True
-        def list_playlists(self):
-            calls.append(1)
-            return [Playlist("p1", "Recent mix", artwork_url="https://is1.mzstatic.com/cover.jpg")]
-    ctx = SimpleNamespace(store=store, secrets=object(), playlist_sources=lambda: [Source()])
-    page = HomePage(ctx)
-    try:
-        assert not page._cover_buttons[iid].cover.isNull()
-        assert store.get_import(iid).artwork_url == "https://is1.mzstatic.com/cover.jpg"
-        page.refresh()
-        assert calls == [1]
-        opened = []
-        page.recent_requested.connect(opened.append)
-        page._cover_buttons[iid].click()
-        assert opened == [iid]
-    finally:
-        page.deleteLater()
-        store.close()
+def test_home_tiles_show_the_service_mark_and_never_cover_art():
+    from s2s.ui.home_page import _RecentPlaylistButton
 
-
-def test_failed_artwork_is_optional_and_home_actions_do_not_expand_to_fill_the_window(monkeypatch):
-    monkeypatch.setattr(workers, "RUN_INLINE", True)
-    monkeypatch.setattr("s2s.artwork.load_cover", lambda _url: None)
-    store = Store(":memory:")
-    iid = store.create_import(Playlist("p1", "Mix", artwork_url="https://i.scdn.co/image/a"), "dest")
-    page = HomePage(SimpleNamespace(store=store, secrets=None))
-    try:
-        page.resize(1100, 1300)
-        page.show()
-        QApplication.processEvents()
-        assert page._cover_buttons[iid].cover.isNull()
-        assert page.choose_panel.height() < 200
-        assert page.find_panel.height() < 200
-        assert page._cover_buttons[iid].width() == 184
-    finally:
-        page.close()
-        page.deleteLater()
-        store.close()
+    for playlist_id, service in (("spotify:playlist:1", "spotify"), ("soundcloud:playlist:2", "soundcloud"), ("3", "apple")):
+        record = SimpleNamespace(id="i", playlist_id=playlist_id, playlist_name="A very long recent playlist title "
+                                 "that wraps onto two lines", artwork_url="https://is1.mzstatic.com/cover.jpg")
+        tile = _RecentPlaylistButton(record, 12)
+        assert tile._service == service and tile.width() == 184 and tile.height() == 264
+        assert not hasattr(tile, "set_cover") and not hasattr(tile, "cover")  # no artwork path at all
+        tile.grab()  # paints without error
 
 
 def test_sidebar_keeps_navigation_icons_and_connection_footer_accessible_when_expanded():

@@ -251,8 +251,8 @@ class TransfersPage(QWidget):
         ph = self.problems.horizontalHeader()
         ph.setStretchLastSection(True)
         ph.setSectionResizeMode(P_NUM, QHeaderView.ResizeMode.ResizeToContents)
-        ph.setSectionResizeMode(P_TRACK, QHeaderView.ResizeMode.Interactive)
-        self.problems.setColumnWidth(P_TRACK, 360)
+        ph.setSectionResizeMode(P_TRACK, QHeaderView.ResizeMode.Stretch)  # the track name takes what the status leaves
+        ph.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # "What happened" is never cut off
         self.problem_help = QLabel("")
         self.problem_help.setWordWrap(True)
         self.fix_btn = QPushButton("Find another source…")
