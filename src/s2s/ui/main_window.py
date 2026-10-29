@@ -67,6 +67,8 @@ class MainWindow(QMainWindow):
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
         self._queueing = False
+        self._aborting_search = False
+        self._starting_playlist = False
         self._session_snapshots = {}
         self._background_on_close = autostart
         self._force_exit = False
@@ -130,26 +132,24 @@ class MainWindow(QMainWindow):
         self.soulseek_status = self.sidebar.soulseek_label
         self.soulseek.status_changed.connect(self._soulseek_status)
 
-        file_menu = self.menuBar().addMenu("&File")
-        act = QAction("Settings...", self)
-        act.triggered.connect(self.open_settings)
-        file_menu.addAction(act)
-        login_act = QAction("Soulseek login...", self)
-        login_act.triggered.connect(lambda: self.soulseek.prompt())
-        file_menu.addAction(login_act)
+        tools_menu = QMenu(self.sidebar.tools_btn)
         history_act = QAction("Import history / outstanding tracks...", self)
         history_act.triggered.connect(self.open_history)
-        file_menu.addAction(history_act)
+        tools_menu.addAction(history_act)
         quit_act = QAction("Quit S2S (pause transfers)", self)
         quit_act.triggered.connect(self.quit_application)
-        file_menu.addAction(quit_act)
-        help_menu = self.menuBar().addMenu("&Help")
-        report_act = QAction("Report a problem...", self)
-        report_act.triggered.connect(self.report_problem)
-        help_menu.addAction(report_act)
+        quit_act.setShortcut(QKeySequence.StandardKey.Quit)
+        self.addAction(quit_act)
         update_act = QAction("Check for updates...", self)
         update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
-        help_menu.addAction(update_act)
+        tools_menu.addAction(update_act)
+        support_act = QAction("Support S2S — Coming soon", self)
+        support_act.setEnabled(False)
+        tools_menu.addAction(support_act)
+        tools_menu.addSeparator()
+        tools_menu.addAction(quit_act)
+        self.sidebar.tools_btn.setMenu(tools_menu)
+        self.sidebar.report_requested.connect(self.report_problem)
 
         self.sidebar.step_selected.connect(self.go_step)
         self.sidebar.service_selected.connect(self._open_service)
@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         self.home.free_search_requested.connect(lambda: self.open_track_search("free"))
         self.home.recent_requested.connect(self.resume_import)
         self.track_search.download_requested.connect(self.review_individual_download)
+        self.track_search.search_cancelled.connect(self.show_home)
         # Review has no Next: "Confirm selection" is the only way on (it opens Downloads by itself).
         self.frames[STEP_REVIEW].next_btn.setVisible(False)
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
@@ -190,6 +191,7 @@ class MainWindow(QMainWindow):
         self.destination.settings_requested.connect(self.open_settings)
         self.search.state_changed.connect(self.refresh_navigation)
         self.search.search_finished.connect(self._search_finished)
+        self.search.cancel_requested.connect(self.cancel_playlist_search)
         self.review.approved.connect(self._approved)
         if hasattr(self.review, "rerun_search_requested"):  # stale matching rules: search again
             self.review.rerun_search_requested.connect(self._rerun_search)
@@ -197,7 +199,7 @@ class MainWindow(QMainWindow):
             self.review.downloads_requested.connect(lambda: self.go_step(STEP_TRANSFERS))
         self.review.queueing_changed.connect(self._queueing_changed)
         self.transfers.find_another_source.connect(self.start_replacement)
-        self.transfers.new_import_requested.connect(self.start_another_import)
+        self.transfers.new_import_requested.connect(self.request_new_playlist)
         self.transfers.cancel_import_requested.connect(self.cancel_import)
         self.transfers.history_requested.connect(self.open_history)
         self.transfers.settings_requested.connect(self.open_settings)
@@ -245,13 +247,13 @@ class MainWindow(QMainWindow):
     def start_playlist_from_home(self) -> None:
         if self._closing or self._queueing:
             return
-        if self.search._running:
+        if self._aborting_search:
+            self.statusBar().showMessage("Stopping the cancelled search…")
+        elif self.search._running:
             self.go_step(STEP_SEARCH)
             self.statusBar().showMessage("Finish or cancel the current playlist search before choosing another playlist.")
-        elif self.ctx.approval_id:
-            self.transfers.request_new_import()
         else:
-            self.go_step(STEP_PLAYLIST)
+            self.request_new_playlist()
 
     def ask_individual_download(self, file, mode: str) -> str | None:
         """Return the destination only after the user confirms this exact file."""
@@ -548,6 +550,15 @@ class MainWindow(QMainWindow):
         return False
 
     def _search_finished(self, cancelled: bool) -> None:
+        if self._closing:
+            return
+        if self._aborting_search:
+            self._aborting_search = False
+            self.home.choose_button.setEnabled(True)
+            self.sidebar.workflow_toggle.setEnabled(True)
+            self.sidebar.steps.setEnabled(True)
+            self._when_refresh_idle(self._finish_cancelled_search)
+            return
         viewing_search = self.stack.currentWidget() is self.frames[STEP_SEARCH]
         self.review.load(self.ctx.results, self.ctx.destination or "")
         self.refresh_navigation()
@@ -608,6 +619,39 @@ class MainWindow(QMainWindow):
         box.exec()
         return box.clickedButton() is go
 
+    def ask_cancel_search(self) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Question, "Cancel this playlist transfer?",
+                          "Stop searching and return Home? This unfinished selection will be cleared.\n\n"
+                          "Your files and other saved transfers will be kept.", parent=self)
+        go = box.addButton("Cancel transfer", QMessageBox.ButtonRole.DestructiveRole)
+        stay = box.addButton("Keep searching", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is go
+
+    def cancel_playlist_search(self) -> None:
+        if self._closing or self._queueing or self._aborting_search or not self.ask_cancel_search():
+            return
+        if not self.search._running:  # the worker may have finished while the question was open
+            self._when_refresh_idle(self._finish_cancelled_search)
+            return
+        self._aborting_search = True
+        self.search.cancel(discard=True)
+        self.search.cancel_btn.setEnabled(False)
+        self.show_home()
+        self.home.choose_button.setEnabled(False)
+        self.sidebar.workflow_toggle.setEnabled(False)
+        self.sidebar.steps.setEnabled(False)
+        self.statusBar().showMessage("Stopping the cancelled search…")
+
+    def _finish_cancelled_search(self) -> None:
+        if self._closing:
+            return
+        self.start_another_import()
+        self.show_home()
+        self.statusBar().showMessage("Playlist transfer cancelled. Ready to start again.")
+
     def cancel_import(self) -> None:
         """Stop every unfinished download of this playlist, then start over (the only way back once confirmed)."""
         ctx = self.ctx
@@ -615,6 +659,7 @@ class MainWindow(QMainWindow):
         if not iid or ctx.approval_id is None or self._queueing or not self.ask_cancel_import():
             return
         self.transfers.stop()
+        self._queueing_changed(True)
 
         def work():
             with ctx.download_service() as svc:
@@ -625,12 +670,14 @@ class MainWindow(QMainWindow):
             transfer_sessions.dismiss(ctx.store, iid)
 
         def done(_result=None) -> None:
+            self._queueing_changed(False)
             if ctx.import_id != iid:
                 return
             self._when_refresh_idle(self.start_another_import)
             self.statusBar().showMessage("Downloads cancelled. Choose a playlist to start again.")
 
         def failed(exc) -> None:
+            self._queueing_changed(False)
             self.transfers.start()
             show_error(self, "Cancel downloads", "Some downloads could not be stopped, so nothing was "
                        f"reset. Try again in a moment.\n\n{ctx.describe(exc)}")
@@ -711,6 +758,7 @@ class MainWindow(QMainWindow):
         self.ctx.destination = None
         self.destination.reset()
         self.search._set_running(False)
+        self.search._auto_key = None
         self.search.show_results([])
         self.search.info.setText("Choose a playlist and a tracklist folder first.")
         self.review.set_results([], "")
@@ -722,6 +770,23 @@ class MainWindow(QMainWindow):
         if self.service.is_connected():
             self.playlists.load_playlists()
         self.statusBar().showMessage("Ready for another import. Choose a playlist.")
+
+    def request_new_playlist(self) -> None:
+        """Detach the foreground selection; saved downloads remain owned by the background monitor."""
+        if self._starting_playlist or self._queueing or self._closing or self.search._running:
+            return
+        self._starting_playlist = True
+        self._navigation_generation += 1
+        self.transfers.stop()
+
+        def ready():
+            self._starting_playlist = False
+            if self._closing:
+                return
+            self.start_another_import()
+            self.statusBar().showMessage("Choose a playlist. Earlier transfers continue in the background.")
+
+        self._when_refresh_idle(ready)
 
     def startup_checks(self) -> None:
         """Downloads folder first (slskd needs it), then the stored Soulseek login or a login popup."""

@@ -225,6 +225,9 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     stylesheet = display_rules + f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}
 QWidget#sidebar {{ background: {c['side']}; border-right: 1px solid {c['border']}; }}
+QPushButton#appBrand {{ background: transparent; border: 1px solid transparent; padding: 0; }}
+QPushButton#appBrand:focus {{ border-color: {c['focus']}; }}
+QPushButton#sidebarSupport {{ padding: 4px 9px; font-size: 12px; min-height: 18px; }}
 QLabel#appWordmark {{ font-size: 23px; font-weight: 700; letter-spacing: 1px; }}
 QLabel#navHeading {{ color: {c['muted']}; font-size: 11px; font-weight: 600;
     margin: 10px 4px 3px 4px; }}

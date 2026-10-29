@@ -822,25 +822,8 @@ class TransfersPage(QWidget):
             record = None
         return (record.playlist_name if record else "") or "this playlist"
 
-    def ask_start_another(self, name: str, active: int) -> bool:
-        """Modal question when downloads are still running. True only for Start another. Replaceable in tests."""
-        from PySide6.QtWidgets import QMessageBox
-
-        box = QMessageBox(QMessageBox.Icon.Question, "Finish with this playlist?",
-                          f"Downloads for {name} are still running ({_plural(active, 'track', 'tracks')} not "
-                          "finished). Finish and go back to Choose playlist?\n\nDownloads continue in Soulseek; S2S imports them "
-                          "when you reopen S2S while they are still running.", parent=self)
-        go = box.addButton("Done", QMessageBox.ButtonRole.AcceptRole)
-        stay = box.addButton("Stay here", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(stay)
-        box.setEscapeButton(stay)
-        box.exec()
-        return box.clickedButton() is go
-
     def request_new_import(self) -> None:
-        """'Start another playlist' (Step 6's button): asks first while anything is still running or queued."""
-        if self._active > 0 and not self.ask_start_another(self._import_name(), self._active):
-            return
+        """Begin another foreground workflow; the background monitor retains this session."""
         self.new_import_requested.emit()
 
     def retry_selected(self) -> None:
@@ -872,6 +855,8 @@ class TransfersPage(QWidget):
         if self._states.get((aid, apple_id)) not in (TransferState.QUEUED, TransferState.IN_PROGRESS):
             show_error(self, "Cancel", "Only queued or running downloads can be cancelled.")
             return
+        if not self.ask_cancel_selected(apple_id):
+            return
         ctx = self.ctx
 
         def work():
@@ -879,6 +864,19 @@ class TransfersPage(QWidget):
                 svc.cancel(aid, apple_id)
 
         run_async(self, work, lambda _r: self.refresh(), lambda e: show_error(self, "Cancel", ctx.describe(e)))
+
+    def ask_cancel_selected(self, apple_id: str) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+
+        name = self._names.get(apple_id, "this track")
+        box = QMessageBox(QMessageBox.Icon.Question, "Cancel this download?",
+                          f"Stop downloading {name}? Other tracks and transfers will keep running.", parent=self)
+        stop = box.addButton("Cancel download", QMessageBox.ButtonRole.DestructiveRole)
+        stay = box.addButton("Keep downloading", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is stop
 
     def process_now(self) -> None:
         """Manual 'Copy finished downloads': refresh, import finished files, archive what is safe."""

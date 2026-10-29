@@ -142,12 +142,14 @@ class TrackStatusBar(QWidget):
 
 class SearchPage(QWidget):
     search_finished = Signal(bool)  # cancelled?
+    cancel_requested = Signal()
     state_changed = Signal()  # a search started or stopped
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ctx = ctx
         self._cancel = threading.Event()
+        self._discard_cancelled = False
         self._running = False
         self._row_of: dict[str, int] = {}
         self._track_position: dict[str, int] = {}
@@ -239,7 +241,7 @@ class SearchPage(QWidget):
         lay.addWidget(self.retry_btn, 0, Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(self.table, 1)
         self.start_btn.clicked.connect(self.start)
-        self.cancel_btn.clicked.connect(self.cancel)
+        self.cancel_btn.clicked.connect(self.cancel_requested)
         self.retry_btn.clicked.connect(lambda: self.start(retry=True))
         self.rules_btn.clicked.connect(self.change_rules)
         self.layout_combo.activated.connect(self._layout_chosen)
@@ -553,7 +555,8 @@ class SearchPage(QWidget):
 
         run_async(self, work, self._finished, self._failed)
 
-    def cancel(self) -> None:
+    def cancel(self, *, discard: bool = False) -> None:
+        self._discard_cancelled = discard
         self._cancel.set()
         self.info.setText("Cancelling...")
 
@@ -578,6 +581,12 @@ class SearchPage(QWidget):
         self.state_changed.emit()
 
     def _finished(self, payload: tuple) -> None:
+        if self._discard_cancelled:
+            self._discard_cancelled = False
+            self._retry_old = None
+            self._set_running(False)
+            self.search_finished.emit(True)
+            return
         requested = getattr(self, "_request_context", None)
         current = (self.ctx.playlist.id if self.ctx.playlist else None, self.ctx.destination,
                    tuple(t.apple_id for t in self.ctx.tracks))
@@ -631,6 +640,12 @@ class SearchPage(QWidget):
         self.search_finished.emit(cancelled)
 
     def _failed(self, exc: object) -> None:
+        if self._discard_cancelled:
+            self._discard_cancelled = False
+            self._retry_old = None
+            self._set_running(False)
+            self.search_finished.emit(True)
+            return
         self._set_running(False)
         if self._retry_old is not None:
             for old in self._retry_old.values():
