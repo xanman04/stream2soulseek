@@ -8,9 +8,10 @@ workflow and must not change as a side effect of visual work.
 - Use the light/dark palettes in `ui/theme.py`; do not introduce independent page palettes.
 - Use system UI typography, a 26px page heading, a 17px section heading and compact body copy.
 - Navigation uses consistent line icons and bordered buttons, with a filled active destination.
-  Keep the sidebar 264 logical pixels wide and its density stable as windows grow. Home, the
-  playlist steps, Find a track and saved transfers scroll on smaller windows; Streaming services, the
-  Soulseek connection and Settings are pinned at the bottom and always fully visible.
+  Keep the sidebar 264 logical pixels wide and never let it scroll. It steps down a ladder of tighter layouts
+  until everything fits: slightly smaller rows, one saved transfer on a single line with a count, then the
+  playlist steps in a menu opened from the Playlist transfer button. Streaming services, the Soulseek connection
+  and Settings are always fully visible at the bottom.
 - Home uses square provider artwork, up to two title lines and secondary service/track information.
   Missing images use an honest service-mark fallback. Never invent artwork or listening history.
   Cache provider images in per-user app data, independently of audio files and release assets.

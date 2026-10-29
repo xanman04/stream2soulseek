@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Sidebar: Streaming services, the Soulseek connection and Settings are always fully visible at the bottom; only the
-  upper part (Home, steps, Find a track, Transfers) scrolls on short windows. Rows are slightly more compact.
+- Sidebar: it never scrolls. On shorter windows it steps down through tighter layouts (smaller rows, one saved
+  transfer on a single line, then the playlist steps in a menu) so Streaming services, the Soulseek connection and
+  Settings are always fully visible.
 - Downloads: a track that is stuck or failed can now be repaired from the same panel using Free search, which returns
   every file Soulseek finds with no recording or format rules applied. Choosing one asks you to confirm it, warns that
   the recording, version and format are yours to judge, and then copies it for that same track. It can never be part
