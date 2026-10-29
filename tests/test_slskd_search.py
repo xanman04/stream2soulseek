@@ -415,3 +415,31 @@ def test_build_queries(name, artist, expected):
     assert got == expected
     assert len(got) <= 8 and len(set(got)) == len(got)
     assert all(len(t) >= 2 for q in got for t in q.split())
+
+
+def test_a_search_that_has_answers_and_goes_quiet_stops_early_instead_of_waiting_out_the_budget():
+    q = build_queries(TRACK)[0]
+
+    class Growing(FakeSlskd):
+        def __call__(self, request):
+            response = super().__call__(request)
+            path = request.url.path.removeprefix("/api/v0")
+            if request.method == "GET" and not path.endswith("/responses"):
+                import json as _json
+
+                body = _json.loads(response.content)
+                n = self.polls[path.split("/")[2]]
+                body["responseCount"] = min(n, 3) * 10  # answers arrive for 3 polls, then stop
+                return httpx.Response(200, json=body)
+            return response
+
+    fake = Growing({q: [("u", "f.mp3", 1)]}, never_complete=True, finalize_after=1)
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    out = run(fake, timeout_s=60, clock=lambda: now[0], sleep=sleep, poll_interval=1, settle_s=4, queries=[q])
+    assert [f.filename for f in out] == ["f.mp3"]
+    assert now[0] < 12  # nowhere near the 60 s budget
+    assert [m for m, _ in fake.calls()].count("PUT") == 1  # it stopped the search itself

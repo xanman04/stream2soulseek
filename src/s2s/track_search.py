@@ -64,6 +64,10 @@ def _client(ctx):
     return factory()
 
 
+FREE_SEARCH_MAX_S = 15  # Free search is one query: peers answer in the first seconds, so it never waits out a long budget
+FREE_SEARCH_SETTLE_S = 4  # ...and it ends once answers have stopped arriving for this long
+
+
 def _search_files(
     ctx, query: str, *, cancel: threading.Event | None, raw: bool, track: AppleTrack | None = None,
     queries: list[str] | None = None,
@@ -90,7 +94,8 @@ def _search_files(
             client,
             track,
             cancel=event,
-            timeout_s=max(1, int(settings.search_timeout_s)),
+            timeout_s=min(FREE_SEARCH_MAX_S, max(1, int(settings.search_timeout_s))) if raw else max(1, int(settings.search_timeout_s)),
+            settle_s=FREE_SEARCH_SETTLE_S if raw else None,
             response_limit=settings.response_limit,
             file_limit=settings.file_limit,
             fast_timeout_s=min(8, max(1, int(settings.search_timeout_s))) if not raw else None,

@@ -807,6 +807,7 @@ def run_search(
     check_empty: bool = False,
     cache: SearchCache | None = None,
     refresh_cached: bool = False,
+    settle_s: float | None = None,
 ) -> list[RemoteFile]:
     """Try broader queries until the caller's candidate-pool target is met.
 
@@ -828,7 +829,7 @@ def run_search(
 
     def attempt(query: str, budget: int) -> list[RemoteFile]:
         found = _run_one(client, query, cancel, budget, response_limit, file_limit,
-                         poll_interval, sleep, new_id, clock)
+                         poll_interval, sleep, new_id, clock, settle_s)
         if check_empty and not found and not _client_connected(client, default=True):
             raise SearchInterrupted("The Soulseek connection dropped during the search.")
         return found
@@ -935,11 +936,12 @@ def _post_search(client, search_id, query, cancel, timeout_s, response_limit, fi
 
 
 def _run_one(client, query, cancel, timeout_s, response_limit, file_limit, poll_interval, sleep, new_id,
-             clock):
+             clock, settle_s=None):
     search_id = new_id()
     try:
         _start_when_free(client, search_id, query, cancel, timeout_s, response_limit, file_limit, sleep, clock)
         deadline = clock() + timeout_s
+        seen_responses, last_change = 0, clock()
         while True:
             if cancel.is_set():
                 _quiet(client.stop_search, search_id)
@@ -948,7 +950,12 @@ def _run_one(client, query, cancel, timeout_s, response_limit, file_limit, poll_
             complete = status.get("isComplete") or "completed" in str(status.get("state") or "").lower()
             if complete and ("endedAt" not in status or status["endedAt"]):
                 break
-            if clock() >= deadline:
+            responses = int(status.get("responseCount") or 0)
+            if responses != seen_responses:
+                seen_responses, last_change = responses, clock()
+            # a search that already has answers and has gone quiet is done: waiting out the whole budget adds nothing
+            settled = settle_s is not None and responses > 0 and clock() - last_change >= settle_s
+            if settled or clock() >= deadline:
                 client.stop_search(search_id)
                 status = _wait_for_final_results(client, search_id, cancel, poll_interval, sleep, clock)
                 break
