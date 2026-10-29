@@ -218,6 +218,30 @@ def self_test(report_path: str) -> int:
     return 1 if failed else 0
 
 
+NEWER_DATA_MESSAGE = ("Your S2S data was last used by a newer version of S2S than this one, so this older version "
+                      "cannot open it safely and nothing was changed."
+                      f"{chr(10) * 2}Install the latest S2S from "
+                      "https://github.com/xanman04/stream2soulseek/releases/latest and open it again.")
+
+
+def open_store(path):
+    """The saved-data database, or None (after telling the user in plain words) when a newer S2S upgraded it."""
+    from .store import Store, StoreError
+
+    try:
+        return Store(path)
+    except StoreError as exc:
+        if "newer than supported" not in str(exc):
+            raise
+        from PySide6.QtWidgets import QMessageBox
+
+        from . import applog
+
+        applog.get().warning("Cannot open the database: %s", exc)
+        QMessageBox.critical(None, "S2S needs updating", NEWER_DATA_MESSAGE)
+        return None
+
+
 def main() -> int:
     from .updater import prevent_launch_during_update
 
@@ -266,7 +290,9 @@ def main() -> int:
 
     applog.get().info("Startup: page modules loaded at %.3f s", time.perf_counter() - startup_started)
 
-    store = Store(config.db_path())
+    store = open_store(config.db_path())
+    if store is None:
+        return 1
     window = MainWindow(store, SecretStore(), config.load_settings())
     applog.get().info("Startup: window constructed at %.3f s", time.perf_counter() - startup_started)
     applog.set_secrets(window.ctx.secret_values())
