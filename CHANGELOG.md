@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.6.1 — 2026-10-29
 
+- More → Support S2S is marked Coming soon while sponsorship approval is pending.
+- Cancelling a playlist search asks for confirmation, discards the unfinished selection and returns Home.
+  Cancelling a manual search or an individual download also asks first. Starting another playlist leaves
+  saved transfers downloading and importing in the background without a warning about stopping them.
+- The S2S logo opens Home. The sidebar now has Report a Bug and a More menu for history, updates and quitting,
+  replacing the File and Help menu bar. Bug reports open a public GitHub draft for review, with reproduction
+  steps, expected behavior and version information; recent logs are optional. Nothing is submitted automatically.
 - Search recognises tracks you added to your tracklist folder yourself, even if they are not named exactly "Title -
   Artist": a track number, "feat." marker or a plain "Original Mix" in the file name no longer hides the match, and
   a file with a different name is recognised from its own tags (same title and version, the track's artist, and a
