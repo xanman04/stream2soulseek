@@ -17,6 +17,48 @@ $allowClose = $false
 function Trace($message) {
     Add-Content -LiteralPath $trace -Value ((Get-Date -Format o) + ' ' + $message)
 }
+function Confirm-CloseUpdateWindow($owner) {
+    $question = New-Object System.Windows.Forms.Form
+    try {
+        $question.Text = 'Close update window?'
+        $question.ClientSize = New-Object Drawing.Size(480, 180)
+        $question.StartPosition = 'CenterParent'
+        $question.FormBorderStyle = 'FixedDialog'
+        $question.MaximizeBox = $false
+        $question.MinimizeBox = $false
+        $question.ShowInTaskbar = $false
+        $question.BackColor = $owner.BackColor
+        $question.ForeColor = $owner.ForeColor
+        $question.Font = $owner.Font
+        $message = New-Object System.Windows.Forms.Label
+        $message.SetBounds(20, 20, 440, 94)
+        $message.Text = "Are you sure you want to close this update window?`r`n`r`nThe update will continue in the background. S2S will reopen automatically when it is finished."
+        $keep = New-Object System.Windows.Forms.Button
+        $keep.SetBounds(180, 126, 130, 34)
+        $keep.Text = 'Keep open'
+        $keep.DialogResult = [Windows.Forms.DialogResult]::No
+        $close = New-Object System.Windows.Forms.Button
+        $close.SetBounds(330, 126, 130, 34)
+        $close.Text = 'Close window'
+        $close.DialogResult = [Windows.Forms.DialogResult]::Yes
+        foreach ($button in @($keep, $close)) {
+            $button.FlatStyle = 'Flat'
+            $button.BackColor = $owner.BackColor
+            $button.ForeColor = $owner.ForeColor
+            if ($appearance.border) { $button.FlatAppearance.BorderColor = [Drawing.ColorTranslator]::FromHtml($appearance.border) }
+        }
+        $question.Controls.AddRange(@($message, $keep, $close))
+        $question.AcceptButton = $keep
+        $question.CancelButton = $keep
+        $question.Add_Shown({
+            $darkQuestion = [int]($question.BackColor.GetBrightness() -lt 0.5)
+            [void][S2SUpdateFrame]::DwmSetWindowAttribute($question.Handle, 20, [ref]$darkQuestion, 4)
+        })
+        return $question.ShowDialog($owner) -eq [Windows.Forms.DialogResult]::Yes
+    } finally {
+        $question.Dispose()
+    }
+}
 try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -28,8 +70,18 @@ try {
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
     $form.MinimizeBox = $true
-    $form.ControlBox = $false
-    $form.Add_FormClosing({ param($sender, $event) if (-not $allowClose) { $event.Cancel = $true } })
+    $form.ControlBox = $true
+    $form.Add_FormClosing({
+        param($sender, $event)
+        if (-not $allowClose) {
+            # Never terminate setup or clear the launch guard while files are being replaced.
+            $event.Cancel = $true
+            if (Confirm-CloseUpdateWindow $sender) {
+                Trace 'Progress window closed; installation continues in the background'
+                $sender.Hide()
+            }
+        }
+    })
     $iconPath = Join-Path $PSScriptRoot 'icon.png'
     if (Test-Path -LiteralPath $iconPath) {
         $iconBitmap = [Drawing.Bitmap]::FromFile($iconPath)
@@ -174,6 +226,10 @@ public static class S2SUpdateFrame {
             })
             $form.Controls.Add($button)
         }
+        # A background update must still make failures and recovery actions visible.
+        $form.WindowState = [Windows.Forms.FormWindowState]::Normal
+        $form.Show()
+        $form.Activate()
         while ($form.Visible) {
             [System.Windows.Forms.Application]::DoEvents()
             Start-Sleep -Milliseconds 100
