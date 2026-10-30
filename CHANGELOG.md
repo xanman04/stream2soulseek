@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+## 1.6.2 — 2026-10-30
+
+- Every in-app bug report includes the scrubbed recent log. Removed the optional-log checkbox; shortened
+  GitHub drafts retain the newest diagnostics, with the full reviewed report saved locally when needed.
+- Release packages now include the bundled heading fonts and their licence in the installed Python
+  package. The packaged self-test rejects missing fonts instead of allowing a system-font fallback.
+- Leaving a confirmed playlist transfer for Home or Find a track clears its old workflow steps while
+  unfinished downloads continue in the background and can be reopened from the sidebar. A new explicit
+  approval also restores a previously dismissed transfer to the saved-transfer list.
+- Transfer history replaces the long saved-import dropdown with searchable transfers, readable dates,
+  status filters and full track details. Open a saved transfer to recover it, open its folder or export
+  unfinished tracks. Refresh discovers new sessions and updates progress without losing your place.
+  Cancelled downloads are shown separately from failures; waiting uploads keep their correct status in Check files.
+- Report a Bug uses a compact form beside a separate report preview, with consistent fields, clearer
+  privacy guidance and responsive stacking on smaller windows. Reports remain visible for review before opening GitHub.
+- The Windows update installation window has minimize and close controls. Closing asks for confirmation
+  and hides progress while installation safely continues; errors reopen the recovery window.
+
 ## 1.6.1 — 2026-10-29
 
 - More → Support S2S is marked Coming soon while sponsorship approval is pending.
