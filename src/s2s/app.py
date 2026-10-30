@@ -173,6 +173,24 @@ def self_test(report_path: str) -> int:
 
     check("service logos", logos)
 
+    def display_fonts():
+        from PySide6.QtGui import QFont, QFontInfo
+        from PySide6.QtWidgets import QApplication
+        from .ui import theme
+
+        app = QApplication.instance() or QApplication([])
+        expected = [f"ClashDisplay-{weight}.otf" for weight in ("Regular", "Medium", "Semibold", "Bold")]
+        missing = [name for name in [*expected, "ClashDisplay-FFL.txt"]
+                   if not (theme._FONT_DIR / name).is_file()]
+        if missing:
+            raise RuntimeError("missing bundled font assets: " + ", ".join(missing))
+        family = theme.display_font_family()
+        if family != theme.DISPLAY_FONT or QFontInfo(QFont(family)).family() != theme.DISPLAY_FONT:
+            raise RuntimeError("bundled heading font did not load")
+        return family + " available with licence"
+
+    check("bundled heading fonts", display_fonts)
+
     def review_and_search():
         from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
         from PySide6.QtWidgets import QApplication
