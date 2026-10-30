@@ -84,7 +84,7 @@ def test_history_accounts_for_all_64_tracks_and_latest_replacement(tmp_path, mon
         ctx = AppContext(store=store, secrets=None, settings=None)
         dialog = HistoryDialog(ctx, import_id=iid)
         assert dialog.table.rowCount() == 64
-        dialog.outstanding_only.setChecked(True)
+        dialog.status_filter.setCurrentIndex(dialog.status_filter.findData("missing"))
         assert dialog.table.rowCount() == 63
         assert any(dialog.table.item(i, 0).text() == "Track 14" for i in range(dialog.table.rowCount()))
         export_path = tmp_path / "outstanding.csv"
@@ -95,7 +95,7 @@ def test_history_accounts_for_all_64_tracks_and_latest_replacement(tmp_path, mon
         with export_path.open(encoding="utf-8-sig", newline="") as f:
             exported = list(csv.DictReader(f))
         assert len(exported) == 63
-        assert all(row["Apple ID"] != "i.0" for row in exported)
+        assert all(row["Track ID"] != "i.0" for row in exported)
         assert changes_after == changes_before
     finally:
         store.close()

@@ -304,7 +304,7 @@ class TransfersPage(QWidget):
         self.archive_table = make_table(["Peer", "Archive status"])
         self.archive_table.setVisible(False)
         self.archive_table.setMaximumHeight(160)
-        self.history_btn = QPushButton("Import history")
+        self.history_btn = QPushButton("Transfer history")
         self.history_btn.setFlat(True)
         self.history_btn.setEnabled(False)
         self.cancel_import_btn = QPushButton("Cancel downloads…")

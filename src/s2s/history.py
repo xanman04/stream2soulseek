@@ -23,6 +23,40 @@ class HistoryRow:
     def outstanding(self) -> bool:
         return self.status not in ("Imported", "Already in library")
 
+    @property
+    def group(self) -> str:
+        if self.status in ("Imported", "Already in library"):
+            return "done"
+        if self.status == "Cancelled by you":
+            return "cancelled"
+        if self.status in ("Approved", "Queued", "Waiting on uploader", "Downloading",
+                           "Awaiting import", "Awaiting local copy"):
+            return "active"
+        if self.status in ("Not found", "Search failed", "Download failed", "Import conflict",
+                           "Import failed", "File missing", "File unverified", "Download status unknown"):
+            return "attention"
+        return "other"
+
+
+def _transfer_history_status(status) -> tuple[str, str]:
+    """Translate a persisted transfer state into a concise history status."""
+    if (status.raw_state or "").strip().casefold() == "cancelled_by_user" or \
+            (status.error or "").strip().casefold() == "cancelled by user":
+        return "Cancelled by you", "You cancelled this transfer. Use Open transfer to resume or check it."
+    if status.state == TransferState.QUEUED:
+        if (status.raw_state or "").strip().casefold() == "queued, remotely":
+            return "Waiting on uploader", "The uploader has not started sending this file yet."
+        return "Queued", "Waiting to download."
+    if status.state == TransferState.IN_PROGRESS:
+        return "Downloading", "Download is in progress."
+    if status.state == TransferState.FAILED:
+        return "Download failed", "The selected download failed."
+    if status.state == TransferState.UNKNOWN:
+        return "Download status unknown", "The transfer status could not be determined."
+    if status.state == TransferState.SUCCEEDED:
+        return "Awaiting import", "Download finished; the file has not been imported yet."
+    return "Approved", "Selected for download."
+
 
 def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
     """Return one row per saved playlist track, ordered by source position.
@@ -47,7 +81,11 @@ def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
     outcomes = {r.apple_id: r for r in store.import_results(import_id)}
     current_import = store.get_import(import_id)
     historical_results: dict[str, object] = {}
-    if current_import:
+    needs_historical_lookup = any(
+        match.status == MatchStatus.SKIPPED and match.note == "already imported"
+        for match in matches.values()
+    )
+    if current_import and needs_historical_lookup:
         destination = os.path.normcase(os.path.normpath(current_import.destination))
         for previous in store.list_imports():
             if (previous.id == import_id or previous.created_at > current_import.created_at
@@ -74,15 +112,8 @@ def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
                                        f"Selected for download from {item.username}; no transfer status is saved yet.", final_path))
                 continue
             status = transfer.status
-            detail = status.error or status.raw_state or ""
-            if status.state == TransferState.QUEUED:
-                label, default = "Queued", "Waiting to download."
-            elif status.state == TransferState.IN_PROGRESS:
-                label, default = "Downloading", "Download is in progress."
-            elif status.state == TransferState.FAILED:
-                label, default = "Download failed", "The selected download failed."
-            else:
-                label, default = "Download status unknown", "The transfer status could not be determined."
+            label, default = _transfer_history_status(status)
+            detail = (status.error or status.raw_state or default) if label in ("Download failed", "Download status unknown") else default
             rows.append(HistoryRow(track.apple_id, track.name, track.artist, label,
                                    detail or default, final_path))
             continue
@@ -122,19 +153,8 @@ def import_history_rows(store: Store, import_id: str) -> list[HistoryRow]:
                                        f"Selected for download from {item.username}; no transfer status is saved yet.", final_path))
                 continue
             status = transfer.status
-            detail = status.error or status.raw_state or ""
-            if status.state == TransferState.QUEUED:
-                label, default = "Queued", "Waiting to download."
-            elif status.state == TransferState.IN_PROGRESS:
-                label, default = "Downloading", "Download is in progress."
-            elif status.state == TransferState.FAILED:
-                label, default = "Download failed", "The selected download failed."
-            elif status.state == TransferState.UNKNOWN:
-                label, default = "Download status unknown", "The transfer status could not be determined."
-            elif status.state == TransferState.SUCCEEDED:
-                label, default = "Awaiting import", "Download finished; the file has not been imported yet."
-            else:
-                label, default = "Approved", "Selected for download."
+            label, default = _transfer_history_status(status)
+            detail = (status.error or status.raw_state or default) if label in ("Download failed", "Download status unknown") else default
             rows.append(HistoryRow(track.apple_id, track.name, track.artist, label,
                                    detail or default, final_path))
             continue

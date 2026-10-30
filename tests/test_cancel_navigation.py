@@ -161,7 +161,7 @@ def test_home_logo_menu_bar_and_sidebar_support_controls(win):
     sidebar.report_btn.click()
     assert reports == [True]
     assert [a.text() for a in sidebar.tools_btn.menu().actions() if not a.isSeparator()] == [
-        "Import history / outstanding tracks...", "Check for updates...", "Support S2S — Coming soon", "Quit S2S (pause transfers)"]
+        "Transfer history…", "Check for updates...", "Support S2S — Coming soon", "Quit S2S (pause transfers)"]
 
 
 def test_pending_support_action_cannot_open_payment_page(win):

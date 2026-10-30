@@ -69,6 +69,21 @@ def test_checklist_order_and_statuses(tmp_path):
     assert kind == "warn" and "2 of 6" in text and "3 missing" in text and "1 skipped" in text
 
 
+def test_check_files_preserves_waiting_and_cancelled_history_states(tmp_path):
+    store, iid, _ = make_store(tmp_path)
+    try:
+        store.upsert_transfer("ap", "i.d", TransferStatus("peer", "z.mp3", 10,
+                              TransferState.QUEUED, "Queued, Remotely"))
+        entry = next(e for e in finalize.build_checklist(store, iid).entries if e.apple_id == "i.d")
+        assert entry.reason == finalize.WAITING
+        store.upsert_transfer("ap", "i.d", TransferStatus("peer", "z.mp3", 10,
+                              TransferState.FAILED, "cancelled_by_user", error="cancelled by user"))
+        entry = next(e for e in finalize.build_checklist(store, iid).entries if e.apple_id == "i.d")
+        assert entry.reason == finalize.CANCELLED and entry.reason_text == "Cancelled by you"
+    finally:
+        store.close()
+
+
 def test_all_in_folder_verdict_and_other_playlist_files_not_extra(tmp_path):
     store = Store(tmp_path / "db.sqlite3")
     try:

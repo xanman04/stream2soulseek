@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
         self.soulseek.status_changed.connect(self._soulseek_status)
 
         tools_menu = QMenu(self.sidebar.tools_btn)
-        history_act = QAction("Import history / outstanding tracks...", self)
+        history_act = QAction("Transfer history…", self)
         history_act.triggered.connect(self.open_history)
         tools_menu.addAction(history_act)
         quit_act = QAction("Quit S2S (pause transfers)", self)
@@ -692,9 +692,13 @@ class MainWindow(QMainWindow):
             fn()
 
     def open_history(self) -> None:
-        dialog = HistoryDialog(self.ctx, self, import_id=self.ctx.import_id)
+        dialog = HistoryDialog(self.ctx, self, import_id=self.ctx.import_id,
+                               open_blocked=self._queueing or self.search._running)
         dialog.exec()
+        selected = dialog.requested_import_id
         dialog.deleteLater()
+        if selected:
+            self.resume_import(selected)
 
     def review_queued_backups(self) -> None:
         if self._queueing or not self.ctx.import_id:
