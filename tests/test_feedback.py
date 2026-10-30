@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlsplit
 from s2s import applog, feedback
 
 
-def test_report_uses_fields_system_summary_and_only_adds_log_when_opted_in(monkeypatch):
+def test_report_always_includes_fields_system_summary_and_scrubbed_log(monkeypatch):
     monkeypatch.setattr(feedback, "system_summary", lambda: "S2S 1.6.0 · Windows synthetic")
     monkeypatch.setattr(applog, "recent_log", lambda: "synthetic scrubbed log")
     report = feedback.build_report("app stopped", steps="1. Start app", expected="app stays open")
@@ -16,8 +16,7 @@ def test_report_uses_fields_system_summary_and_only_adds_log_when_opted_in(monke
     assert "Steps to reproduce:\n1. Start app" in report
     assert "Expected result:\napp stays open" in report
     assert "Version and platform:\nS2S 1.6.0 · Windows synthetic" in report
-    assert "synthetic scrubbed log" not in report
-    assert "synthetic scrubbed log" in feedback.build_report("app stopped", include_log=True)
+    assert "synthetic scrubbed log" in report
 
 
 def test_github_url_is_encoded_bounded_and_contains_no_local_path_or_credentials():
@@ -44,7 +43,7 @@ def test_save_report_is_local_and_preserves_full_content(tmp_path, monkeypatch):
     assert path.read_text(encoding="utf-8") == "synthetic report"
 
 
-def test_dialog_preview_log_opt_in_and_opening_only_opens_draft(monkeypatch, tmp_path):
+def test_dialog_always_previews_log_and_opening_only_opens_draft(monkeypatch, tmp_path):
     from PySide6.QtWidgets import QApplication, QCheckBox
 
     from s2s import config
@@ -53,17 +52,15 @@ def test_dialog_preview_log_opt_in_and_opening_only_opens_draft(monkeypatch, tmp
     app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(config, "app_dir", lambda: tmp_path)
     monkeypatch.setattr(feedback, "system_summary", lambda: "S2S 1.6.0 · Windows synthetic")
-    monkeypatch.setattr(applog, "recent_log", lambda: "synthetic opt-in log")
+    monkeypatch.setattr(applog, "recent_log", lambda: "synthetic included log")
     dialog = FeedbackDialog()
     opened = []
     monkeypatch.setattr(dialog, "open_url", lambda url: opened.append(url) or True)
     dialog.description.setPlainText("Downloads stopped")
     dialog.steps.setPlainText("1. Start download")
     dialog.expected.setPlainText("Track downloads")
-    assert "synthetic opt-in log" not in dialog.preview.toPlainText()
-    assert dialog.findChild(QCheckBox).isChecked() is False
-    dialog.include_log.setChecked(True)
-    assert "synthetic opt-in log" in dialog.preview.toPlainText()
+    assert dialog.findChild(QCheckBox) is None
+    assert "synthetic included log" in dialog.preview.toPlainText()
     dialog.send()
     assert len(opened) == 1
     assert opened[0].startswith("https://github.com/xanman04/stream2soulseek/issues/new?")
@@ -91,7 +88,6 @@ def test_send_copy_and_save_use_the_exact_reviewed_preview(monkeypatch):
     dialog.description.setPlainText("App stopped")
     dialog.steps.setPlainText("Click Search")
     dialog.expected.setPlainText("Show results")
-    dialog.include_log.setChecked(True)
     reviewed = dialog.preview.toPlainText()
     log[0] = "new unreviewed entry"
     opened, saved = [], []
@@ -130,3 +126,69 @@ def test_dialog_requires_reproduction_fields_and_handles_save_failure(monkeypatc
     dialog.save()
     assert "Copy report" in dialog.status.text()
     dialog.deleteLater()
+
+
+def test_report_layout_reflows_without_losing_fields_or_preview():
+    from PySide6.QtWidgets import QApplication, QBoxLayout
+    from s2s.ui.feedback_dialog import FeedbackDialog
+
+    dialog = FeedbackDialog()
+    dialog.resize(980, 650)
+    dialog.show()
+    QApplication.processEvents()
+    assert dialog.body_layout.direction() == QBoxLayout.Direction.LeftToRight
+    dialog.description.setPlainText("Long title " * 80)
+    dialog.steps.setPlainText("1. Open Search\n2. Select a result")
+    dialog.expected.setPlainText("Show results")
+    reviewed = dialog.preview.toPlainText()
+    dialog.resize(650, 580)
+    # Reflow posts a second layout request to the scroll area's content widget.
+    for _ in range(3):
+        QApplication.processEvents()
+    assert dialog.body_layout.direction() == QBoxLayout.Direction.TopToBottom
+    assert dialog.preview.toPlainText() == reviewed
+    assert dialog.send_btn.isEnabled() and dialog.preview.isReadOnly()
+    assert dialog.scroll.verticalScrollBar().maximum() > 0
+    dialog.scroll.ensureWidgetVisible(dialog.preview)
+    QApplication.processEvents()
+    assert dialog.scroll.verticalScrollBar().value() > 0
+    assert dialog.send_btn.isVisible()
+    dialog.close()
+    dialog.deleteLater()
+
+def test_empty_log_is_still_reported(monkeypatch):
+    monkeypatch.setattr(applog, 'recent_log', lambda: '')
+    assert feedback.LOG_HEADING + '\n(empty)' in feedback.build_report('Issue')
+
+
+def test_shortened_draft_keeps_recent_log_even_with_long_unicode_description(monkeypatch):
+    monkeypatch.setattr(applog, 'recent_log', lambda: 'older log\n' * 3000 + 'LATEST DIAGNOSTIC ENTRY')
+    report = feedback.build_report('音 🎵' * 5000, steps='Search', expected='Results')
+    title = '[Bug] ' + '音' * 100
+    body, shortened = feedback.issue_body(report, title=title)
+    assert shortened
+    assert feedback.LOG_HEADING in body
+    assert 'LATEST DIAGNOSTIC ENTRY' in body
+    assert len(body) <= feedback.ISSUE_BODY_LIMIT
+    assert len(feedback.issue_url(title, body)) <= feedback.ISSUE_URL_LIMIT
+    assert 'Earlier log entries omitted' in body
+
+def test_included_log_is_scrubbed_from_real_fixture_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(applog, 'log_dir', lambda: tmp_path)
+    monkeypatch.setattr(applog, '_SECRETS', ['fixture-password'])
+    (tmp_path / 's2s.log').write_text('Failure fixture-password Bearer fixture-token ' + str(Path.home()) + '\n', encoding='utf-8')
+    report = feedback.build_report('Issue')
+    assert '--- s2s.log ---' in report
+    assert 'fixture-password' not in report and 'fixture-token' not in report
+    assert str(Path.home()) not in report
+    assert '[redacted]' in report
+
+
+def test_unreadable_log_folder_keeps_reporting_available(monkeypatch):
+    def unavailable():
+        raise PermissionError('synthetic protected log folder')
+    monkeypatch.setattr(applog, 'recent_log', unavailable)
+    report = feedback.build_report('Issue')
+    assert feedback.LOG_HEADING in report
+    assert 'Recent log unavailable' in report
+    assert 'synthetic protected' not in report
