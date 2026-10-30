@@ -63,9 +63,9 @@ def assert_context_unchanged(ctx, before):
             assert getattr(ctx, name) == value
 
 
-def test_home_and_track_search_routes_preserve_active_import(env):
+def test_home_and_track_search_routes_preserve_unconfirmed_draft(env):
     win, _store, tmp_path = env
-    before = active_context(win, tmp_path)
+    before = active_context(win, tmp_path, approval=False)
 
     win.show_home()
     assert win.stack.currentWidget() is win.home

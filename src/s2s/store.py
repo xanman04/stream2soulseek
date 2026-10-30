@@ -501,6 +501,10 @@ class Store:
                     (approval.id, it.apple_id, it.username, it.filename, it.size, it.destination, it.local_sha256,
                      int(it.manual_free)),
                 )
+            if approval.items:
+                # A fresh explicit approval reopens a previously cancelled session.
+                self._conn.execute("UPDATE transfer_session_views SET dismissed=0 WHERE import_id=?",
+                                   (approval.import_id,))
 
     def get_approval(self, approval_id: str) -> Approval | None:
         with self._lock:

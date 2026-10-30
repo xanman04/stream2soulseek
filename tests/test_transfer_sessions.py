@@ -315,3 +315,14 @@ def test_concurrent_import_completed_copies_once_without_conflict(store, tmp_pat
     assert (destination / "Song - Artist.mp3").read_bytes() == source.read_bytes()
     assert source.exists()
     assert not list(destination.glob("*.partial"))
+
+def test_new_explicit_approval_reopens_a_dismissed_session(store, tmp_path):
+    import_id, destination, tracks, downloads = create_fixture_import(store, tmp_path, 'Reopened')
+    first = approve_tracks(store, import_id, destination, downloads, tracks)
+    dismiss(store, import_id)
+    assert sessions(store) == []
+    second = approve_tracks(store, import_id, destination, downloads, tracks, username='replacement')
+    listed = sessions(store)
+    assert len(listed) == 1 and listed[0].import_id == import_id
+    assert listed[0].waiting == 1
+    assert second.id != first.id

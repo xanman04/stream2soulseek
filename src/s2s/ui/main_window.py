@@ -232,6 +232,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.home)
         self.sidebar.show_home()
         self.home.refresh()
+        self._park_confirmed_transfer()
 
     def open_track_search(self, mode: str = "quick") -> None:
         if self._closing or self._queueing:
@@ -243,6 +244,23 @@ class MainWindow(QMainWindow):
         self.track_search.set_mode(mode)
         self.stack.setCurrentWidget(self.track_search)
         self.sidebar.show_track_search()
+        self._park_confirmed_transfer()
+
+    def _park_confirmed_transfer(self) -> None:
+        """Keep confirmed work in saved transfers, leaving the playlist wizard ready for new work."""
+        if not self.ctx.approval_id:
+            return  # an unconfirmed selection is still a foreground draft
+        iid, generation = self.ctx.import_id, self._navigation_generation
+        self._transfer_sessions_changed(transfer_sessions.sessions(self.ctx.store))
+
+        def ready():
+            if (not self._closing and self.ctx.import_id == iid
+                    and self._navigation_generation == generation):
+                self.start_another_import(show_playlist=False)
+                self._transfer_sessions_changed(transfer_sessions.sessions(self.ctx.store))
+                self.transfer_monitor.refresh()
+
+        self._when_refresh_idle(ready)
 
     def start_playlist_from_home(self) -> None:
         if self._closing or self._queueing:
@@ -751,7 +769,7 @@ class MainWindow(QMainWindow):
         if not busy:
             self.refresh_navigation()
 
-    def start_another_import(self) -> None:
+    def start_another_import(self, *, show_playlist: bool = True) -> None:
         """Begin a fresh selection while preserving accounts, settings and stored import history."""
         if self.transfers._inflight:
             return  # the completion button is disabled while a refresh is still running
@@ -770,10 +788,12 @@ class MainWindow(QMainWindow):
         self.playlists.playlist_search.clear()
         self.playlists.track_search.clear()
         self.playlists.reset()
-        self.go_step(STEP_PLAYLIST)
-        if self.service.is_connected():
-            self.playlists.load_playlists()
-        self.statusBar().showMessage("Ready for another import. Choose a playlist.")
+        self.refresh_navigation()
+        if show_playlist:
+            self.go_step(STEP_PLAYLIST)
+            if self.service.is_connected():
+                self.playlists.load_playlists()
+            self.statusBar().showMessage("Ready for another import. Choose a playlist.")
 
     def request_new_playlist(self) -> None:
         """Detach the foreground selection; saved downloads remain owned by the background monitor."""
