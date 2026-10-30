@@ -27,7 +27,7 @@ s2s = "s2s.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-s2s = ["ui/assets/*.png", "ui/assets/logos/*.svg", "ui/assets/logos/NOTICE.md", "update_windows.ps1"]
+s2s = ["ui/assets/*.png", "ui/assets/logos/*.svg", "ui/assets/logos/NOTICE.md", "ui/assets/fonts/*.otf", "ui/assets/fonts/*.txt", "update_windows.ps1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
