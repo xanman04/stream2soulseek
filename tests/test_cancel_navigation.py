@@ -223,3 +223,70 @@ def test_cancel_one_file_requires_confirmation_and_preserves_other_transfers(win
     page.cancel_selected()
     assert cancelled == ([("saved-approval", "selected-track")] if confirmed else [])
     assert win.ctx.import_id == "saved-import" and win.ctx.approval_id == "saved-approval"
+
+def test_home_parks_confirmed_transfer_in_sidebar_and_clears_workflow(win, tmp_path, monkeypatch):
+    from test_transfer_sessions import create_fixture_import, approve_tracks, status_for
+    from s2s.transfer_sessions import sessions
+    iid, destination, tracks, downloads = create_fixture_import(win.ctx.store, tmp_path, 'Parked')
+    approval = approve_tracks(win.ctx.store, iid, destination, downloads, tracks)
+    win.ctx.store.upsert_transfer(approval.id, tracks[0].apple_id, status_for(approval.items[0]))
+    win.resume_import(iid)
+    monkeypatch.setattr(win.transfer_monitor, 'refresh', lambda: None)
+    win.show_home()
+    assert win.stack.currentWidget() is win.home
+    assert win.ctx.import_id is None and win.ctx.approval_id is None
+    assert win.ctx.playlist is None and win.ctx.tracks == []
+    assert not any(win.step_done())
+    assert win.sidebar.transfers.count() == 1
+    assert win.sidebar.transfers.item(0).data(256) == iid
+    assert sessions(win.ctx.store)[0].waiting == 1
+    win.resume_import(iid)
+    assert win.ctx.import_id == iid and win.ctx.approval_id == approval.id
+
+
+def test_home_keeps_unconfirmed_playlist_draft(win, tmp_path):
+    _select_playlist(win, tmp_path)
+    win.show_home()
+    assert win.ctx.import_id == 'foreground-import'
+    assert win.ctx.tracks
+
+
+def test_parking_waits_for_refresh_and_ignores_a_newer_navigation(win, tmp_path, monkeypatch):
+    from test_transfer_sessions import create_fixture_import, approve_tracks
+    iid, destination, tracks, downloads = create_fixture_import(win.ctx.store, tmp_path, 'Busy')
+    approval = approve_tracks(win.ctx.store, iid, destination, downloads, tracks)
+    win.resume_import(iid)
+    callbacks = []
+    monkeypatch.setattr(win, '_when_refresh_idle', callbacks.append)
+    win.show_home()
+    assert win.ctx.import_id == iid
+    win._navigation_generation += 1
+    callbacks.pop()()
+    assert win.ctx.import_id == iid
+
+
+def test_track_search_parks_confirmed_playlist_without_resetting_search_page(win, tmp_path, monkeypatch):
+    from test_transfer_sessions import create_fixture_import, approve_tracks
+    iid, destination, tracks, downloads = create_fixture_import(win.ctx.store, tmp_path, 'Search')
+    approve_tracks(win.ctx.store, iid, destination, downloads, tracks)
+    win.resume_import(iid)
+    monkeypatch.setattr(win.transfer_monitor, 'refresh', lambda: None)
+    win.open_track_search('free')
+    assert win.stack.currentWidget() is win.track_search
+    assert win.ctx.import_id is None and win.sidebar.transfers.count() == 1
+
+def test_parking_clears_workflow_only_after_current_import_refresh_finishes(win, tmp_path, monkeypatch):
+    from test_transfer_sessions import create_fixture_import, approve_tracks
+    iid, destination, tracks, downloads = create_fixture_import(win.ctx.store, tmp_path, 'Finishing')
+    approve_tracks(win.ctx.store, iid, destination, downloads, tracks)
+    win.resume_import(iid)
+    callbacks = []
+    monkeypatch.setattr(win, '_when_refresh_idle', callbacks.append)
+    monkeypatch.setattr(win.transfer_monitor, 'refresh', lambda: None)
+    win.transfers._inflight = True
+    win.show_home()
+    assert win.ctx.import_id == iid and win.stack.currentWidget() is win.home
+    win.transfers._inflight = False
+    callbacks.pop()()
+    assert win.ctx.import_id is None and not any(win.step_done())
+    assert win.sidebar.transfers.count() == 1
