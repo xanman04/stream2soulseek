@@ -28,5 +28,5 @@ What happened instead?
 
 ### Logs or screenshots (optional)
 
-Use **Report a Bug** in S2S to prepare a report with version details and an optional scrubbed log.
+Use **Report a Bug** in S2S to prepare a report with version details and the automatically included scrubbed log.
 Review all attachments first. Never attach credentials, browser profiles, or the application's data folder.

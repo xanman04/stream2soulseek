@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 ISSUE_URL = "https://github.com/xanman04/stream2soulseek/issues/new"
 ISSUE_BODY_LIMIT = 5000
 ISSUE_URL_LIMIT = 7500
+LOG_HEADING = "Recent log (logins and personal folders removed):"
 
 
 def system_summary() -> str:
@@ -31,9 +32,8 @@ def system_summary() -> str:
             f"Python {platform.python_version()} · Qt for Python {pyside}")
 
 
-def build_report(description: str, *, steps: str = "", expected: str = "",
-                  include_log: bool = False) -> str:
-    """Create report text; logs are included only after explicit opt-in."""
+def build_report(description: str, *, steps: str = "", expected: str = "") -> str:
+    """Create report text with the scrubbed recent log included in every report."""
     from .applog import recent_log, scrub
 
     lines = [
@@ -42,8 +42,11 @@ def build_report(description: str, *, steps: str = "", expected: str = "",
         "", "Expected result:", scrub(expected.strip()) or "(not provided)",
         "", "Version and platform:", system_summary(),
     ]
-    if include_log:
-        lines += ["", "Recent log (logins and personal folders removed):", recent_log() or "(empty)"]
+    try:
+        log = recent_log() or "(empty)"
+    except OSError:
+        log = "(Recent log unavailable: S2S could not read its log folder.)"
+    lines += ["", LOG_HEADING, log]
     return "\n".join(lines) + "\n"
 
 
@@ -52,14 +55,32 @@ def issue_body(report: str, *, title: str = "S2S bug report") -> tuple[str, bool
     if len(report) <= ISSUE_BODY_LIMIT and len(issue_url(title, report)) <= ISSUE_URL_LIMIT:
         return report, False
     marker = "\n\n[Report shortened to fit GitHub's draft URL. Save the full report locally and attach it after reviewing.]\n"
-    low, high = 0, min(len(report), ISSUE_BODY_LIMIT - len(marker))
+    # Reserve room for the newest diagnostics, rather than cutting off the log
+    # whenever a long description or normal-sized log exceeds the browser URL limit.
+    prefix, separator, log = report.rpartition("\n" + LOG_HEADING + "\n")
+    suffix = ""
+    if separator:
+        log = log.rstrip()
+        low, high = 0, min(len(log), 1500)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if len(issue_url(title, log[-middle:])) <= 3000:
+                low = middle
+            else:
+                high = middle - 1
+        suffix = "\n" + LOG_HEADING + "\n"
+        if low < len(log):
+            suffix += "[Earlier log entries omitted from draft.]\n"
+        suffix += (log[-low:] if low else "(empty)") + "\n"
+        report = prefix
+    low, high = 0, min(len(report), ISSUE_BODY_LIMIT - len(marker) - len(suffix))
     while low < high:
         middle = (low + high + 1) // 2
-        if len(issue_url(title, report[:middle].rstrip() + marker)) <= ISSUE_URL_LIMIT:
+        if len(issue_url(title, report[:middle].rstrip() + marker + suffix)) <= ISSUE_URL_LIMIT:
             low = middle
         else:
             high = middle - 1
-    return report[:low].rstrip() + marker, True
+    return report[:low].rstrip() + marker + suffix, True
 
 
 def issue_url(title: str, body: str) -> str:

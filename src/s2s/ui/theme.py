@@ -245,6 +245,17 @@ QListWidget#stepList::item:disabled {{ color: {c['disabled']}; }}
 QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
 QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
 QLabel#sectionTitle {{ font-size: 17px; font-weight: 600; }}
+QLabel#reportFieldLabel {{ font-weight: 600; }}
+QLabel#reportHelp {{ color: {c['muted']}; font-size: 12px; }}
+QDialog#feedbackDialog QTextEdit#reportInput, QDialog#feedbackDialog QPlainTextEdit#reportInput {{
+    background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; border-radius: 7px; padding: 9px; }}
+QDialog#feedbackDialog QTextEdit#reportInput:focus, QDialog#feedbackDialog QPlainTextEdit#reportInput:focus {{
+    border-color: {c['focus']}; }}
+QFrame#reportPreviewPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 9px; }}
+QFrame#reportPreviewPanel QLabel {{ background: transparent; border: none; }}
+QPlainTextEdit#reportPreview {{ background: transparent; color: {c['text']}; border: none; padding: 0; }}
+QScrollArea#reportScroll {{ background: transparent; border: none; }}
+QFrame#reportFooter {{ border: none; border-top: 1px solid {c['border']}; }}
 QLabel#mutedText {{ color: {c['muted']}; }}
 QFrame#homeActionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; }}
 QFrame#searchControls {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}

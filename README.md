@@ -178,7 +178,7 @@ window open while S2S closes and reopens. The installer preserves unchanged runt
 Versions 1.1.2 and earlier need a manual installation.
 
 **Report a Bug** in the sidebar prepares a GitHub issue draft with your description, reproduction steps,
-expected result and app/system versions. A recent scrubbed log is optional and off by default. Review the
+expected result, app/system versions and the recent scrubbed log. Logs are included automatically. Review the
 report inside S2S, then open the draft in your browser; nothing is submitted automatically. You can copy
 or save the report locally. Long reports are shortened for the draft and saved separately for manual
 attachment. Reports posted to [GitHub issues](https://github.com/xanman04/stream2soulseek/issues) are public;
