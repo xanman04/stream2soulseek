@@ -32,6 +32,7 @@ FAILED = "failed"
 WAITING = "waiting"
 DECLINED = "declined"
 NOT_SEARCHED = "not_searched"
+CANCELLED = "cancelled"
 
 _REASONS = {
     NOT_FOUND: "Not found on Soulseek",
@@ -40,6 +41,7 @@ _REASONS = {
     WAITING: "Still waiting to download",
     DECLINED: "Declined by the uploader",
     NOT_SEARCHED: "Not searched yet",
+    CANCELLED: "Cancelled by you",
 }
 _HISTORY_REASON = {
     "Not found": NOT_FOUND,
@@ -47,11 +49,14 @@ _HISTORY_REASON = {
     "Not selected": NOT_SELECTED,
     "Not searched": NOT_SEARCHED,
     "Queued": WAITING,
+    "Waiting on uploader": WAITING,
     "Downloading": WAITING,
     "Approved": WAITING,
     "Awaiting import": WAITING,
+    "Awaiting local copy": WAITING,
     "Import pending": WAITING,
     "Download failed": FAILED,
+    "Cancelled by you": CANCELLED,
     "Download status unknown": FAILED,
     "Import failed": FAILED,
     "Import conflict": FAILED,

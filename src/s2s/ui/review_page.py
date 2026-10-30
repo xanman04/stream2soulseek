@@ -1408,7 +1408,7 @@ class ReviewPage(QWidget):
         self._close_queuing_popup()
         self.view.setEnabled(True)
         self.queueing_changed.emit(False)
-        self._notice = ("Queuing did not finish. Check Downloads and Import history before retrying: some files "
+        self._notice = ("Queuing did not finish. Check Downloads and Transfer history before retrying: some files "
                         "may already have been submitted.", "error")
         self._update_footer()
         show_error(self, "Could not queue downloads", self.ctx.describe(exc))

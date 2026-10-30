@@ -30,6 +30,7 @@ _STATUS_STYLE = {
 }
 _REASON_KIND = {
     finalize.WAITING: "info",
+    finalize.CANCELLED: "muted",
     finalize.NOT_SELECTED: "warn",
     finalize.DECLINED: "warn",
 }

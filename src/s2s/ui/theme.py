@@ -246,6 +246,7 @@ QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']};
 QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
 QLabel#sectionTitle {{ font-size: 17px; font-weight: 600; }}
 QLabel#reportFieldLabel {{ font-weight: 600; }}
+QLabel#historyDetailTitle {{ font-weight: 600; margin-top: 6px; }}
 QLabel#reportHelp {{ color: {c['muted']}; font-size: 12px; }}
 QDialog#feedbackDialog QTextEdit#reportInput, QDialog#feedbackDialog QPlainTextEdit#reportInput {{
     background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; border-radius: 7px; padding: 9px; }}
