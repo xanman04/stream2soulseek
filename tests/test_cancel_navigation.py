@@ -161,16 +161,18 @@ def test_home_logo_menu_bar_and_sidebar_support_controls(win):
     sidebar.report_btn.click()
     assert reports == [True]
     assert [a.text() for a in sidebar.tools_btn.menu().actions() if not a.isSeparator()] == [
-        "Transfer history…", "Check for updates...", "Support S2S — Coming soon", "Quit S2S (pause transfers)"]
+        "Transfer history…", "Check for updates...", "Support S2S", "Quit S2S (pause transfers)"]
 
 
-def test_pending_support_action_cannot_open_payment_page(win):
+def test_support_action_opens_the_approved_public_sponsors_page(win, monkeypatch):
+    from s2s.ui import main_window
+
     action = next(a for a in win.sidebar.tools_btn.menu().actions() if a.text().startswith("Support S2S"))
-    activated = []
-    action.triggered.connect(lambda: activated.append(True))
-    assert "Coming soon" in action.text() and not action.isEnabled()
+    opened = []
+    monkeypatch.setattr(main_window.QDesktopServices, "openUrl", lambda url: opened.append(url.toString()) or True)
+    assert action.text() == "Support S2S" and action.isEnabled()
     action.trigger()
-    assert activated == []
+    assert opened == ["https://github.com/sponsors/xanman04"]
 
 
 def test_manual_search_cancel_requires_confirmation_then_returns_home(win, monkeypatch):

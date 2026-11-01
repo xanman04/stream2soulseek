@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Optional support is available through GitHub Sponsors. The More → Support S2S action now opens the
+  public sponsorship page, and the repository includes a Sponsor button.
+
 ## 1.6.2 — 2026-10-30
 
 - Every in-app bug report includes the scrubbed recent log. Removed the optional-log checkbox; shortened

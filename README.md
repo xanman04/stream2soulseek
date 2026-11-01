@@ -241,8 +241,8 @@ See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
 
 ## Support development
 
-S2S is free to use, with no paid features. Optional sponsorship is coming soon; the app's
-**More → Support S2S** entry will become available when sponsorship setup is complete.
+S2S is free to use, with no paid features. If you would like to support its development,
+you can make an optional contribution through [GitHub Sponsors](https://github.com/sponsors/xanman04).
 
 ## License
 

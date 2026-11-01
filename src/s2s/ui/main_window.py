@@ -8,8 +8,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, QTimer
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import QThreadPool, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
                                QStackedWidget, QSystemTrayIcon, QWidget)
 
@@ -143,8 +143,8 @@ class MainWindow(QMainWindow):
         update_act = QAction("Check for updates...", self)
         update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
         tools_menu.addAction(update_act)
-        support_act = QAction("Support S2S — Coming soon", self)
-        support_act.setEnabled(False)
+        support_act = QAction("Support S2S", self)
+        support_act.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/sponsors/xanman04")))
         tools_menu.addAction(support_act)
         tools_menu.addSeparator()
         tools_menu.addAction(quit_act)
