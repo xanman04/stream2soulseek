@@ -348,6 +348,7 @@ class Settings:
     match_policy: MatchPolicy = field(default_factory=MatchPolicy)
     rule_layouts: dict[str, MatchPolicy] = field(default_factory=dict)  # saved rule sets by name (see layouts.py)
     shared_folders: list[str] = field(default_factory=list)  # folders slskd shares with Soulseek; none by default
+    update_channel: str = "stable"  # explicit opt-in; server authorization is still required for previews
     extra: dict = field(default_factory=dict)
 
 

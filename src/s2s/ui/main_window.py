@@ -490,14 +490,28 @@ class MainWindow(QMainWindow):
     def check_for_updates(self, *, manual: bool) -> None:
         """Look for a newer signed release (in the background). Automatic checks stay silent when nothing is new."""
         from .. import __version__, updater
+        from ..sponsors import SponsorClient
+
+        channel = self.ctx.settings.update_channel
+        preview_client = SponsorClient(self.ctx.secrets)
 
         def work():
-            return updater.check_for_update(__version__)
+            notices = []
+            info = updater.check_for_update(__version__, channel=channel,
+                preview_releases=preview_client.releases, on_preview_error=notices.append)
+            return info, notices
 
-        def done(info) -> None:
+        def done(result) -> None:
+            info, notices = result
             if info is None:
                 if manual:
-                    QMessageBox.information(self, "Check for updates", f"S2S {__version__} is the latest version.")
+                    message = (f"No newer stable release is available for S2S {__version__}." if channel == "stable"
+                               else f"No newer eligible release is available for S2S {__version__}.")
+                    if notices:
+                        message = "\n\n".join(notices) + "\n\nNo newer stable release is available."
+                    QMessageBox.information(self, "Check for updates", message)
+                elif notices:
+                    self.statusBar().showMessage(notices[0], 15000)
                 return
             self._offer_update(info)
 

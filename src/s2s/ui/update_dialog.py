@@ -47,7 +47,7 @@ class UpdateDialog(QDialog):
         self.phase_changed.connect(self._say)
         self.setWindowTitle("Update S2S")
 
-        head = QLabel(f"S2S {info.version} is available")
+        head = QLabel(f"S2S {info.version}{' preview' if info.channel == 'preview' else ''} is available")
         f = head.font()
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
@@ -61,6 +61,10 @@ class UpdateDialog(QDialog):
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
         lay.addWidget(head)
         lay.addWidget(current)
+        if info.channel == "preview":
+            warning = theme.subtle(QLabel("Preview build — may contain bugs. You can keep your current version."))
+            warning.setWordWrap(True)
+            lay.addWidget(warning)
         changes = change_headlines(info.notes)
         if changes:
             self.changes = QLabel("\n".join(f"•  {c}" for c in changes))
@@ -86,9 +90,14 @@ class UpdateDialog(QDialog):
         later = self.later_btn = QPushButton("Later")
         self.update_btn = theme.primary(QPushButton("Update"))
         if target is None:
-            self.update_btn.setText("Download")
-            self.status.setText("Opens the download page.")
-            self.update_btn.clicked.connect(self._open_page)
+            if info.channel == "preview":
+                self.update_btn.setText("Download preview")
+                self.status.setText("Saves a verified installer for manual installation; this copy cannot update itself.")
+                self.update_btn.clicked.connect(self.install)
+            else:
+                self.update_btn.setText("Download")
+                self.status.setText("Opens the download page.")
+                self.update_btn.clicked.connect(self._open_page)
         else:
             self.update_btn.clicked.connect(self.install)
             if busy_reason:
@@ -131,6 +140,13 @@ class UpdateDialog(QDialog):
         self._say(f"Downloading {self.info.version}…")
         info, target = self.info, self.target
         appearance = theme.update_appearance()
+        preview_client = None
+        if info.channel == "preview":
+            from ..sponsors import SponsorClient
+
+            ctx = getattr(self.parent(), "ctx", None)
+            if ctx is not None:
+                preview_client = SponsorClient(ctx.secrets)
 
         def work():
             import os
@@ -138,7 +154,9 @@ class UpdateDialog(QDialog):
             from .. import config
 
             archive = updater.download_update(info, config.app_dir() / "updates",
-                progress=self.download_progress.emit, status=self.phase_changed.emit)
+                progress=self.download_progress.emit, status=self.phase_changed.emit, preview_client=preview_client)
+            if target is None:
+                return archive
             self.phase_changed.emit("Preparing the update…")
             try:
                 new_app = updater.stage_update(archive, target)
@@ -151,6 +169,16 @@ class UpdateDialog(QDialog):
             return _script, cmd
 
         def done(prepared) -> None:
+            if target is None:
+                self._installing = False
+                self.later_btn.setEnabled(True)
+                self.progress.setVisible(False)
+                self.update_btn.setEnabled(True)
+                self.update_btn.setText("Open folder")
+                self.update_btn.clicked.disconnect()
+                self.update_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(prepared.parent))))
+                self._say(f"Verified installer saved to {prepared}. Open the folder and run it when you are ready.")
+                return
             script, cmd = prepared
             try:
                 updater.mark_pending(info.version)
@@ -183,14 +211,15 @@ class UpdateDialog(QDialog):
             timer.start(100)
 
         def failed(exc) -> None:
+            from ..sponsors import SponsorError
             self._installing = False
             self.later_btn.setEnabled(True)
             self.progress.setVisible(False)
-            self.update_btn.setText("Download")
+            self.update_btn.setText("Try again" if info.channel == "preview" else "Download")
             self.update_btn.setEnabled(True)
             self.update_btn.clicked.disconnect()
-            self.update_btn.clicked.connect(self._open_page)
-            msg = str(exc) if isinstance(exc, updater.UpdateError) else "The update could not be installed."
+            self.update_btn.clicked.connect(self.install if info.channel == "preview" else self._open_page)
+            msg = str(exc) if isinstance(exc, (updater.UpdateError, SponsorError)) else "The update could not be installed."
             self._say(msg)
 
         run_async(self, work, done, failed)

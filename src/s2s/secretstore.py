@@ -21,6 +21,8 @@ APPLE_DEVELOPER_TOKEN = "apple_developer_token"
 APPLE_MEDIA_USER_TOKEN = "apple_media_user_token"
 SLSKD_API_KEY = "slskd_api_key"
 SPOTIFY_SESSION = "spotify_session"
+SPONSOR_GITHUB_TOKEN = "sponsor_github_token"
+SPONSOR_ENTITLEMENT = "sponsor_entitlement"  # UX-only cache, never server download authorization
 
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 _ENTROPY = b"djimport/v1"  # pre-rename value; changing it would make every stored secret unreadable

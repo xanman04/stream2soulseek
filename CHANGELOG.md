@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.6.3 — 2026-11-04
 
+- Add Stable/Preview update-channel support with explicit sponsor opt-in, GitHub device sign-in,
+  private-preview service components, and correct prerelease version ordering. Preview remains disabled in this release. The service must be
+  configured and verified before sponsor preview access can be activated; stable updates stay independent.
+- Prevent preview versions from building or uploading release artifacts in the public repository.
+  Private previews retain installer signature checks and never replace GitHub's Latest stable release.
 - Optional support is available through GitHub Sponsors. The More → Support S2S action now opens the
   public sponsorship page, and the repository includes a Sponsor button.
 

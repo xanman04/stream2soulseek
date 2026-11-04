@@ -1,0 +1,23 @@
+{
+  "$schema": "https://developers.cloudflare.com/workers/wrangler/schema.json",
+  "name": "s2s-sponsor-worker",
+  "main": "index.js",
+  "compatibility_date": "2026-11-03",
+  "vars": {
+    "GITHUB_CLIENT_ID": "Ov23li1Cz7fdt9bXFKPh",
+    "SPONSOR_LOGIN": "xanman04",
+    "PREVIEW_REPO": "xanman04/stream2soulseek-preview"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": false,
+      "head_sampling_rate": 0.05
+    }
+  }
+}

@@ -26,6 +26,7 @@ from .context import AppContext
 from .matching_rules import MatchingRulesWidget
 from .util import show_error
 from .workers import run_async
+from .update_settings import UpdateSettingsWidget
 
 
 class SettingsDialog(QDialog):
@@ -121,6 +122,9 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(general, "General")
         self.tabs.addTab(scroll, "Matching rules")
         self.tabs.addTab(sharing, "Sharing")
+        self.updates = UpdateSettingsWidget(ctx)
+        self.finished.connect(self.updates.stop)
+        self.tabs.addTab(self.updates, "Updates")
         self.tabs.addTab(advanced, "Advanced")
         if matching:
             self.tabs.setCurrentIndex(1)
@@ -213,7 +217,8 @@ class SettingsDialog(QDialog):
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
                 match_policy=self.rules.policy(),
-                rule_layouts=dict(self.rules.layouts), shared_folders=self.shared_folders())
+                rule_layouts=dict(self.rules.layouts), shared_folders=self.shared_folders(),
+                update_channel=self.updates.selected_channel())
             for f in new.shared_folders:  # the downloads folder may have changed since a folder was added
                 problem = self._share_problem(f)
                 if problem:

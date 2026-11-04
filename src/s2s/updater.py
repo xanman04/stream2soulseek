@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .update_key import PUBLIC_KEY_B64
+from .release_versions import parse_version as _parse_semver
 
 REPO = "xanman04/stream2soulseek"
 LATEST_API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -50,6 +51,7 @@ class UpdateInfo:
     signature: str  # base64 Ed25519 signature of (archive_name, sha256), from the release text
     page_url: str
     size_bytes: int | None = None
+    channel: str = "stable"
 
 
 SIGNATURE_BLOCK = "s2s-update-signatures"
@@ -89,33 +91,70 @@ def platform_target() -> str | None:
     return None
 
 
-def parse_version(text: str) -> tuple[int, ...]:
-    parts = []
-    for piece in text.strip().lstrip("vV").split("."):
-        digits = "".join(ch for ch in piece if ch.isdigit())
-        parts.append(int(digits) if digits else 0)
-    return tuple(parts + [0] * (3 - len(parts)))
+def parse_version(text: str):
+    """SemVer precedence, accepting old two-component stable tags for compatibility."""
+    text = text.strip().lstrip("vV")
+    if re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", text):
+        text += ".0"
+    return _parse_semver(text)
 
 
 def is_newer(candidate: str, current: str) -> bool:
-    return parse_version(candidate) > parse_version(current)
+    try:
+        return parse_version(candidate) > parse_version(current)
+    except (ValueError, AttributeError):
+        return False
 
 
-def check_for_update(current: str, *, http_get=None) -> UpdateInfo | None:
-    """The latest release when it is newer than `current` and has a signed archive for this computer."""
+def check_for_update(current: str, *, http_get=None, channel: str = "stable",
+                     preview_releases=None, on_preview_error=None) -> UpdateInfo | None:
+    """Stable by default. Preview data must come from an authenticated service client.
+
+    A preview-service failure never prevents a stable update. No public prerelease scan or
+    local entitlement switch grants access to private preview downloads.
+    """
+    if channel not in ("stable", "preview"):
+        channel = "stable"
     target = platform_target()
     if target is None:
         return None
     get = http_get or _http_get
+    stable_error = None
+    releases = []
     try:
         release = get(LATEST_API).json()
-    except Exception as exc:  # noqa: BLE001
-        raise UpdateError("Could not check for updates. Check your internet connection.") from exc
-    if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+        info = _release_info(release, current, target, preview=False)
+        if info:
+            releases.append(info)
+    except Exception:  # noqa: BLE001
+        stable_error = UpdateError("Could not check stable updates. Check your internet connection.")
+    if channel == "preview" and preview_releases is not None:
+        try:
+            payload = preview_releases()
+            if not isinstance(payload, list):
+                raise UpdateError("Invalid preview release list.")
+            for release in payload:
+                info = _release_info(release, current, target, preview=True)
+                if info:
+                    releases.append(info)
+        except Exception:  # never expose authenticated URLs, upstream bodies or credentials
+            if on_preview_error:
+                on_preview_error("Preview updates could not be checked. Stable updates remain available.")
+    if releases:
+        return max(releases, key=lambda info: parse_version(info.version))
+    if stable_error:
+        raise stable_error
+    return None
+
+
+def _release_info(release, current: str, target: str, *, preview: bool) -> UpdateInfo | None:
+    if not isinstance(release, dict) or release.get("draft") or bool(release.get("prerelease")) != preview:
         return None
     version = str(release.get("tag_name") or "").lstrip("vV")
     if not version or not is_newer(version, current):
         return None
+    if bool(parse_version(version).prerelease) != preview:
+        return None  # mislabelled release must never send a preview to the stable channel
     assets = {a.get("name"): a.get("browser_download_url") for a in release.get("assets") or [] if isinstance(a, dict)}
     body = str(release.get("body") or "")
     name = installer_name(version, target)
@@ -126,7 +165,7 @@ def check_for_update(current: str, *, http_get=None) -> UpdateInfo | None:
                  if isinstance(a, dict) and a.get("name") == name), None)
     size = size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else None
     return UpdateInfo(version, visible_notes(body), name, assets[name], signed[1],
-                      str(release.get("html_url") or RELEASES_PAGE), size)
+                      str(release.get("html_url") or RELEASES_PAGE), size, "preview" if preview else "stable")
 
 
 def signed_message(archive_name: str, sha256: str) -> bytes:
@@ -145,7 +184,8 @@ def verify_signature(archive_name: str, sha256: str, signature_b64: str, public_
     return verify(key, signed_message(archive_name, sha256), signature)
 
 
-def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=None, status=None) -> Path:
+def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=None, status=None,
+                    preview_client=None) -> Path:
     """Download and verify the installer. Returns its path; raises UpdateError when it is not genuine."""
     folder.mkdir(parents=True, exist_ok=True)
     archive = folder / info.archive_name
@@ -179,6 +219,11 @@ def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=N
     try:
         if http_get is not None:
             write(http_get(info.archive_url))
+        elif info.channel == "preview":
+            if preview_client is None:
+                raise UpdateError("Connect your sponsor account to download this preview.")
+            with preview_client.stream_download(info.archive_url) as response:
+                write(response)
         else:
             with _stream_get(info.archive_url) as response:
                 write(response)

@@ -9,6 +9,9 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 ROOT = Path(SPECPATH).parent  # noqa: F821 - provided by PyInstaller
 VERSION = os.environ.get("S2S_VERSION", "0.0.0")
+# macOS bundle version keys require numeric components; S2S and installer filenames
+# retain the full prerelease version for updater precedence and signature checks.
+BUNDLE_VERSION = VERSION.split("-", 1)[0].split("+", 1)[0]
 ICON_PNG = str(ROOT / "src" / "s2s" / "ui" / "assets" / "s2s-icon.png")
 
 datas, binaries, hidden = [], [], []
@@ -45,12 +48,12 @@ if sys.platform == "darwin":
         name="S2S.app",
         icon=ICON_PNG,
         bundle_identifier="io.github.xanman04.s2s",
-        version=VERSION,
+        version=BUNDLE_VERSION,
         info_plist={
             "CFBundleName": "S2S",
             "CFBundleDisplayName": "S2S",
-            "CFBundleShortVersionString": VERSION,
-            "CFBundleVersion": VERSION,
+            "CFBundleShortVersionString": BUNDLE_VERSION,
+            "CFBundleVersion": BUNDLE_VERSION,
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "14.4",  # minimum supported by the pinned Qt 6.12 build
             "NSHumanReadableCopyright": "Copyright (C) 2026 xanman04. GNU GPL v3 or later.",

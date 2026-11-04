@@ -12,8 +12,36 @@ permissions:
   contents: write
 
 jobs:
+  sponsor-service-tests:
+    name: Test sponsor access service
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test services/sponsor-worker/test/*.test.js
+
+  classify:
+    name: Classify release channel
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.classify.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Block previews in public repositories
+        id: classify
+        run: python packaging/release_channel.py --tag "$S2S_RELEASE_TAG" --private "$S2S_REPO_PRIVATE"
+        env:
+          S2S_RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          S2S_REPO_PRIVATE: ${{ github.event.repository.private }}
+
   build:
     name: Build ${{ matrix.label }}
+    needs: classify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -56,7 +84,7 @@ jobs:
 
   release:
     name: Publish the release
-    needs: build
+    needs: [classify, build, sponsor-service-tests]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -84,6 +112,7 @@ jobs:
         with:
           name: S2S ${{ steps.verify.outputs.version }}
           body_path: release-notes.md
+          prerelease: ${{ needs.classify.outputs.channel == 'preview' }}
           files: |
             assets/S2S-*-setup.exe
             assets/S2S-*.dmg
@@ -91,11 +120,15 @@ jobs:
           draft: true
       - name: Publish the complete release as Latest
         uses: actions/github-script@v8
+        env:
+          S2S_RELEASE_CHANNEL: ${{ needs.classify.outputs.channel }}
         with:
           script: |
             // Look the draft up by its id: GitHub's by-tag lookup only returns published releases.
             const repo = {owner: context.repo.owner, repo: context.repo.repo};
             const release_id = Number('${{ steps.draft.outputs.id }}');
+            const channel = process.env.S2S_RELEASE_CHANNEL;
+            if (!['stable', 'preview'].includes(channel)) throw new Error(`Invalid release channel: ${channel}`);
             const {data: assets} = await github.rest.repos.listReleaseAssets({...repo, release_id, per_page: 100});
             if (assets.length !== 3) throw new Error(`Expected only the 3 installers, found ${assets.length}`);
-            await github.rest.repos.updateRelease({...repo, release_id, draft: false, make_latest: 'true'});
+            await github.rest.repos.updateRelease({...repo, release_id, draft: false, prerelease: channel === 'preview', make_latest: channel === 'stable' ? 'true' : 'false'});
