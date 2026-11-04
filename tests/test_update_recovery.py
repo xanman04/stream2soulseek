@@ -93,6 +93,43 @@ def test_update_dialog_progress_and_close_protection():
     dialog.deleteLater()
 
 
+def test_update_eta_requires_stable_progress_and_clears_when_measurements_stop(monkeypatch):
+    from types import SimpleNamespace
+
+    from s2s.ui import update_dialog
+
+    now = 0
+    monkeypatch.setattr(update_dialog, "time", SimpleNamespace(monotonic=lambda: now))
+    dialog = update_dialog.UpdateDialog(updater.UpdateInfo("9", "", "setup.exe", "", "", ""))
+    dialog._show_progress(-1)
+    assert dialog.estimate.isHidden()
+    for now, fraction in enumerate((0.0, 0.03, 0.06)):
+        dialog._show_progress(fraction)
+        assert dialog.estimate.isHidden()
+
+    now = 3
+    dialog._show_progress(0.09)
+    assert not dialog.estimate.isHidden()
+    assert dialog.estimate.text() == "About 35 seconds left"
+
+    now = 4
+    dialog._show_progress(0.2)
+    assert dialog.estimate.isHidden()
+    for now, fraction in enumerate((0.23, 0.26, 0.29), start=5):
+        dialog._show_progress(fraction)
+    assert not dialog.estimate.isHidden()
+
+    now = 9
+    dialog._expire_estimate()
+    assert dialog.estimate.isHidden()
+    for now, fraction in enumerate((0.32, 0.35, 0.38, 0.41), start=10):
+        dialog._show_progress(fraction)
+    assert not dialog.estimate.isHidden()
+    dialog._say("Verifying the downloaded update…")
+    assert dialog.estimate.isHidden()
+    dialog.deleteLater()
+
+
 def test_rendered_windows_helper_has_no_template_tokens_and_parses(tmp_path, monkeypatch):
     import subprocess
 

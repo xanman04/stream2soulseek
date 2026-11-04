@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import sys
 import time
+from collections import deque
+from math import ceil
 
 from PySide6.QtCore import QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -43,6 +45,11 @@ class UpdateDialog(QDialog):
         self.info = info
         self.target = target  # where the new version is installed; None: this copy cannot update itself
         self._installing = False
+        self._download_samples: deque[tuple[float, float]] = deque(maxlen=4)
+        self._last_progress_at: float | None = None
+        self._estimate_timer = QTimer(self)
+        self._estimate_timer.setInterval(500)
+        self._estimate_timer.timeout.connect(self._expire_estimate)
         self.download_progress.connect(self._show_progress)
         self.phase_changed.connect(self._say)
         self.setWindowTitle("Update S2S")
@@ -83,8 +90,11 @@ class UpdateDialog(QDialog):
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
+        self.estimate = theme.subtle(QLabel())
+        self.estimate.hide()
         lay.addWidget(self.status)
         lay.addWidget(self.progress)
+        lay.addWidget(self.estimate)
         lay.addSpacing(10)
 
         later = self.later_btn = QPushButton("Later")
@@ -117,6 +127,7 @@ class UpdateDialog(QDialog):
         self.accept()
 
     def _say(self, text: str) -> None:
+        self._reset_estimate()
         self.status.setText(text)
         self.status.setVisible(bool(text))
 
@@ -125,6 +136,48 @@ class UpdateDialog(QDialog):
         self.progress.setTextVisible(fraction >= 0)
         if fraction >= 0:
             self.progress.setValue(round(fraction * 1000))
+        if not 0 <= fraction < 1:
+            self._reset_estimate()
+            return
+        now = time.monotonic()
+        self._expire_estimate(now)
+        self._last_progress_at = now
+        if not self._estimate_timer.isActive():
+            self._estimate_timer.start()
+        samples = self._download_samples
+        if samples and now - samples[-1][0] < 1:
+            return
+        samples.append((now, fraction))
+        if len(samples) < samples.maxlen:
+            return
+        rates = [(end - start) / (later - earlier)
+                 for (earlier, start), (later, end) in zip(samples, list(samples)[1:])]
+        if min(rates) <= 0 or max(rates) > 1.5 * min(rates):
+            self.estimate.hide()
+            return
+        seconds = (1 - fraction) * (now - samples[0][0]) / (fraction - samples[0][1])
+        if seconds < 5:
+            self.estimate.hide()
+            return
+        if seconds < 60:
+            text = f"About {ceil(seconds / 5) * 5} seconds left"
+        else:
+            minutes = round(seconds / 60)
+            text = f"About {minutes} {'minute' if minutes == 1 else 'minutes'} left"
+        self.estimate.setText(text)
+        self.estimate.show()
+
+    def _reset_estimate(self) -> None:
+        self._download_samples.clear()
+        self._last_progress_at = None
+        self._estimate_timer.stop()
+        self.estimate.hide()
+
+    def _expire_estimate(self, now: float | None = None) -> None:
+        if now is None:
+            now = time.monotonic()
+        if self._last_progress_at is not None and now - self._last_progress_at >= 2:
+            self._reset_estimate()
 
     def reject(self) -> None:
         if not self._installing:

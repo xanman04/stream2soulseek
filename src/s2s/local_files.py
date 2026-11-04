@@ -67,8 +67,29 @@ def source_path(filename: str, downloads_dir: str) -> Path:
     return path
 
 
-def validate_source(filename: str, downloads_dir: str, size: int, digest: str) -> Path:
-    path = source_path(filename, downloads_dir)
+def reuse_folders(settings) -> tuple[str, ...]:
+    """Additional completed-download roots, including a recognizable older slskd layout."""
+    folders = list(settings.local_reuse_folders)
+    if settings.slskd_downloads_dir:
+        current = Path(settings.slskd_downloads_dir)
+        legacy = current.parent / "complete"
+        if current != legacy and (legacy / settings.archive_dir_name).is_dir():
+            folders.append(str(legacy))
+    return tuple(dict.fromkeys(folder for folder in folders if Path(folder).is_absolute()))
+
+
+def validate_source(filename: str, downloads_dir: str, size: int, digest: str,
+                    *, extra_roots: tuple[str, ...] = ()) -> Path:
+    for root in (downloads_dir, *extra_roots):
+        if not root:
+            continue
+        try:
+            path = source_path(filename, root)
+        except (OSError, ValueError):
+            continue
+        break
+    else:
+        raise ValueError("source is outside the configured Soulseek download folders or is unavailable")
     if path.stat().st_size != size or organize._sha256(path) != digest:
         raise ValueError("the local file changed since review")
     return path
@@ -103,29 +124,38 @@ class LocalIndex:
         self.settings, self.cancel = settings, cancel
         self.entries = []
         self.digests = {}
-        if not settings.slskd_downloads_dir or not settings.ffprobe_path:
+        if not settings.ffprobe_path:
             return
-        root = Path(settings.slskd_downloads_dir)
-        if not root.is_dir() or root.is_symlink() or getattr(root, "is_junction", lambda: False)():
-            return
+        from .slskd.service import incomplete_dir_for
+
+        incomplete = Path(incomplete_dir_for(settings)).resolve()
         accepted = {ext for rule in settings.match_policy.formats for ext in EXTENSIONS[rule.kind]}
-        paths = []
-        for directory, dirs, files in os.walk(root, followlinks=False):
-            dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink()
-                       and not getattr(Path(directory) / d, "is_junction", lambda: False)()]
+        paths = {}
+        for folder in (settings.slskd_downloads_dir, *reuse_folders(settings)):
             if cancel.is_set():
                 break
-            for name in files:
+            if not folder:
+                continue
+            root = Path(folder).absolute()
+            if (not root.is_dir() or root.is_symlink() or getattr(root, "is_junction", lambda: False)()
+                    or root.resolve().is_relative_to(incomplete)):
+                continue
+            for directory, dirs, files in os.walk(root, followlinks=False):
+                parent = Path(directory)
+                dirs[:] = [d for d in dirs if not (parent / d).is_symlink()
+                           and not getattr(parent / d, "is_junction", lambda: False)()
+                           and (parent / d).resolve() != incomplete]
                 if cancel.is_set():
                     break
-                path = Path(directory) / name
-                if path.suffix.lower().lstrip(".") not in accepted:
-                    continue
-                paths.append(path)
+                for name in files:
+                    path = parent / name
+                    if path.suffix.lower().lstrip(".") in accepted:
+                        paths.setdefault(path, root)
 
-        def inspect(path):
+        def inspect(entry):
             if cancel.is_set():
                 return None
+            path, root = entry
             try:
                 path = source_path(str(path.absolute()), str(root))
                 before = path.stat()
@@ -138,18 +168,18 @@ class LocalIndex:
                     store.cache_local_audio(str(path), sig, metadata)
                 ext = path.suffix.lower().lstrip(".")
                 if not verify_downloaded(ext, metadata["codec"], metadata["bitrate"], settings.match_policy):
-                    return path, before, metadata
+                    return path, root, before, metadata
             except (OSError, ValueError, StopIteration, KeyError, TypeError, subprocess.SubprocessError):
                 pass  # unreadable/unfinished files remain available to the normal search
             return None
 
         # Limit ffprobe processes; unchanged files use the persistent stat-keyed cache.
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="local-audio") as pool:
-            self.entries = [entry for entry in pool.map(inspect, paths) if entry is not None]
+            self.entries = [entry for entry in pool.map(inspect, paths.items()) if entry is not None]
 
     def find(self, track):
         candidates = []
-        for path, scanned_stat, meta in self.entries:
+        for path, root, scanned_stat, meta in self.entries:
             if self.cancel.is_set():
                 return None
             size = scanned_stat.st_size
@@ -164,7 +194,7 @@ class LocalIndex:
                            length_s=meta["duration"])
             # Use tags when present, but also check the original name: version evidence in either
             # must not be erased by incomplete tags (e.g. a file labelled VIP with a plain title tag).
-            relative = path.relative_to(Path(self.settings.slskd_downloads_dir).resolve())
+            relative = path.relative_to(root)
             evidence = str(relative)
             tagged = bool(meta["title"] and meta["artist"])
             if tagged:
@@ -189,7 +219,7 @@ class LocalIndex:
             try:
                 digest = self.digests.get(str(path)) or organize._sha256(path)
                 self.digests[str(path)] = digest
-                validate_source(str(path), self.settings.slskd_downloads_dir, size, digest)
+                validate_source(str(path), str(root), size, digest)
                 if _signature(path.stat()) != _signature(scanned_stat):
                     continue
             except (OSError, ValueError):

@@ -338,6 +338,7 @@ class Settings:
 
     slskd_url: str = "http://127.0.0.1:5030"
     slskd_downloads_dir: str = ""  # must be set by the user (Settings); the folder slskd downloads into
+    local_reuse_folders: list[str] = field(default_factory=list)  # additional completed-download folders
     ffprobe_path: str = field(default_factory=default_ffprobe_path)
     search_timeout_s: int = 30
     response_limit: int = 100

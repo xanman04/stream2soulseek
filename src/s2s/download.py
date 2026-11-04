@@ -107,7 +107,7 @@ class DownloadService:
     # -------------------------------------------------------------- refresh
 
     def replace_selection(self, previous_id: str, import_id: str, item: SelectionItem, *, downloads_dir: str,
-                          archive_name: str = "OLD"):
+                          archive_name: str = "OLD", extra_roots: tuple[str, ...] = ()):
         """Confirm one manual replacement. Cancel a waiting source before persisting/queuing its successor."""
         with _RECOVERY_LOCK, self._lock:
             previous = self._store.get_approval(previous_id)
@@ -120,7 +120,7 @@ class DownloadService:
             if not any(i.apple_id == item.apple_id for i in previous.items):
                 raise ApprovalError("Track is not in the previous selection")
             approval = prepare_approval(self._store, import_id, [item], downloads_dir=downloads_dir,
-                                        archive_name=archive_name)
+                                        archive_name=archive_name, extra_roots=extra_roots)
             rec = self._store.get_transfer(previous_id, item.apple_id)
             if rec is not None and rec.status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS,
                                                         TransferState.UNKNOWN):

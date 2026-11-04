@@ -30,7 +30,7 @@ class Svc:
         self.enqueued.append((aid, fp))
         return []
 
-    def replace_selection(self, previous_id, import_id, item, *, downloads_dir, archive_name="OLD"):
+    def replace_selection(self, previous_id, import_id, item, *, downloads_dir, archive_name="OLD", extra_roots=()):
         approval = create_approval(self.store, import_id, [item], downloads_dir=downloads_dir,
                                    archive_name=archive_name)
         self.enqueue_approved(approval.id, approval.fingerprint)

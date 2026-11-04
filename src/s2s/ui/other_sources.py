@@ -226,6 +226,7 @@ class OtherSourcesPanel(TrackSearchPage):
         def work():
             from ..track_search import remember_manual_candidate
             from ..models import TransferState
+            from ..local_files import reuse_folders
             if item_.manual_free:
                 remember_manual_candidate(ctx.store, import_id, track, cand.file)
             record = ctx.store.get_transfer(previous_id, apple_id)
@@ -236,7 +237,8 @@ class OtherSourcesPanel(TrackSearchPage):
             with service as svc:
                 approval = svc.replace_selection(previous_id, import_id, item_,
                                                   downloads_dir=ctx.settings.slskd_downloads_dir,
-                                                  archive_name=ctx.settings.archive_dir_name)
+                                                  archive_name=ctx.settings.archive_dir_name,
+                                                  extra_roots=reuse_folders(ctx.settings))
                 if item_.local_sha256 is not None:
                     workflow.import_completed(ctx.store, approval.id, ctx.settings)
             return approval

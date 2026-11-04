@@ -128,6 +128,31 @@ def test_a_different_version_in_the_folder_does_not_skip_the_track(env):
     assert res[0].status == MatchStatus.PROPOSED
 
 
+def test_local_remix_and_missing_feature_credit_skip_soulseek(env, monkeypatch):
+    from s2s import local_files
+
+    destination = env.root / "House"
+    (destination / "Beamin' [K Motionz & skantia rmx] - skantia, k motionz, songer.mp3").write_bytes(b"synthetic")
+    (destination / "Work Hard Play Hard - Rendah.flac").write_bytes(b"synthetic")
+    env.settings.ffprobe_path = "ffprobe"
+
+    def probe(path, *_):
+        if path.suffix == ".flac":
+            return {"title": "Work Hard Play Hard", "artist": "Rendah", "duration": 229}
+        return {}
+
+    monkeypatch.setattr(local_files, "_probe", probe)
+    playlist = [
+        AppleTrack("i.1", "Beamin’ (feat. Songer) [K Motionz & skantia Remix]", "K Motionz & skantia"),
+        AppleTrack("i.2", "Work Hard Play Hard (feat. Burrahz)", "Rendah", duration_ms=228_966, position=1),
+    ]
+    client = FakeSlskd({})
+    results, events = run(env, client, playlist)
+    assert [(r.status, r.note) for r in results] == [(MatchStatus.SKIPPED, "already in folder")] * 2
+    assert [event[2].status for event in events] == [MatchStatus.SKIPPED] * 2
+    assert not client.texts
+
+
 def test_already_imported_tracks_are_skipped_without_searching(env):
     from s2s.models import ImportResult
     prev = env.store.create_import(Playlist("p.0", "Old"), str(env.root / "House"))

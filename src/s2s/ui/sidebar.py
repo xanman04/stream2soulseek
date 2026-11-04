@@ -337,6 +337,7 @@ class Sidebar(QWidget):
         brand = self.brand_btn = QPushButton()
         brand.setObjectName("appBrand")
         brand.setAccessibleName("S2S — Home")
+        brand.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         brand.setCursor(Qt.CursorShape.PointingHandCursor)
         self._brand_row = QHBoxLayout(brand)
         self._mark = QLabel()

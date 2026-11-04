@@ -822,6 +822,8 @@ class ReviewPage(QWidget):
         self.confirm_btn.setEnabled(False)
         foot = QHBoxLayout()
         foot.addWidget(self.dest_label, 1)
+        self.cancel_btn = QPushButton("Cancel transfer")
+        foot.addWidget(self.cancel_btn)
         foot.addWidget(self.confirm_btn)
 
         lay = QVBoxLayout(self)
@@ -931,6 +933,7 @@ class ReviewPage(QWidget):
                     replacement: bool = False, without_source: int = 0) -> None:
         self._locked = locked
         self.replacement = replacement
+        self.cancel_btn.setText("Back to downloads" if replacement else "Cancel transfer")
         self._without_source = without_source
         self._notice = None
         policy = self.ctx.settings.match_policy
@@ -1234,8 +1237,10 @@ class ReviewPage(QWidget):
             return next((i for i, r in enumerate(self.model.rows) if r.result.track.apple_id == track.apple_id), -1)
 
         def done(result):
+            if generation != self._load_generation or import_id != self.ctx.import_id:
+                return
             idx = finish()
-            if generation != self._load_generation or import_id != self.ctx.import_id or idx < 0:
+            if idx < 0:
                 return
             self._notice = None
             self.model.replace_result(idx, result)
@@ -1245,6 +1250,8 @@ class ReviewPage(QWidget):
             self._update_footer()
 
         def failed(exc):
+            if generation != self._load_generation or import_id != self.ctx.import_id:
+                return
             idx = finish()
             if idx >= 0:
                 self.model.row_changed(idx)
@@ -1368,11 +1375,13 @@ class ReviewPage(QWidget):
         self._update_footer()
 
         def work():
+            from ..local_files import reuse_folders
+
             service = (ctx.download_service(local_only=True) if all(it.local_sha256 is not None for it in items)
                        else ctx.download_service())
             with service as svc:  # client built first for remote items; local-only approvals need no connection
                 approval = create_approval(ctx.store, import_id, items, downloads_dir=downloads_dir,
-                                           archive_name=archive_name)
+                                           archive_name=archive_name, extra_roots=reuse_folders(ctx.settings))
                 svc.enqueue_approved(approval.id, approval.fingerprint)
                 if any(it.local_sha256 is not None for it in items):
                     workflow.import_completed(ctx.store, approval.id, ctx.settings)

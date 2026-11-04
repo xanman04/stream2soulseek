@@ -137,7 +137,7 @@ def incomplete_dir_for(settings: Settings) -> str:
     explicit = settings.extra.get("slskd_incomplete_dir")
     if explicit:
         return str(explicit)
-    return str(config.app_dir() / "slskd" / "incomplete")
+    return str(config.app_dir_path() / "slskd" / "incomplete")
 
 
 # ------------------------------------------------------------------ config

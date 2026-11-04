@@ -79,6 +79,21 @@ def test_confirmed_cancel_shows_home_while_worker_drains_then_clears_selection(w
     assert not win.search._discard_cancelled
 
 
+def test_cancel_from_review_clears_draft_only_after_confirmation(win, monkeypatch, tmp_path):
+    _select_playlist(win, tmp_path)
+    win.stack.setCurrentWidget(win.frames[3])
+    monkeypatch.setattr(win, "ask_cancel_search", lambda: False)
+    win.review.cancel_btn.click()
+    assert win.ctx.playlist is not None
+    assert win.stack.currentWidget() is win.frames[3]
+
+    monkeypatch.setattr(win, "ask_cancel_search", lambda: True)
+    win.review.cancel_btn.click()
+    assert win.ctx.playlist is None
+    assert win.ctx.import_id is None
+    assert win.stack.currentWidget() is win.home
+
+
 def test_declined_cancel_keeps_search_and_selection_untouched(win, monkeypatch, tmp_path):
     _select_playlist(win, tmp_path)
     win.search._set_running(True)

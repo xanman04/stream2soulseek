@@ -17,6 +17,7 @@ import unicodedata
 from pathlib import Path
 
 from .matching.formats import EXTENSIONS, verify_downloaded
+from .matching.versions import parse_title, split_names, version_words
 from .models import AppleTrack, ImportOutcome, ImportResult, MatchPolicy, Tier, TransferState, TransferStatus
 
 PARTIAL_SUFFIX = ".s2s-partial"
@@ -236,6 +237,9 @@ def find_existing(destination: str, track: AppleTrack) -> list[Path]:
 
 
 _FEAT = {"feat", "ft", "featuring"}
+LibraryIdentity = tuple[str, str, bool, str | None, tuple[str, ...], frozenset[str]]
+LibraryName = tuple[list[str], set[LibraryIdentity | None]]
+LibraryTags = tuple[list[str], list[str], float, LibraryIdentity | None, LibraryName]
 
 
 def _clean_words(words: list[str], *, number: bool = False) -> list[str]:
@@ -254,20 +258,20 @@ def _clean_words(words: list[str], *, number: bool = False) -> list[str]:
     return out
 
 
-def library_names(destination: str) -> list[list[str]]:
-    """Read-only: the word lists of the file names in a library folder, read once for many tracks."""
+def library_names(destination: str) -> list[LibraryName]:
+    """Read the audio filenames once, preserving title and artist boundaries."""
     d = Path(destination)
     if not d.is_dir():
         return []
     try:
-        return [_clean_words(_norm(p.stem).split(), number=True) for p in sorted(d.iterdir())
-                if p.is_file() and not p.name.endswith(PARTIAL_SUFFIX)]
+        return [_library_name(p.stem) for p in sorted(d.iterdir())
+                if p.is_file() and p.suffix.lower().lstrip(".") in AUDIO_SUFFIXES]
     except OSError:
         return []
 
 
-def library_tags(destination: str, store, settings, cancel=None, *, runner=None) -> list[tuple[list[str], list[str], float]]:
-    """Read-only: (title words, artist words, seconds) from the tags of each audio file in a library folder.
+def library_tags(destination: str, store, settings, cancel=None, *, runner=None) -> list[LibraryTags]:
+    """Read-only: index audio tags, duration and filename evidence for a library folder.
 
     Lets a file you added yourself be recognised by what it IS, not only by what it is called. Tags are cached by
     path and file signature, so a folder is read once. Files that cannot be read are simply left out."""
@@ -296,8 +300,11 @@ def library_tags(destination: str, store, settings, cancel=None, *, runner=None)
             if meta is None:
                 meta = _probe(path, settings.ffprobe_path, run)
                 store.cache_local_audio(str(path), signature, meta)
-            title, artist = _clean_words(_norm(meta.get("title", "")).split()), _norm(meta.get("artist", "")).split()
-            return (title, artist, float(meta.get("duration") or 0)) if title and artist else None
+            raw_title, raw_artist = meta.get("title", ""), meta.get("artist", "")
+            title, artist = _clean_words(_norm(raw_title).split()), _norm(raw_artist).split()
+            if title and artist:
+                return (title, artist, float(meta.get("duration") or 0),
+                        _library_identity(raw_title, raw_artist), _library_name(path.stem))
         except (OSError, ValueError, KeyError, TypeError, StopIteration, subprocess.SubprocessError):
             return None
 
@@ -317,33 +324,68 @@ def _without(words: list[str], part: list[str]) -> list[str] | None:
     return None
 
 
-def in_library(track: AppleTrack, names: list[list[str]]) -> bool:
-    """True when a file is named for exactly this title and artist and for nothing else.
+def _library_identity(title: str, artist: str) -> LibraryIdentity | None:
+    parsed = parse_title(title)
+    if not parsed.base or parsed.extra_brackets:
+        return None
+    credits = frozenset(split_names(artist)) | frozenset(parsed.featured)
+    if not credits:
+        return None
+    version = tuple("remix" if word == "rmx" else word for word in version_words(parsed.version))
+    if version == ("original", "mix"):
+        version = ()
+    return parsed.base, parsed.kind, parsed.extended, parsed.excluded, version, credits
 
-    "Title - Artist", "Artist - Title" and "Title (Version) - Artist" for a track whose title already carries that
-    version all match. Any extra word (a VIP, a remix, a second artist, a track number) means it may be a different
-    recording, so it does not match: that track is searched as usual rather than skipped on a guess."""
+
+def _library_name(name: str) -> LibraryName:
+    words = _clean_words(_norm(name).split(), number=True)
+    stem = re.sub(r"^\d{1,3}[. _-]+", "", name)
+    identities = set()
+    # Only relax credit order when the filename gives us an explicit boundary.
+    for separator in re.finditer(r"\s+[-–—]\s+", stem):
+        left, right = stem[:separator.start()], stem[separator.end():]
+        identities.update((_library_identity(left, right), _library_identity(right, left)))
+    return words, identities
+
+
+def in_library(track: AppleTrack, names: list[LibraryName]) -> bool:
+    """Match exact filename words or the same title, version and artist credits."""
     title, artist = _clean_words(_norm(track.name).split()), _clean_words(_norm(track.artist).split())
     if not title or not artist:
         return False
-    for words in names:
+    identity = _library_identity(track.name, track.artist)
+    for words, identities in names:
         rest = _without(words, title)
         if rest is not None and _without(rest, artist) == []:
+            return True
+        if identity is not None and identity in identities:
             return True
     return False
 
 
-def in_library_by_tags(track: AppleTrack, tagged: list[tuple[list[str], list[str], float]]) -> bool:
-    """True when a file's own tags say it is this recording: the same title (version words included), every word of
-    the track's artist among the file's artists, and, when both lengths are known, within 3 seconds."""
+def in_library_by_tags(track: AppleTrack, tagged: list[LibraryTags]) -> bool:
+    """Match exact tag words, or verify normalized recording and credits against the duration."""
     title, artist = _clean_words(_norm(track.name).split()), _clean_words(_norm(track.artist).split())
     if not title or not artist:
         return False
     wanted = (track.duration_ms or 0) / 1000
-    for tag_title, tag_artist, seconds in tagged:
+    identity = _library_identity(track.name, track.artist)
+    lead_credits = frozenset(split_names(track.artist))
+    for tag_title, tag_artist, seconds, tag_identity, (_, name_identities) in tagged:
+        if wanted and seconds and abs(seconds - wanted) > 3:
+            continue
+        if identity and any(named and named[0] == identity[0] and lead_credits <= named[-1]
+                            and named[:-1] != identity[:-1] for named in name_identities):
+            continue
         if tag_title == title and all(word in tag_artist for word in artist):
-            if not wanted or not seconds or abs(seconds - wanted) <= 3:
-                return True
+            return True
+        if not (wanted and seconds and identity and tag_identity and identity[:-1] == tag_identity[:-1]):
+            continue
+        # A featured credit is sometimes missing from a local tag. Require all
+        # playlist lead artists and reject any unexpected credits.
+        if not lead_credits <= tag_identity[-1] <= identity[-1]:
+            continue
+        return True
     return False
 
 
@@ -390,6 +432,7 @@ def import_file(
     policy: MatchPolicy | None = None,
     require_peer: bool = False,
     local_sha256: str | None = None,
+    extra_roots: tuple[str, ...] = (),
 ) -> ImportResult:
     policy = policy or MatchPolicy()
     aid = track.apple_id
@@ -402,7 +445,8 @@ def import_file(
     try:
         if local_sha256 is not None:
             from .local_files import validate_source
-            src = validate_source(transfer.filename, downloads_dir, transfer.size, local_sha256)
+            src = validate_source(transfer.filename, downloads_dir, transfer.size, local_sha256,
+                                  extra_roots=extra_roots)
         else:
             src = locate_download(downloads_dir, transfer.username, transfer.filename, transfer.size,
                                   archive_name=archive_name, require_peer=require_peer)

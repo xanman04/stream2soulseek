@@ -79,7 +79,7 @@ def local_match(store, settings, track, cancel, runner):
     return result
 
 
-def approve_match(store, iid, result, destination, downloads):
+def approve_match(store, iid, result, destination, downloads, *, extra_roots=()):
     file = result.best.file
     assert file.username == "" and Path(file.filename).is_absolute()
     assert file.local_sha256
@@ -87,13 +87,15 @@ def approve_match(store, iid, result, destination, downloads):
         store, iid,
         [SelectionItem(result.track.apple_id, file.username, file.filename, file.size,
                        str(destination), file.local_sha256)],
-        downloads_dir=str(downloads),
+        downloads_dir=str(downloads), extra_roots=extra_roots,
     )
 
 
-def test_local_copy_roundtrip_stays_approved_and_never_queues(tmp_path):
+@pytest.mark.parametrize("root_name", ["downloads", "old-downloads", "complete"])
+def test_local_copy_roundtrip_stays_approved_and_never_queues(tmp_path, root_name):
     downloads = tmp_path / "downloads"
-    source = downloads / "OLD" / "peer" / "Artist - Song.mp3"
+    downloads.mkdir()
+    source = tmp_path / root_name / "OLD" / "peer" / "Artist - Song.mp3"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"synthetic local audio" * 19)
     store_path = tmp_path / "state.sqlite3"
@@ -101,13 +103,16 @@ def test_local_copy_roundtrip_stays_approved_and_never_queues(tmp_path):
     try:
         iid, destination, track = make_import(store, tmp_path)
         settings = make_settings(downloads)
+        if root_name == "old-downloads":
+            settings.local_reuse_folders = [str(source.parents[2])]
         probe = FakeProbe()
         match = local_match(store, settings, track, threading.Event(), probe)
         assert match.best.file.filename == str(source)
         assert match.best.file.local_sha256
         store.save_match_results(iid, [match])
 
-        approval = approve_match(store, iid, match, destination, downloads)
+        approval = approve_match(store, iid, match, destination, downloads,
+                                 extra_roots=local_files.reuse_folders(settings))
         assert not destination.joinpath("Artist - Song.mp3").exists()
         store.close()
 

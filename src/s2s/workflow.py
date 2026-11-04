@@ -235,7 +235,7 @@ def search_and_match(
     on_stage("Checking your tracklist folder…")
     folder_tags = organize.library_tags(imp.destination, store, settings, cancel)
     from .local_files import LocalIndex
-    on_stage("Checking your existing Soulseek downloads…")
+    on_stage("Checking your Soulseek download folders and archives…")
     local_index = LocalIndex(store, settings, cancel)
     declined_peers = declined_peer_reasons(store)
     slow_peers = slow_peer_reasons(store)
@@ -851,6 +851,8 @@ def import_completed(
                                 cand.detected_version, Path(item.filename.replace("\\", "/")).suffix.lstrip(".")),
                         )
                 else:
+                    from .local_files import reuse_folders
+
                     res = organize.import_file(
                         track=track, tier=cand.tier, detected_version=cand.detected_version,
                         transfer=rec.status, downloads_dir=settings.slskd_downloads_dir,
@@ -858,6 +860,7 @@ def import_completed(
                         archive_name=settings.archive_dir_name, policy=settings.match_policy,
                         require_peer=pool_for_track(store, approval_id, item.apple_id) is not None,
                         local_sha256=item.local_sha256,
+                        extra_roots=reuse_folders(settings) if item.local_sha256 is not None else (),
                     )
             except Exception as exc:
                 res = ImportResult(item.apple_id, ImportOutcome.INVALID, None, None,

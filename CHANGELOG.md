@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.4 — 2026-11-04
+
+- **Find more tracks you already have.** S2S recognizes more filename and tag variations and checks current and older Soulseek download folders before searching. Add other folders in Settings → Advanced.
+- **Cancel a playlist transfer before confirming.** Cancel from playlist selection, folder selection, search, or review to clear the draft and return Home.
+- **Clearer update progress.** Downloads show an estimated time remaining when the speed is steady. The Windows installer has smoother progress animation and clearer phase messages.
+- **Small interface fixes.** The sidebar logo opens Home without highlighting, and the status bar links to GitHub Sponsors.
+
 ## 1.6.3 — 2026-11-04
 
 - Add Stable/Preview update-channel support with explicit sponsor opt-in, GitHub device sign-in,

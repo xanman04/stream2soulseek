@@ -7,7 +7,7 @@ from s2s.models import AppleTrack
 
 
 def names(*files):
-    return [organize._norm(f.rsplit(".", 1)[0]).split() for f in files]
+    return [organize._library_name(f.rsplit(".", 1)[0]) for f in files]
 
 
 def track(title, artist):
@@ -22,6 +22,7 @@ def track(title, artist):
      "Lessons (Interplanetary Criminal Back 2 Skool Mix) - Conducta.mp3"),
     ("Regional Banger (Dismantle Remix)", "Gardna & Dismantle", "Regional Banger (Dismantle Remix) - Gardna, Dismantle.mp3"),
     ("Müta", "Yö Speed", "Muta - Yo Speed.mp3"),
+    ("Ultrasound", "Arcando & Pirapus", "Ultrasound (Original Mix) - Pirapus, Arcando.mp3"),
 ])
 def test_exactly_named_files_match(title, artist, file):
     assert organize.in_library(track(title, artist), names(file))
@@ -30,13 +31,20 @@ def test_exactly_named_files_match(title, artist, file):
 @pytest.mark.parametrize("title, artist, file", [
     ("Fogo", "Yo Speed", "Fogo (VIP Mix) - Yo Speed.mp3"),       # a different version
     ("Fogo", "Yo Speed", "Fogo - Yo Speed feat. Someone.mp3"),   # a different credit
-    ("Fogo", "Yo Speed", "01 Fogo - Yo Speed.mp3"),              # a track number: not sure
     ("Fogo", "Yo Speed", "Fogo - Somebody Else.mp3"),
     ("One", "Lash", "One More Time - Lash.mp3"),
     ("Fogo", "Yo Speed", "Fogo.mp3"),
 ])
 def test_anything_extra_or_missing_does_not_match(title, artist, file):
     assert not organize.in_library(track(title, artist), names(file))
+
+
+def test_remix_abbreviation_and_reordered_credits_match_without_accepting_other_versions():
+    wanted = track("Beamin’ (feat. Songer) [K Motionz & skantia Remix]", "K Motionz & skantia")
+    assert organize.in_library(wanted, names("Beamin' [K Motionz & skantia rmx] - skantia, k motionz, songer.mp3"))
+    assert not organize.in_library(wanted, names("Beamin' [K Motionz rmx] - skantia, k motionz, songer.mp3"))
+    assert not organize.in_library(wanted, names("Beamin' [K Motionz & skantia rmx] - skantia, k motionz.mp3"))
+    assert not organize.in_library(track("Break That", "Georgie Riot"), names("Break That (VIP) - Georgie Riot.mp3"))
 
 
 def test_a_missing_or_empty_folder_matches_nothing(tmp_path):
@@ -77,3 +85,17 @@ def test_a_badly_named_file_is_recognised_by_its_tags(tmp_path, monkeypatch):
     assert not organize.in_library_by_tags(AppleTrack("i", "Fogo", "Yo Speed", duration_ms=260_000), tagged)  # length
     assert not organize.in_library_by_tags(AppleTrack("i", "Fogo (VIP Mix)", "Somebody Else"), tagged)  # artist
     assert not organize.in_library_by_tags(AppleTrack("i", "Zamar", "Yo Speed"), tagged)
+
+
+@pytest.mark.parametrize(("filename", "duration", "expected"), [
+    ("Work Hard Play Hard - Rendah.flac", 229_000, True),
+    ("Work Hard Play Hard - Rendah.flac", None, False),
+    ("Work Hard Play Hard - Rendah.flac", 250_000, False),
+    ("Work Hard Play Hard (VIP) - Rendah.flac", 229_000, False),
+])
+def test_missing_feature_credit_requires_duration_and_no_version_conflict(filename, duration, expected):
+    wanted = AppleTrack("i", "Work Hard Play Hard (feat. Burrahz)", "Rendah", duration_ms=duration)
+    tags = [("work hard play hard".split(), ["rendah"], 229,
+             organize._library_identity("Work Hard Play Hard", "Rendah"),
+             organize._library_name(filename.removesuffix(".flac")))]
+    assert organize.in_library_by_tags(wanted, tags) is expected

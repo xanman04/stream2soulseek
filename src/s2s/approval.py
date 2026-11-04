@@ -96,7 +96,7 @@ def check_destination(dest: str, downloads_dir: str, archive_name: str = "OLD") 
 
 
 def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *, downloads_dir: str,
-                     archive_name: str = "OLD") -> Approval:
+                     archive_name: str = "OLD", extra_roots: tuple[str, ...] = ()) -> Approval:
     """Validate an exact selection without persisting or queueing it."""
     if store.get_import(import_id) is None:
         raise ApprovalError("unknown import")
@@ -128,7 +128,7 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
         if it.local_sha256 is not None:
             from .local_files import validate_source
             try:
-                validate_source(it.filename, downloads_dir, it.size, it.local_sha256)
+                validate_source(it.filename, downloads_dir, it.size, it.local_sha256, extra_roots=extra_roots)
             except (OSError, ValueError) as exc:
                 raise ApprovalError(f"Local file unavailable or changed; search again: {exc}") from exc
         if (cand.tier == Tier.REJECTED or cand.format_rank == 9) and not it.manual_free:
@@ -150,8 +150,9 @@ def prepare_approval(store: Store, import_id: str, items: list[SelectionItem], *
 
 
 def create_approval(store: Store, import_id: str, items: list[SelectionItem], *, downloads_dir: str,
-                    archive_name: str = "OLD") -> Approval:
-    approval = prepare_approval(store, import_id, items, downloads_dir=downloads_dir, archive_name=archive_name)
+                    archive_name: str = "OLD", extra_roots: tuple[str, ...] = ()) -> Approval:
+    approval = prepare_approval(store, import_id, items, downloads_dir=downloads_dir, archive_name=archive_name,
+                                extra_roots=extra_roots)
     store.save_approval(approval)
     return approval
 

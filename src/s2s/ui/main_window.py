@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, QTimer, QUrl
+from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
                                QStackedWidget, QSystemTrayIcon, QWidget)
@@ -143,9 +143,14 @@ class MainWindow(QMainWindow):
         update_act = QAction("Check for updates...", self)
         update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
         tools_menu.addAction(update_act)
+        sponsor_url = "https://github.com/sponsors/xanman04"
         support_act = QAction("Support S2S", self)
-        support_act.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/sponsors/xanman04")))
+        support_act.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(sponsor_url)))
         tools_menu.addAction(support_act)
+        support_link = theme.subtle(QLabel(f'Enjoying S2S? <a href="{sponsor_url}">Support the app</a>'))
+        support_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        support_link.linkActivated.connect(lambda _url: support_act.trigger())
+        self.statusBar().insertPermanentWidget(0, support_link)
         tools_menu.addSeparator()
         tools_menu.addAction(quit_act)
         self.sidebar.tools_btn.setMenu(tools_menu)
@@ -169,6 +174,7 @@ class MainWindow(QMainWindow):
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
         self.frames[STEP_REVIEW].footer.setVisible(False)
         for f in self.frames:
+            f.cancel_btn.clicked.connect(self.cancel_playlist_search)
             if f.index == STEP_FINISH:  # the last step's button starts the next playlist
                 f.next_clicked.connect(self.transfers.request_new_import)
             else:
@@ -193,6 +199,7 @@ class MainWindow(QMainWindow):
         self.search.search_finished.connect(self._search_finished)
         self.search.cancel_requested.connect(self.cancel_playlist_search)
         self.review.approved.connect(self._approved)
+        self.review.cancel_btn.clicked.connect(self.cancel_review)
         if hasattr(self.review, "rerun_search_requested"):  # stale matching rules: search again
             self.review.rerun_search_requested.connect(self._rerun_search)
         if hasattr(self.review, "downloads_requested"):
@@ -652,15 +659,22 @@ class MainWindow(QMainWindow):
         return box.clickedButton() is go
 
     def ask_cancel_search(self) -> bool:
+        prompt = "Stop searching and return Home?" if self.search._running else "Cancel this playlist and return Home?"
         box = QMessageBox(QMessageBox.Icon.Question, "Cancel this playlist transfer?",
-                          "Stop searching and return Home? This unfinished selection will be cleared.\n\n"
+                          f"{prompt} This unfinished selection will be cleared.\n\n"
                           "Your files and other saved transfers will be kept.", parent=self)
         go = box.addButton("Cancel transfer", QMessageBox.ButtonRole.DestructiveRole)
-        stay = box.addButton("Keep searching", QMessageBox.ButtonRole.RejectRole)
+        stay = box.addButton("Keep transfer", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(stay)
         box.setEscapeButton(stay)
         box.exec()
         return box.clickedButton() is go
+
+    def cancel_review(self) -> None:
+        if self._replacement_open:
+            self.go_step(STEP_TRANSFERS)
+        else:
+            self.cancel_playlist_search()
 
     def cancel_playlist_search(self) -> None:
         if self._closing or self._queueing or self._aborting_search or not self.ask_cancel_search():
@@ -680,7 +694,7 @@ class MainWindow(QMainWindow):
     def _finish_cancelled_search(self) -> None:
         if self._closing:
             return
-        self.start_another_import()
+        self.start_another_import(show_playlist=False)
         self.show_home()
         self.statusBar().showMessage("Playlist transfer cancelled. Ready to start again.")
 

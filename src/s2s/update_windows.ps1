@@ -17,6 +17,14 @@ $allowClose = $false
 function Trace($message) {
     Add-Content -LiteralPath $trace -Value ((Get-Date -Format o) + ' ' + $message)
 }
+function Wait-UpdatePoll {
+    # Poll the installer at the old rate without starving the window's paint and input messages.
+    $poll = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 12
+    } while ($poll.ElapsedMilliseconds -lt 100)
+}
 function Confirm-CloseUpdateWindow($owner) {
     $question = New-Object System.Windows.Forms.Form
     try {
@@ -62,9 +70,55 @@ function Confirm-CloseUpdateWindow($owner) {
 try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+
+public sealed class S2SUpdateProgress : Panel {
+    private readonly Stopwatch clock = Stopwatch.StartNew();
+    public Color Accent { get; set; }
+    public bool Animate { get; private set; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(uint action, uint parameter, out int value, uint flags);
+
+    public S2SUpdateProgress() {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+        const uint getClientAreaAnimation = 0x1042;
+        int enabled;
+        Animate = SystemParametersInfo(getClientAreaAnimation, 0, out enabled, 0) && enabled != 0;
+    }
+
+    protected override void OnPaint(PaintEventArgs e) {
+        if (Width <= 0 || Height <= 0) return;
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        float radius = Math.Min(Width, Height) / 2f;
+        float span = Math.Max(0, Width * 0.25f - 2 * radius);
+        double phase = clock.Elapsed.TotalSeconds * Math.PI / 1.6;
+        float travel = Math.Max(0, Width - span - 2 * radius);
+        float left = Animate
+            ? travel * (float)((1 - Math.Cos(phase)) / 2)
+            : travel / 2;
+        using (var brush = new SolidBrush(Accent)) {
+            e.Graphics.FillEllipse(brush, left, 0, radius * 2, Height);
+            e.Graphics.FillRectangle(brush, left + radius, 0, span, Height);
+            e.Graphics.FillEllipse(brush, left + span, 0, radius * 2, Height);
+        }
+    }
+}
+
+public static class S2SUpdateFrame {
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+}
+'@
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'Updating S2S'
-    $form.ClientSize = New-Object System.Drawing.Size(480, 205)
+    $form.ClientSize = New-Object System.Drawing.Size(480, 196)
     $form.AutoScaleMode = 'Dpi'
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
@@ -83,9 +137,16 @@ try {
         }
     })
     $iconPath = Join-Path $PSScriptRoot 'icon.png'
+    $headingLeft = 24
     if (Test-Path -LiteralPath $iconPath) {
         $iconBitmap = [Drawing.Bitmap]::FromFile($iconPath)
         $form.Icon = [Drawing.Icon]::FromHandle($iconBitmap.GetHicon())
+        $logo = New-Object System.Windows.Forms.PictureBox
+        $logo.SetBounds(24, 25, 38, 38)
+        $logo.SizeMode = 'Zoom'
+        $logo.Image = $iconBitmap
+        $form.Controls.Add($logo)
+        $headingLeft = 76
     }
     if ($appearance.window) {
         $form.BackColor = [Drawing.ColorTranslator]::FromHtml($appearance.window)
@@ -93,44 +154,34 @@ try {
         $form.Font = New-Object Drawing.Font($appearance.font, [single]$appearance.font_size)
     }
     $title = New-Object System.Windows.Forms.Label
-    $title.SetBounds(20, 20, 440, 30)
+    $title.SetBounds($headingLeft, 20, (456 - $headingLeft), 30)
     $title.Text = 'Updating S2S'
-    $title.Font = New-Object Drawing.Font($form.Font.FontFamily, 13, ([Drawing.FontStyle]::Bold))
+    $title.Font = New-Object Drawing.Font($form.Font.FontFamily, 16, ([Drawing.FontStyle]::Bold))
     $label = New-Object System.Windows.Forms.Label
-    $label.SetBounds(20, 60, 440, 38)
-    $label.Text = 'Closing S2S before installing the update...'
-    $bar = New-Object System.Windows.Forms.Panel
-    $bar.SetBounds(20, 108, 440, 10)
+    $label.SetBounds($headingLeft, 53, (456 - $headingLeft), 25)
+    $label.Text = 'Waiting for S2S to close…'
+    $bar = New-Object S2SUpdateProgress
+    $bar.SetBounds(24, 101, 432, 8)
+    $bar.AccessibleName = 'Update in progress'
     $bar.BackColor = [Drawing.SystemColors]::ControlLight
-    $fill = New-Object System.Windows.Forms.Panel
-    $fill.SetBounds(-100, 0, 100, 10)
-    $fill.BackColor = [Drawing.Color]::SteelBlue
+    $bar.Accent = [Drawing.Color]::SteelBlue
     if ($appearance.panel) {
         $bar.BackColor = [Drawing.ColorTranslator]::FromHtml($appearance.panel)
-        $fill.BackColor = [Drawing.ColorTranslator]::FromHtml($appearance.primary)
+        $bar.Accent = [Drawing.ColorTranslator]::FromHtml($appearance.primary)
     }
-    $bar.Controls.Add($fill)
     $animation = New-Object System.Windows.Forms.Timer
-    $animation.Interval = 20
-    $animation.Add_Tick({
-        $fill.Left = $fill.Left + 5
-        if ($fill.Left -gt $bar.Width) { $fill.Left = -$fill.Width }
-    })
-    $animation.Start()
+    $animation.Interval = 16
+    $animation.Add_Tick({ if ($form.Visible -and $form.WindowState -ne 'Minimized') { $bar.Invalidate() } })
+    if ($bar.Animate) { $animation.Start() }
     $detail = New-Object System.Windows.Forms.Label
-    $detail.SetBounds(20, 134, 440, 50)
-    $detail.Text = 'S2S will reopen automatically when the update is ready.'
+    $detail.SetBounds(24, 126, 432, 25)
+    $detail.Text = 'S2S will reopen automatically.'
+    $elapsed = New-Object System.Windows.Forms.Label
+    $elapsed.SetBounds(24, 154, 432, 24)
     if ($appearance.muted) { $detail.ForeColor = [Drawing.ColorTranslator]::FromHtml($appearance.muted) }
-    $form.Controls.AddRange(@($title, $label, $bar, $detail))
+    if ($appearance.muted) { $elapsed.ForeColor = $detail.ForeColor }
+    $form.Controls.AddRange(@($title, $label, $bar, $detail, $elapsed))
     # Match the app's dark/light title bar on supported Windows versions.
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class S2SUpdateFrame {
-    [DllImport("dwmapi.dll")]
-    public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-}
-'@
     $form.Show()
     $dark = [int]($form.BackColor.GetBrightness() -lt 0.5)
     [void][S2SUpdateFrame]::DwmSetWindowAttribute($form.Handle, 20, [ref]$dark, 4)
@@ -142,10 +193,9 @@ public static class S2SUpdateFrame {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
         if ($clock.Elapsed.TotalSeconds -gt 120) { throw 'S2S did not close. The installer was not started.' }
-        [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 100
+        Wait-UpdatePoll
     }
-    $label.Text = 'Installing the update...'
+    $label.Text = 'Installing the update…'
     Trace 'Starting installer'
     # A separate runspace keeps the window responsive while Windows scans/starts setup.
     $job = [PowerShell]::Create()
@@ -159,9 +209,9 @@ public static class S2SUpdateFrame {
     }).AddArgument($setup).AddArgument($app).AddArgument($log)
     $pending = $job.BeginInvoke()
     while (-not $pending.IsCompleted) {
-        $detail.Text = ('Elapsed: {0:mm\:ss}. S2S will reopen automatically.' -f $clock.Elapsed)
-        [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 100
+        $elapsedText = 'Elapsed: {0:mm\:ss}' -f $clock.Elapsed
+        if ($elapsed.Text -ne $elapsedText) { $elapsed.Text = $elapsedText }
+        Wait-UpdatePoll
     }
     $codes = @($job.EndInvoke($pending))
     if ($job.HadErrors -or $codes.Count -ne 1) { throw 'Windows could not run the installer.' }
@@ -186,8 +236,7 @@ public static class S2SUpdateFrame {
     while (-not $restarted.HasExited -and $opening.Elapsed.TotalSeconds -lt 30) {
         $restarted.Refresh()
         if ($restarted.MainWindowHandle -ne [IntPtr]::Zero) { break }
-        [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 100
+        Wait-UpdatePoll
     }
     $success = $true
 } catch {
@@ -197,8 +246,9 @@ public static class S2SUpdateFrame {
     Remove-Item -LiteralPath $active -Force -ErrorAction SilentlyContinue
     if ($form) {
         $allowClose = $true
-        $animation.Stop()
-        $bar.Visible = $false
+        if ($animation) { $animation.Stop() }
+        if ($bar) { $bar.Visible = $false }
+        if ($elapsed) { $elapsed.Visible = $false }
         $form.ClientSize = New-Object System.Drawing.Size(480, 300)
         $form.ControlBox = $true
         $title.Text = 'Update needs attention'

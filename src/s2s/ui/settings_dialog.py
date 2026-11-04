@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
@@ -39,6 +39,11 @@ class SettingsDialog(QDialog):
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
         self.downloads.setPlaceholderText("Incoming downloads, kept in user/album folders")
+        self.reuse_folders = QPlainTextEdit("\n".join(s.local_reuse_folders))
+        self.reuse_folders.setPlaceholderText("One folder per line")
+        self.reuse_folders.setFixedHeight(72)
+        add_reuse = QPushButton("Add folder…")
+        add_reuse.clicked.connect(self._add_reuse_folder)
         self.folder_help = QLabel(
             "Soulseek downloads keep their user/album folders here. In Step 2, choose a separate "
             "tracklist folder for the track files alone. Originals are kept in the archive subfolder after copying."
@@ -79,6 +84,11 @@ class SettingsDialog(QDialog):
         advanced_form = QFormLayout()  # Advanced
         advanced_form.addRow(self.folder_help)
         advanced_form.addRow("Soulseek download folder:", self._with_browse(self.downloads, True))
+        reuse_help = QLabel("Scan these folders for completed downloads before searching Soulseek.")
+        reuse_help.setWordWrap(True)
+        advanced_form.addRow(reuse_help)
+        advanced_form.addRow("Other download folders:", self.reuse_folders)
+        advanced_form.addRow("", add_reuse)
         advanced_form.addRow("Originals archive subfolder:", self.archive)
         advanced_form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
         advanced_form.addRow("slskd URL (loopback):", self.url)
@@ -209,11 +219,24 @@ class SettingsDialog(QDialog):
 
         run_async(self, work, done, failed)
 
+    def _add_reuse_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Choose a completed download folder")
+        if folder:
+            self.reuse_folders.appendPlainText(folder)
+
     def save(self) -> None:
         try:
+            downloads = self.downloads.text().strip()
+            folders = [line.strip() for line in self.reuse_folders.toPlainText().splitlines() if line.strip()]
+            previous = self.ctx.settings.slskd_downloads_dir
+            if previous and Path(previous) != Path(downloads):
+                folders.append(previous)
+            folders = list(dict.fromkeys(folders))
+            if any(not Path(folder).is_absolute() for folder in folders):
+                raise ValueError("Other download folders must use full paths.")
             new: Settings = dataclasses.replace(
                 self.ctx.settings, slskd_url=self.url.text().strip(),
-                slskd_downloads_dir=self.downloads.text().strip(),
+                slskd_downloads_dir=downloads, local_reuse_folders=folders,
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
                 match_policy=self.rules.policy(),
