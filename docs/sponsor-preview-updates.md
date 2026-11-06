@@ -1,6 +1,8 @@
 # Stable and sponsor preview updates
 
-**Status (2026-11-06):** live from S2S 1.8.1. The Worker is deployed, the private preview repository builds signed
+**Status (2026-11-06):** live in S2S 1.8.1, which is released; the GitHub Sponsors page describes it. The Worker's `PREVIEW_REPO_TOKEN` (a GitHub fine-grained token) expires on 2027-02-04: replace it in Cloudflare before then, or previews stop.
+
+**How it was checked:** the Worker is deployed, the private preview repository builds signed
 release candidates, and the full chain (GitHub device sign-in, sponsorship check, private release list, authenticated
 installer download and signature verification) was checked live with the owner account on Windows. Not yet checked
 live: a non-sponsor, a cancelled sponsorship, a second sponsor account, and packaged preview updates on macOS.

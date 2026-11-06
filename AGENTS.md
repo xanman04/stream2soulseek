@@ -5,7 +5,7 @@ and installation in [docs/INSTALL.md](docs/INSTALL.md). Dated implementation not
 
 ## Current status (2026-11-06)
 
-S2S is a public, GPL-3.0-or-later project with signed installer releases on GitHub (v1.0 through v1.8.0; see
+S2S is a public, GPL-3.0-or-later project with signed installer releases on GitHub (v1.0 through v1.8.1; see
 `CHANGELOG.md`). Sources: Apple Music, Spotify and SoundCloud. Updates are
 signed with Ed25519 and applied in-app. A Stable channel is the default; from 1.8.1 a sponsor Preview channel and the
 Credits window are live, served by a Cloudflare Worker (`services/sponsor-worker`) backed by a private preview
