@@ -128,9 +128,10 @@ def test_whats_new_dialog_shows_items_or_an_honest_empty_message():
     from s2s.ui.whats_new_dialog import WhatsNewDialog
 
     QApplication.instance() or QApplication([])
-    full = WhatsNewDialog(version="2.0", items=[("A", "b")])
+    full = WhatsNewDialog(version="2.0", items=[("A", "b"), ("Documentation", "docs only"), ("", "no lead-in")])
     shown = " ".join(label.text() for label in full.findChildren(QLabel))
-    assert "What's new in 2.0" in shown and "<b>A.</b>" in shown
+    assert "What's new in 2.0" in shown and "<b>A</b>" in shown and "b</span>" in shown
+    assert full.item_count == 1 and "docs only" not in shown and "no lead-in" not in shown  # one bullet per real change
     none = WhatsNewDialog(version="2.0", items=[])
     empty = " ".join(label.text() for label in none.findChildren(QLabel))
     assert "no release notes" in empty

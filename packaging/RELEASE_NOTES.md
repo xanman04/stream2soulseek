@@ -1,7 +1,8 @@
 ## What's changed
 
-- **Sponsor Preview is open.** Monthly GitHub sponsors can connect their account under Settings → Updates and choose Preview to receive upcoming builds first. Stable stays the default and needs no account.
-- **Settings.** Number fields such as the search timeout and minimum bitrate are now sliders that show their value, and the remaining number boxes have visible arrows.
+- **Sponsor Preview is open.** Monthly GitHub sponsors can try upcoming builds first: connect GitHub under Settings → Updates and choose Preview. Stable stays the default and needs no account.
+- **Sliders in Settings.** The search timeout, minimum bitrate and length tolerance are now sliders that show their value, and the remaining number boxes have visible arrows.
+- **Clearer dialogs.** What's new lists each change as its own bullet, and About and Credits are tidier.
 
 ## Downloads
 

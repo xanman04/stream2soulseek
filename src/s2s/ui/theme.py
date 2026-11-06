@@ -349,6 +349,7 @@ QSlider::groove:horizontal:disabled, QSlider::sub-page:horizontal:disabled {{ ba
 QSlider::handle:horizontal:disabled {{ background: {c['disabled']}; }}
 QSlider {{ min-height: 24px; }}
 QLabel#settingsReadout {{ font-weight: 600; }}
+QFrame#bulletDot {{ background: {c['primary']}; border: none; border-radius: 3px; }}
 QPlainTextEdit {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px 8px; }}
 QPlainTextEdit:focus {{ border-color: {c['focus']}; }}
 QDialog#settingsDialog {{ background: {c['window']}; }}
