@@ -62,3 +62,19 @@ def test_settings_navigation_list_follows_the_pages():
     assert dlg.tabs.currentIndex() == 2
     dlg.tabs.setCurrentIndex(4)
     assert dlg.nav.currentRow() == 4 and not dlg.tabs.tabBar().isVisibleTo(dlg)
+
+
+def test_stable_and_preview_updates_use_different_popups():
+    from s2s import updater
+    from s2s.ui.update_dialog import PreviewUpdateDialog, UpdateDialog, dialog_for
+
+    QApplication.instance() or QApplication([])
+    stable = dialog_for(updater.UpdateInfo("1.8.0", "", "n", "u", "s", "p"), target="S2S")
+    preview = dialog_for(updater.UpdateInfo("1.8.1-rc.1", "", "n", "u", "s", "p", channel="preview"), target="S2S")
+    assert type(stable) is UpdateDialog and isinstance(preview, PreviewUpdateDialog)
+    stable_text = " ".join(label.text() for label in stable.findChildren(QLabel)).lower()
+    preview_text = " ".join(label.text() for label in preview.findChildren(QLabel))
+    assert "preview" not in stable_text and "sponsor" not in stable_text
+    assert "Sponsor preview 1.8.1-rc.1" in preview_text and "sponsoring" in preview_text
+    assert stable.windowTitle() == "Update S2S" and preview.windowTitle() == "S2S sponsor preview"
+    assert stable.update_btn.text() == "Update" and preview.update_btn.text() == "Install preview"

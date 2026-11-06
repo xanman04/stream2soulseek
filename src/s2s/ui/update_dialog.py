@@ -61,6 +61,10 @@ class StartupUpdateCheck(QDialog):
 
 
 class UpdateDialog(QDialog):
+    """The update offered to everyone: a new stable release of the whole app. Sponsor preview builds use
+    PreviewUpdateDialog instead, so the two are never confused."""
+
+    WINDOW_TITLE = "Update S2S"
     quit_requested = Signal()  # the installer is running: S2S must close so it can swap the app
     download_progress = Signal(float)
     phase_changed = Signal(str)
@@ -77,9 +81,9 @@ class UpdateDialog(QDialog):
         self._estimate_timer.timeout.connect(self._expire_estimate)
         self.download_progress.connect(self._show_progress)
         self.phase_changed.connect(self._say)
-        self.setWindowTitle("Update S2S")
+        self.setWindowTitle(self.WINDOW_TITLE)
 
-        head = QLabel(f"S2S {info.version}{' preview' if info.channel == 'preview' else ''} is available")
+        head = QLabel(self._headline())
         f = head.font()
         f.setPointSizeF(f.pointSizeF() * 1.3)
         f.setBold(True)
@@ -93,8 +97,9 @@ class UpdateDialog(QDialog):
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
         lay.addWidget(head)
         lay.addWidget(current)
-        if info.channel == "preview":
-            warning = theme.subtle(QLabel("Preview build — may contain bugs. You can keep your current version."))
+        notice = self._notice()
+        if notice:
+            warning = theme.subtle(QLabel(notice))
             warning.setWordWrap(True)
             lay.addWidget(warning)
         changes = change_headlines(info.notes)
@@ -146,6 +151,12 @@ class UpdateDialog(QDialog):
         lay.addLayout(row)
         self.update_btn.setDefault(True)
         later.clicked.connect(self.reject)
+
+    def _headline(self) -> str:
+        return f"S2S {self.info.version} is available"
+
+    def _notice(self) -> str:
+        return ""
 
     def _open_page(self) -> None:
         QDesktopServices.openUrl(QUrl(self.info.page_url))
@@ -299,3 +310,27 @@ class UpdateDialog(QDialog):
             self._say(msg)
 
         run_async(self, work, done, failed)
+
+
+class PreviewUpdateDialog(UpdateDialog):
+    """A sponsor preview build: an early version for sponsors, offered apart from the regular update."""
+
+    WINDOW_TITLE = "S2S sponsor preview"
+
+    def __init__(self, info: updater.UpdateInfo, *, target=None, busy_reason: str = "", parent=None) -> None:
+        super().__init__(info, target=target, busy_reason=busy_reason, parent=parent)
+        if target is not None and self.update_btn.text() == "Update":
+            self.update_btn.setText("Install preview")
+        self.later_btn.setText("Not now")
+
+    def _headline(self) -> str:
+        return f"Sponsor preview {self.info.version} is ready"
+
+    def _notice(self) -> str:
+        return ("Thank you for sponsoring S2S. This early build is only offered to sponsors and may contain bugs. "
+                "Your current version stays as it is until you choose to install it.")
+
+
+def dialog_for(info: updater.UpdateInfo, **kwargs) -> UpdateDialog:
+    """The popup that matches this release: preview builds get their own, everything else the regular update."""
+    return (PreviewUpdateDialog if info.channel == "preview" else UpdateDialog)(info, **kwargs)

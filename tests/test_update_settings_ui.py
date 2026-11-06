@@ -72,10 +72,12 @@ def test_settings_upgrade_defaults_and_unknown_channel_are_safe():
 
 def test_preview_dialog_identifies_preview_and_keeps_existing_update_controls():
     info = UpdateInfo("1.7.0-rc.1", "", "name", "url", "sig", "page", channel="preview")
-    dialog = UpdateDialog(info)
+    from s2s.ui.update_dialog import dialog_for
+
+    dialog = dialog_for(info)  # a preview build gets its own popup, apart from the regular update
     text = " ".join(label.text() for label in dialog.findChildren(QLabel))
-    assert "preview is available" in text and "may contain bugs" in text
-    assert dialog.update_btn.text() == "Download preview" and dialog.later_btn.text() == "Later"
+    assert "Sponsor preview 1.7.0-rc.1 is ready" in text and "may contain bugs" in text
+    assert dialog.update_btn.text() == "Download preview" and dialog.later_btn.text() == "Not now"
     dialog.deleteLater()
 
 

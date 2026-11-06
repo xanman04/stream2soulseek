@@ -612,7 +612,7 @@ class MainWindow(QMainWindow):
 
     def _offer_update(self, info) -> None:
         from .. import updater
-        from .update_dialog import UpdateDialog
+        from .update_dialog import dialog_for
 
         busy = ""
         if self._queueing or self._downloads_running_in_last_import():
@@ -623,7 +623,7 @@ class MainWindow(QMainWindow):
 
             get().info("Update cannot install itself (running from %s)", updater.installed_app())
             target = None
-        dialog = UpdateDialog(info, target=target, busy_reason=busy, parent=self)
+        dialog = dialog_for(info, target=target, busy_reason=busy, parent=self)
         dialog.quit_requested.connect(self._quit_for_update)
         dialog.exec()
         dialog.deleteLater()
