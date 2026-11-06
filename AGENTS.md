@@ -3,6 +3,22 @@
 Owner: the repository maintainer. Current user workflows are documented in [README.md](README.md)
 and installation in [docs/INSTALL.md](docs/INSTALL.md). Dated implementation notes below are historical.
 
+## Current status (2026-11-06)
+
+S2S is a public, GPL-3.0-or-later project with signed installer releases on GitHub (v1.0 through v1.7.1; later
+work is described in `CHANGELOG.md` under "Unreleased"). Sources: Apple Music, Spotify and SoundCloud. Updates are
+signed with Ed25519 and applied in-app. A Stable channel is live; a sponsor Preview channel and the Credits window
+exist in code, with a Cloudflare Worker (`services/sponsor-worker`) and a private preview repository, but preview
+sign-in stays off in public builds until its live checks pass (see `docs/sponsor-preview-updates.md`). The database
+schema is version 9.
+
+Where things live: user guide `README.md`; installing `docs/INSTALL.md`; source setup `docs/SETUP.md`; releases
+`docs/RELEASING.md`; sponsors and previews `docs/sponsor-preview-updates.md`; SoundCloud `docs/SOUNDCLOUD.md`;
+interface rules `DESIGN.md`; screenshots tool `docs/UI_GALLERY.md`. Local-only (gitignored): `HANDOFF.md` and the
+`local/` folder for private working files. Personal music folders live outside the repository and are never
+referenced in it. Sections below that carry a date are the original plan and rationale; where they disagree with
+the paragraph above or the README, the README wins.
+
 This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. All project files live in the repository checkout; anything outside it (the maintainer's music library and other workspaces) is not part of the project. This is a development plan, not evidence that the integrations work.
 
 ## Project-wide rules
@@ -137,7 +153,7 @@ Before finalizing an import, validate the transfer success state and local path,
 
 Run network requests and filesystem work off the Qt UI thread. Keep approval enforcement in backend logic as well as the GUI. Do not pass peer filenames into shell commands; validate paths against configured download/library roots.
 
-## Apple Music integration investigation
+## Apple Music integration investigation (historical; Apple Music is implemented)
 
 Candidate: https://github.com/LunaParker/apple-music-py (MIT, alpha, version 0.0.1 at inspection).
 
@@ -214,11 +230,11 @@ The user explicitly requires that personal credentials never become hardcoded or
 - Use synthetic accounts/tokens for automated tests. No real authenticated profiles, playlist exports, downloads or personal audio in source control or build packages.
 - The project folder is its own Git repository; its `.gitignore` excludes audio, credentials, sessions, local state and build artifacts. The parent workspace folder deliberately has no repository.
 - Use placeholder-only templates. Review tracked files, history and explicit release contents before any future publication; ignore rules are not retroactive or sufficient alone.
-- Public release and legal review are deferred. Do not imply that private development makes unauthorized downloading/sharing lawful, or treat a disclaimer as legal protection.
+- Releases are public, but the legal questions (unofficial streaming-service APIs, downloading and sharing) are not resolved by the licence or by any disclaimer. Do not imply that the app's design makes unauthorized downloading/sharing lawful.
 
 ## Packaging history (October 2026)
 
-The user wants, eventually, a single runnable Windows package (like the SoulseekQt installer) to send to friends, even without open-sourcing. Each friend signs in to their own Apple Music and Soulseek accounts and uses their own folders. Design for this now:
+Packaged Windows and macOS installers have been public since v1.0. Each user signs in to their own accounts and uses their own folders. The constraints below still hold:
 
 - macOS groundwork done 2026-10-26 (not verified on a Mac): app data in ~/Library/Application Support/S2S
   (config.app_dir_path), secrets in the login Keychain via `keyring` (SecretStore keychain backend, darwin-only
@@ -233,7 +249,7 @@ The user wants, eventually, a single runnable Windows package (like the Soulseek
 - Licenses: slskd is AGPL-3.0, so redistributing its binary requires shipping its license and offering the corresponding source. PySide6/Qt is LGPL-3.0 (keep it dynamically linked and include notices); Qt WebEngine includes Chromium third-party licenses. Collect notices into the package.
 - Sending the package to friends is distribution: the deferred legal/terms questions (unofficial Apple API, downloading) apply to it as well.
 
-## Implementation order and acceptance checks
+## Implementation order and acceptance checks (original plan; the app has since shipped)
 
 1. Embedded Apple login and read-only playlist browser; prove real login and complete pagination first.
 2. Start/connect to local slskd; prove authenticated API access, Soulseek connectivity and a bounded search.
@@ -255,6 +271,6 @@ Do not replace these milestones with a mock UI and call the app complete. Report
 - Qt WebEngine: https://doc.qt.io/qtforpython-6/PySide6/QtWebEngineWidgets/QWebEngineView.html
 - Qt profile persistence: https://doc.qt.io/qtforpython-6/PySide6/QtWebEngineCore/QWebEngineProfile.html
 
-## Starting state
+## Starting state (historical)
 
 This section is historical: at the start only instructions and Git exclusions existed; no application code, slskd installation, or real Apple session has been created by this conversation. Start with milestone 1. The user has approved the desktop-app development plan, not public release or unreviewed bulk downloads.

@@ -20,6 +20,9 @@ through the bundled [slskd client](https://github.com/slskd/slskd).
 - Records missing and unsuccessful tracks so you can return to them later.
 - Reuses recent search candidates across app restarts and overlapping playlists.
 - Browses local tracklist folders in **My Playlists**, with track details and total runtime.
+- Finds single tracks with **Quick search** (ranked by your matching rules) or **Free search** (raw results).
+- Lets you listen to each finished file with a spectrogram before you trust it.
+- Updates itself from signed releases, with a Stable channel for everyone and an optional Preview channel for sponsors.
 
 S2S does not download audio from the streaming services. No download starts until you confirm a selection.
 
@@ -186,17 +189,39 @@ minutes offers **Choose another uploader…**. S2S tries only the alternative fi
 which files are allowed remains a separate step from finding them. Approved alternatives can be tried at
 the interval you choose, which defaults to 45 seconds. Available backup counts vary by recording.
 
+## Settings and menus
+
+**Settings** (bottom of the sidebar) has five pages: **General** (automatic import, the extended search
+timeout), **Matching rules** (accepted formats, version handling and saved Layouts), **Sharing** (folders
+you choose to share with Soulseek), **Updates** (Stable or sponsor Preview) and **Advanced** (the close
+button, download folders, ffprobe and the slskd connection).
+
+The **More** menu in the sidebar holds **Check for updates**, **Help** (user guide, What's new, open the log
+folder, copy diagnostics, report a bug), **Support S2S**, **Credits**, **About** (version, licence and notices)
+and **Quit**. Quitting asks first only when transfers would be interrupted. By default the window's close button
+keeps S2S running in the system tray while transfers are in progress; turn that off under
+**Settings → Advanced** to make it quit instead. S2S reopens at the size and place you left it.
+
+The first time S2S starts, a short welcome card on Home explains the steps. After you update to a new
+stable release, **What's new** shows that version's changes once.
+
 ## Updates and problem reports
 
 S2S checks for updates at startup and through **More → Check for updates**. It downloads the installer for
 your computer, verifies its update signature, installs it and restarts. Settings, saved sessions and
 history are kept. Active downloads can block installation.
 
+The **Stable** channel is for everyone and needs no account. Eligible monthly GitHub sponsors can opt into
+**Preview** under **Settings → Updates** to try upcoming builds first. A preview build has its own update
+window and may contain bugs; Preview is not yet switched on in public builds (see
+[sponsor preview updates](docs/sponsor-preview-updates.md)).
+
 On Windows, a separate progress window stays open while S2S closes and the installer runs.
 If an older copy cannot update itself, download and run the current installer from the releases page.
 
-**Report a Bug** in the sidebar prepares a GitHub issue draft with your description, reproduction steps,
-expected result, app/system versions and the recent scrubbed log. Logs are included automatically. Review the
+**Report a Bug** in the sidebar (also under **More → Help**) prepares a GitHub issue draft with your
+description, reproduction steps, expected result, app/system versions and the recent scrubbed log.
+**Help → Copy diagnostics** puts just the versions and a few non-personal settings on the clipboard. Logs are included automatically. Review the
 report inside S2S, then open the draft in your browser; nothing is submitted automatically. You can copy
 or save the report locally. Long reports are shortened for the draft and saved separately for manual
 attachment. Reports posted to [GitHub issues](https://github.com/xanman04/stream2soulseek/issues) are public;
@@ -245,6 +270,10 @@ Use `.venv/bin/python` on macOS or `.venv\Scripts\python.exe` on Windows:
 <venv-python> -m pytest -q
 ```
 
+The sponsor service in `services/sponsor-worker` has its own tests (`node --test`, Node.js 22+).
+`tools/ui_gallery.py` renders the real interface with made-up data for screenshots; see the
+[UI gallery guide](docs/UI_GALLERY.md).
+
 To build a standalone app on its target operating system:
 
 ```sh
@@ -269,9 +298,10 @@ See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
 ## Support development
 
 S2S is free to use. You can support development with a monthly or one-time contribution through
-[GitHub Sponsors](https://github.com/sponsors/xanman04). The sponsor Preview channel is implemented
-and awaiting activation in public builds. Stable updates are available without GitHub sign-in.
-Monthly $10 sponsors can opt into public recognition under **More → Credits** in the app.
+[GitHub Sponsors](https://github.com/sponsors/xanman04). Monthly $10 sponsors can opt into public recognition
+under **More → Credits** in the app. The sponsor Preview update channel is built into the app and is waiting for
+its final live checks before it is switched on in public builds; Stable updates are available to everyone without
+GitHub sign-in. See [sponsor preview updates](docs/sponsor-preview-updates.md) for how it works.
 
 ## License
 

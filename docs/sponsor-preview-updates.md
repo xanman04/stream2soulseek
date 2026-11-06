@@ -1,10 +1,14 @@
 # Stable and sponsor preview updates
 
+**Status (2026-11-06):** the app code, the Cloudflare Worker (deployed) and the private preview repository
+(created and seeded) exist. Still to do before public activation: the signing-key check and a signed release
+candidate in the private repository, then a live sign-in and download with an active sponsor.
+
 **Stable** is the public update channel and needs no GitHub account. Sponsor Preview is implemented and
 disabled in the public build. When enabled, eligible monthly sponsors will be able to opt in from
 **Settings → Updates** after GitHub verification.
 
-The app compares semantic versions, so `1.7.0-rc.9 < 1.7.0-rc.10 < 1.7.0`. Stable ignores prereleases even if GitHub labels a tag incorrectly. Preview considers stable releases and authorized preview releases together and offers the newest compatible signed installer. Switching to Stable never silently downgrades an installation. If the installed preview is ahead of Stable, it waits for a newer stable version. This does not guarantee that manually installing an older version can read newer saved data.
+The app compares semantic versions, so `1.7.0-rc.9 < 1.7.0-rc.10 < 1.7.0`. Stable ignores prereleases even if GitHub labels a tag incorrectly. Preview considers stable releases and authorized preview releases together and offers the newest compatible signed installer. A preview build opens its own "sponsor preview" window; the regular update window is only for stable releases. Switching to Stable never silently downgrades an installation. If the installed preview is ahead of Stable, it waits for a newer stable version. This does not guarantee that manually installing an older version can read newer saved data.
 
 ## Identity and access
 
@@ -38,7 +42,7 @@ Switching an app to Preview does not bypass the per-platform signed-installer re
 ## Sponsor credits
 
 **Credits** in the footer and under **More** loads approved display names from the sponsor service
-when opened. After a sponsor explicitly approves public recognition and the exact name, add their
+when opened; the window lists them under "Special thanks to". After a sponsor explicitly approves public recognition and the exact name, add their
 GitHub GraphQL node ID and display name to the private Worker secret `SPONSOR_CREDITS_OPT_INS`
 as a JSON object. The Worker uses `SPONSOR_CREDITS_TOKEN`, a separate maintainer GitHub credential,
 to check for an active recurring $10 tier. Test the token with a real consenting sponsor before

@@ -6,7 +6,15 @@ predictable review over decorative effects. Download approval and transfer behav
 workflow and must not change as a side effect of visual work.
 
 - Use the light/dark palettes in `ui/theme.py`; do not introduce independent page palettes.
-- Use system UI typography, a 26px page heading, a 17px section heading and compact body copy.
+- Use system UI typography, a 26px page heading, a 17px section heading and compact body copy. Headings use
+  the bundled Clash Display through `theme.display_label`; body text stays in the system font.
+- Settings is a dialog with a navigation list on the left and one scrolling page per section
+  (`ui/settings_layout.py`): a 22px page title, titled sections on one quiet panel, each field with its label above
+  and muted help text below. Panels never nest; tick boxes and radio buttons use the shared themed indicators.
+- Dialogs for different things stay different: the regular update window is for stable releases only, and sponsor
+  preview builds use their own window. Menus name actions plainly ("About", "Quit"); only "Support S2S" carries the
+  app name.
+- Buttons that open a dialog or menu with the mouse do not keep a focus ring afterwards; keyboard focus stays visible.
 - Navigation uses consistent line icons and bordered buttons, with a filled active destination.
   Keep the sidebar 264 logical pixels wide and never let it scroll. It steps down a ladder of tighter layouts
   until everything fits: slightly smaller rows, one saved transfer on a single line with a count, then the

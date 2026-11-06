@@ -17,6 +17,12 @@ dependencies = [
     "websockets>=12,<18",
 ]
 
+[project.urls]
+Homepage = "https://github.com/xanman04/stream2soulseek"
+Issues = "https://github.com/xanman04/stream2soulseek/issues"
+Changelog = "https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md"
+Sponsor = "https://github.com/sponsors/xanman04"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "cryptography>=42"]  # cryptography: signing releases and checking s2s.ed25519 in tests
 
