@@ -6,7 +6,6 @@ import re
 import sys
 import time
 from collections import deque
-from math import ceil
 
 from PySide6.QtCore import QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -156,11 +155,9 @@ class UpdateDialog(QDialog):
             self.estimate.hide()
             return
         seconds = (1 - fraction) * (now - samples[0][0]) / (fraction - samples[0][1])
-        if seconds < 5:
-            self.estimate.hide()
-            return
         if seconds < 60:
-            text = f"About {ceil(seconds / 5) * 5} seconds left"
+            remaining = max(1, round(seconds))
+            text = f"About {remaining} {'second' if remaining == 1 else 'seconds'} left"
         else:
             minutes = round(seconds / 60)
             text = f"About {minutes} {'minute' if minutes == 1 else 'minutes'} left"

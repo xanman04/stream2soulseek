@@ -32,6 +32,26 @@ $form.ShowInTaskbar = $false
 $form.Show()
 [Windows.Forms.Application]::DoEvents()
 Assert ($form.ControlBox -and $form.MinimizeBox -and -not $form.MaximizeBox) 'Missing native window controls'
+Assert $animation.Enabled 'Progress animation timer did not start'
+function Get-BarPosition {
+    $frame = New-Object Drawing.Bitmap($bar.Width, $bar.Height)
+    try {
+        $bar.DrawToBitmap($frame, $bar.ClientRectangle)
+        for ($x = 0; $x -lt $frame.Width; $x++) {
+            if ($frame.GetPixel($x, [int]($frame.Height / 2)).ToArgb() -eq $bar.Accent.ToArgb()) {
+                return $x
+            }
+        }
+        throw 'Progress marker was not painted'
+    } finally { $frame.Dispose() }
+}
+$first = Get-BarPosition
+$moved = $false
+for ($sample = 0; $sample -lt 6; $sample++) {
+    Wait-UpdatePoll
+    if ((Get-BarPosition) -ne $first) { $moved = $true; break }
+}
+Assert $moved 'Progress marker stayed in the same position'
 $bitmap = New-Object Drawing.Bitmap($form.Width, $form.Height)
 $form.DrawToBitmap($bitmap, (New-Object Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
 $bitmap.Save((Join-Path $PSScriptRoot 'progress.png'))

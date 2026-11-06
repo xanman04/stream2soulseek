@@ -110,21 +110,26 @@ def test_update_eta_requires_stable_progress_and_clears_when_measurements_stop(m
     now = 3
     dialog._show_progress(0.09)
     assert not dialog.estimate.isHidden()
-    assert dialog.estimate.text() == "About 35 seconds left"
+    assert dialog.estimate.text() == "About 30 seconds left"
 
     now = 4
+    dialog._show_progress(0.12)
+    assert dialog.estimate.text() == "About 29 seconds left"
+
+    now = 5
     dialog._show_progress(0.2)
     assert dialog.estimate.isHidden()
-    for now, fraction in enumerate((0.23, 0.26, 0.29), start=5):
+    for now, fraction in enumerate((0.23, 0.26, 0.29), start=6):
         dialog._show_progress(fraction)
     assert not dialog.estimate.isHidden()
 
-    now = 9
+    now = 10
     dialog._expire_estimate()
     assert dialog.estimate.isHidden()
-    for now, fraction in enumerate((0.32, 0.35, 0.38, 0.41), start=10):
+    for now, fraction in enumerate((0.5625, 0.6875, 0.8125, 0.9375), start=11):
         dialog._show_progress(fraction)
     assert not dialog.estimate.isHidden()
+    assert dialog.estimate.text() == "About 1 second left"
     dialog._say("Verifying the downloaded update…")
     assert dialog.estimate.isHidden()
     dialog.deleteLater()

@@ -80,17 +80,9 @@ using System.Windows.Forms;
 public sealed class S2SUpdateProgress : Panel {
     private readonly Stopwatch clock = Stopwatch.StartNew();
     public Color Accent { get; set; }
-    public bool Animate { get; private set; }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SystemParametersInfo(uint action, uint parameter, out int value, uint flags);
-
     public S2SUpdateProgress() {
         DoubleBuffered = true;
         ResizeRedraw = true;
-        const uint getClientAreaAnimation = 0x1042;
-        int enabled;
-        Animate = SystemParametersInfo(getClientAreaAnimation, 0, out enabled, 0) && enabled != 0;
     }
 
     protected override void OnPaint(PaintEventArgs e) {
@@ -100,9 +92,7 @@ public sealed class S2SUpdateProgress : Panel {
         float span = Math.Max(0, Width * 0.25f - 2 * radius);
         double phase = clock.Elapsed.TotalSeconds * Math.PI / 1.6;
         float travel = Math.Max(0, Width - span - 2 * radius);
-        float left = Animate
-            ? travel * (float)((1 - Math.Cos(phase)) / 2)
-            : travel / 2;
+        float left = travel * (float)((1 - Math.Cos(phase)) / 2);
         using (var brush = new SolidBrush(Accent)) {
             e.Graphics.FillEllipse(brush, left, 0, radius * 2, Height);
             e.Graphics.FillRectangle(brush, left + radius, 0, span, Height);
@@ -172,7 +162,7 @@ public static class S2SUpdateFrame {
     $animation = New-Object System.Windows.Forms.Timer
     $animation.Interval = 16
     $animation.Add_Tick({ if ($form.Visible -and $form.WindowState -ne 'Minimized') { $bar.Invalidate() } })
-    if ($bar.Animate) { $animation.Start() }
+    $animation.Start()
     $detail = New-Object System.Windows.Forms.Label
     $detail.SetBounds(24, 126, 432, 25)
     $detail.Text = 'S2S will reopen automatically.'
