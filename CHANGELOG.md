@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0 — 2026-11-06
+
+- **My Playlists.** Browse local tracklist folders, search and sort tracks, and see total runtime and storage size. Add existing folders alongside your past transfer destinations.
+- **Add a song to a transfer.** Enter a title and artist on Find on Soulseek. Manually added songs go through the same search and review as the rest of the playlist.
+- **Check files.** S2S prepares upcoming spectrograms in the background and makes the playback controls easier to spot.
+- **Sidebar and footer.** Transfer history moves into the sidebar. The support link keeps keyboard access without retaining a focus outline after a mouse click, and the footer reminder is removed.
+
 ## 1.6.4 — 2026-11-04
 
 - **Find more tracks you already have.** S2S recognizes more filename and tag variations and checks current and older Soulseek download folders before searching. Add other folders in Settings → Advanced.
