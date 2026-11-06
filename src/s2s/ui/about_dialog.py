@@ -19,7 +19,12 @@ class AboutDialog(QDialog):
         self.setWindowTitle("About S2S")
         self.setMinimumWidth(460)
         layout = QVBoxLayout(self)
-        layout.addWidget(theme.display_label(QLabel("S2S - Stream to Soulseek")))
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(12)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
+        heading = QLabel("S2S - Stream to Soulseek")
+        heading.setObjectName("sectionTitle")
+        layout.addWidget(heading)
         layout.addWidget(theme.subtle(QLabel(f"Version {__version__}")))
 
         body = QLabel(
@@ -31,6 +36,7 @@ class AboutDialog(QDialog):
             f'<a href="{SOURCE_URL}">Source code</a> · <a href="{LICENSE_URL}">Licence</a> · '
             f'<a href="{NOTICES_URL}">Third-party software</a>')
         body.setWordWrap(True)
+        body.setMinimumWidth(460)
         body.setTextFormat(Qt.TextFormat.RichText)
         body.setOpenExternalLinks(True)
         layout.addWidget(body)

@@ -1,12 +1,12 @@
 # Stable and sponsor preview updates
 
-**Status (2026-11-06):** the app code, the Cloudflare Worker (deployed) and the private preview repository
-(created and seeded) exist. Still to do before public activation: the signing-key check and a signed release
-candidate in the private repository, then a live sign-in and download with an active sponsor.
+**Status (2026-11-06):** live from S2S 1.8.1. The Worker is deployed, the private preview repository builds signed
+release candidates, and the full chain (GitHub device sign-in, sponsorship check, private release list, authenticated
+installer download and signature verification) was checked live with the owner account on Windows. Not yet checked
+live: a non-sponsor, a cancelled sponsorship, a second sponsor account, and packaged preview updates on macOS.
 
-**Stable** is the public update channel and needs no GitHub account. Sponsor Preview is implemented and
-disabled in the public build. When enabled, eligible monthly sponsors will be able to opt in from
-**Settings → Updates** after GitHub verification.
+**Stable** is the public update channel and needs no GitHub account. Eligible monthly sponsors can opt into
+Sponsor Preview from **Settings → Updates** after GitHub verification.
 
 The app compares semantic versions, so `1.7.0-rc.9 < 1.7.0-rc.10 < 1.7.0`. Stable ignores prereleases even if GitHub labels a tag incorrectly. Preview considers stable releases and authorized preview releases together and offers the newest compatible signed installer. A preview build opens its own "sponsor preview" window; the regular update window is only for stable releases. Switching to Stable never silently downgrades an installation. If the installed preview is ahead of Stable, it waits for a newer stable version. This does not guarantee that manually installing an older version can read newer saved data.
 
@@ -22,8 +22,8 @@ Only the configured service origin receives the user's authorization header; des
 
 ## Activating the preview channel
 
-The public desktop app keeps sponsor login disabled while its service URL is empty. Before enabling it,
-verify the OAuth application, Worker deployment and private release repository together.
+These steps were completed for 1.8.1, and are kept as a checklist if the service is ever rebuilt. The desktop app
+keeps sponsor login disabled while its service URL (`src/s2s/sponsor_config.py`) is empty.
 
 1. Create a fine-grained GitHub token for the private preview repository only, with **Contents: Read-only**. In the Worker's Cloudflare settings, save it as the secret `PREVIEW_REPO_TOKEN`. Keep the token out of the app, repository, and chat.
 2. Seed the private repository with the reviewed S2S source and release workflow. Add the existing updater signing key as the private repository's GitHub Actions secret `S2S_UPDATE_SIGNING_KEY`. The Worker token and signing key serve separate purposes and go in different places.

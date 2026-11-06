@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.8.1 — 2026-11-06
 
+- **Sponsor Preview is open.** Monthly GitHub sponsors can connect their account under Settings → Updates, choose Preview, and receive upcoming builds before they reach everyone. Stable stays the default and needs no account.
 - **Settings.** Number fields (extended search timeout, minimum bitrate, length tolerance) are now sliders that show their value, and the remaining number boxes have visible up and down arrows.
 - **Documentation.** The README screenshots are dark mode.
 

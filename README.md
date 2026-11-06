@@ -212,9 +212,9 @@ your computer, verifies its update signature, installs it and restarts. Settings
 history are kept. Active downloads can block installation.
 
 The **Stable** channel is for everyone and needs no account. Eligible monthly GitHub sponsors can opt into
-**Preview** under **Settings → Updates** to try upcoming builds first. A preview build has its own update
-window and may contain bugs; Preview is not yet switched on in public builds (see
-[sponsor preview updates](docs/sponsor-preview-updates.md)).
+**Preview** under **Settings → Updates** to try upcoming builds first. Sign-in happens on GitHub's own site and
+S2S never sees your password. A preview build has its own update window and may contain bugs. See
+[sponsor preview updates](docs/sponsor-preview-updates.md).
 
 On Windows, a separate progress window stays open while S2S closes and the installer runs.
 If an older copy cannot update itself, download and run the current installer from the releases page.
@@ -244,8 +244,9 @@ S2S has no analytics or telemetry. It contacts only these services:
 - **Soulseek**, through the bundled slskd: your searches, your downloads, and any folders you chose to share.
 - **GitHub**, to look for new releases and download the installer you approve. Problem reports open a draft in
   your browser that you review first; nothing is sent from the app.
-- **A small sponsor-credits service run on Cloudflare**, when you open **More → Credits**. The request carries
-  no personal data, although, like any web server, the service can see the connecting network address.
+- **A small sponsor service run on Cloudflare**, when you open **More → Credits** (no personal data is sent) and,
+  only if you connect a GitHub sponsor account, to check your sponsorship and deliver preview builds. Like any web
+  server, it can see the connecting network address.
 
 Use S2S only for material you are authorized to obtain or share. S2S is not affiliated with Apple,
 Spotify, SoundCloud, Soulseek or slskd.
@@ -299,9 +300,9 @@ See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
 
 S2S is free to use. You can support development with a monthly or one-time contribution through
 [GitHub Sponsors](https://github.com/sponsors/xanman04). Monthly $10 sponsors can opt into public recognition
-under **More → Credits** in the app. The sponsor Preview update channel is built into the app and is waiting for
-its final live checks before it is switched on in public builds; Stable updates are available to everyone without
-GitHub sign-in. See [sponsor preview updates](docs/sponsor-preview-updates.md) for how it works.
+under **More → Credits** in the app. Monthly sponsors at any tier can opt into the Preview update channel;
+Stable updates are available to everyone without GitHub sign-in. See
+[sponsor preview updates](docs/sponsor-preview-updates.md) for how it works.
 
 ## License
 

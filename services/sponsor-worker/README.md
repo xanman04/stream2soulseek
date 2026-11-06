@@ -46,7 +46,9 @@ node --test
 npx wrangler dev
 ```
 
-Before enabling Preview in a public build, verify the configured Worker with real sponsorship checks and
-private asset downloads. The desktop integration remains disabled while its public service URL is empty.
+Before changing the Worker or its secrets, verify the sign-in, release list and a private asset download again
+with the owner account (the owner is always allowed). If `/v1/releases` answers 502 `preview_unavailable`, the
+`PREVIEW_REPO_TOKEN` secret cannot read the private repository: replace it with a fresh token. The desktop integration
+stays disabled while its public service URL is empty.
 Workers Logs are configured with invocation logs disabled. Keep tracing disabled unless the deployment
 redacts query strings, which can contain signed release-storage URLs.

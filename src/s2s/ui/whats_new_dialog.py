@@ -18,8 +18,12 @@ class WhatsNewDialog(QDialog):
         self.setMinimumWidth(480)
         items = changelog.entries(version) if items is None else items
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(theme.display_label(QLabel(f"What's new in {version}")))
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(12)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)  # exactly as tall as its content
+        heading = QLabel(f"What's new in {version}")
+        heading.setObjectName("sectionTitle")
+        layout.addWidget(heading)
         if items:
             rows = []
             for lead, rest in items:
@@ -30,6 +34,7 @@ class WhatsNewDialog(QDialog):
         else:
             body = theme.subtle(QLabel("There are no release notes for this version in this copy of S2S."))
         body.setWordWrap(True)
+        body.setMinimumWidth(460)
         layout.addWidget(body)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         theme.primary(buttons.button(QDialogButtonBox.StandardButton.Close))
