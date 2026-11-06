@@ -7,15 +7,14 @@
 - **What's new.** After updating to a new stable release, a small window lists that version's changes once. More > Help > What's new shows them again.
 - **Help menu.** More > Help has the user guide, Open log folder, Copy diagnostics (version, platform and a few settings, with no folders or logins) and Report a bug. Menu items no longer repeat "S2S": About, Quit.
 - **Window.** S2S reopens at the size and place you last left it. Bug reports include the update channel and a few non-personal settings.
-- **Quit.** The More menu says "Quit S2S" and asks before quitting only when transfers would be interrupted.
+- **Quit.** The More menu says "Quit" and asks before quitting only when transfers would be interrupted.
 - **Close button.** Settings > Advanced can turn off "Closing the window (X) keeps S2S running in the system tray" (on by default). With it off, X quits and asks first if transfers are running; with it on, X never asks.
-- **About S2S.** More > About S2S shows the version, licence (GPL-3.0-or-later), no-warranty and not-affiliated notices, and links to the source and third-party licences.
+- **About.** More > About shows the version, licence (GPL-3.0-or-later), no-warranty and not-affiliated notices, and links to the source and third-party licences.
 - **Settings.** The pages now share one layout: a list of sections on the left, titled sections with help under each setting, and styled tick boxes. The Settings button no longer keeps a focus ring after the window closes.
 - **Updates.** A new stable release and a sponsor preview build now open different popups. The regular update popup is only for stable releases; previews have their own "Sponsor preview" popup.
 - **More button.** It no longer stays highlighted after its menu closes.
 - **Credits.** More > Credits lists supporters who chose to be named, under "Special thanks to".
-- Public documentation refreshed (README, install and setup guides, sponsor preview notes), and the private preview
-  release workflow can verify its updater signing key before building.
+- The private preview release workflow can verify its updater signing key before building installers.
 
 ## 1.7.1 — 2026-11-06
 
