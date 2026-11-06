@@ -164,7 +164,6 @@ class MyPlaylistsPage(QWidget):
             seen.add(key)
             entry = QListWidgetItem(Path(path).name or path)
             entry.setData(Qt.ItemDataRole.UserRole, path)
-            entry.setToolTip(path)
             if selected and key == os.path.normcase(os.path.normpath(selected)):
                 selected_row = self.folders.count()
             self.folders.addItem(entry)
