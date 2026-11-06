@@ -12,7 +12,7 @@ $trace = Join-Path (Split-Path $result) 'update-helper.log'
 $success = $false
 $job = $null
 $form = $null
-$animation = $null
+$frameClock = [Diagnostics.Stopwatch]::StartNew()
 $allowClose = $false
 function Trace($message) {
     Add-Content -LiteralPath $trace -Value ((Get-Date -Format o) + ' ' + $message)
@@ -22,6 +22,11 @@ function Wait-UpdatePoll {
     $poll = [Diagnostics.Stopwatch]::StartNew()
     do {
         [System.Windows.Forms.Application]::DoEvents()
+        if ($frameClock.ElapsedMilliseconds -ge 32 -and $form.Visible -and $form.WindowState -ne 'Minimized') {
+            # Paint now: queued timer/paint messages can be delayed while setup starts.
+            $bar.Advance()
+            $frameClock.Restart()
+        }
         Start-Sleep -Milliseconds 12
     } while ($poll.ElapsedMilliseconds -lt 100)
 }
@@ -80,9 +85,16 @@ using System.Windows.Forms;
 public sealed class S2SUpdateProgress : Panel {
     private readonly Stopwatch clock = Stopwatch.StartNew();
     public Color Accent { get; set; }
+    public float Position { get; private set; }
     public S2SUpdateProgress() {
         DoubleBuffered = true;
         ResizeRedraw = true;
+    }
+
+    public void Advance() {
+        double phase = clock.Elapsed.TotalSeconds * Math.PI / 1.6;
+        Position = (float)((1 - Math.Cos(phase)) / 2);
+        Refresh();
     }
 
     protected override void OnPaint(PaintEventArgs e) {
@@ -90,9 +102,8 @@ public sealed class S2SUpdateProgress : Panel {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         float radius = Math.Min(Width, Height) / 2f;
         float span = Math.Max(0, Width * 0.25f - 2 * radius);
-        double phase = clock.Elapsed.TotalSeconds * Math.PI / 1.6;
         float travel = Math.Max(0, Width - span - 2 * radius);
-        float left = travel * (float)((1 - Math.Cos(phase)) / 2);
+        float left = travel * Position;
         using (var brush = new SolidBrush(Accent)) {
             e.Graphics.FillEllipse(brush, left, 0, radius * 2, Height);
             e.Graphics.FillRectangle(brush, left + radius, 0, span, Height);
@@ -159,10 +170,6 @@ public static class S2SUpdateFrame {
         $bar.BackColor = [Drawing.ColorTranslator]::FromHtml($appearance.panel)
         $bar.Accent = [Drawing.ColorTranslator]::FromHtml($appearance.primary)
     }
-    $animation = New-Object System.Windows.Forms.Timer
-    $animation.Interval = 16
-    $animation.Add_Tick({ if ($form.Visible -and $form.WindowState -ne 'Minimized') { $bar.Invalidate() } })
-    $animation.Start()
     $detail = New-Object System.Windows.Forms.Label
     $detail.SetBounds(24, 126, 432, 25)
     $detail.Text = 'S2S will reopen automatically.'
@@ -236,7 +243,6 @@ public static class S2SUpdateFrame {
     Remove-Item -LiteralPath $active -Force -ErrorAction SilentlyContinue
     if ($form) {
         $allowClose = $true
-        if ($animation) { $animation.Stop() }
         if ($bar) { $bar.Visible = $false }
         if ($elapsed) { $elapsed.Visible = $false }
         $form.ClientSize = New-Object System.Drawing.Size(480, 300)
@@ -280,7 +286,6 @@ public static class S2SUpdateFrame {
     Remove-Item -LiteralPath $active -Force -ErrorAction SilentlyContinue
     if ($form) { $form.Dispose() }
     if ($iconBitmap) { $iconBitmap.Dispose() }
-    if ($animation) { $animation.Dispose() }
     if ($success) {
         Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction SilentlyContinue

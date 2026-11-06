@@ -19,6 +19,7 @@ through the bundled [slskd client](https://github.com/slskd/slskd).
 - Checks completed files and collects them into a folder without artist, album or uploader subfolders.
 - Records missing and unsuccessful tracks so you can return to them later.
 - Reuses recent search candidates across app restarts and overlapping playlists.
+- Browses local tracklist folders in **My Playlists**, with track details and total runtime.
 
 S2S does not download audio from the streaming services. No download starts until you confirm a selection.
 
@@ -40,9 +41,13 @@ administrator rights and includes an uninstaller.
 **macOS:** Open the disk image, drag S2S into Applications, and launch it from there. **Apple menu → About
 This Mac** identifies your chip and macOS version.
 
-Windows installers are not publisher-signed. Mac builds are ad hoc signed without Apple Developer ID
-signing or notarization, so operating-system security prompts are expected. See the
-[installation guide](docs/INSTALL.md) for first-launch instructions and SHA-256 verification.
+Windows installers are unsigned and Mac builds are not notarized. Before overriding a first-launch
+warning, [verify the SHA-256](docs/INSTALL.md#verify-a-download) against the checksum on the release page.
+
+- **Windows:** If SmartScreen shows **Windows protected your PC**, select **More info → Run anyway**
+  if offered. See the [Windows steps](docs/INSTALL.md#windows) if that option is missing.
+- **macOS:** After trying to open S2S from Applications, go to **System Settings → Privacy & Security**
+  and select **Open Anyway**. See the [Mac steps](docs/INSTALL.md#macos) for the full sequence.
 
 Live Mac testing has covered successful sign-in, searching, reviewing selections and downloading files
 from Soulseek. Verification and copying into the final tracklist folder still need a live retest following
@@ -51,8 +56,8 @@ checks before publication.
 
 ## Connect your accounts
 
-Start S2S and choose a **Soulseek downloads folder** for incoming files. Sign in to your own Soulseek
-account when prompted. Close any other Soulseek client using that account to avoid disconnecting it.
+Start S2S and sign in to Soulseek when prompted. S2S uses a default **Soulseek downloads folder** for
+incoming files, which you can change in Settings. Close any other Soulseek client using the same account.
 
 Open a streaming service in the sidebar to connect it. Sign-in takes place inside S2S on the service's
 own website; saved sessions can be reused on later launches.
@@ -61,7 +66,7 @@ own website; saved sessions can be reused on later launches.
 | --- | --- |
 | **Apple Music** | Sign in, browse library playlists and preview their tracks. |
 | **Spotify** | Sign in to browse playlists, or paste a public Spotify playlist link in **Choose playlist** without signing in. |
-| **SoundCloud** | Enable web sign-in, then connect to browse playlists you own, including accessible private playlists. Liked tracks and other users' liked playlists are not included. |
+| **SoundCloud** | Sign in to browse your own playlists and playlists you saved from other users, or paste a playlist link in **Choose playlist**. The account's separate Liked Tracks feed is not included. See the [SoundCloud guide](docs/SOUNDCLOUD.md). |
 
 These integrations use unofficial website APIs and may need updates when the services change. Account
 permissions, library access and unavailable tracks can affect the playlist data returned.
@@ -78,7 +83,8 @@ image cannot be loaded, S2S shows that service's mark instead. Artwork does not 
    preview do not modify the original playlist. Sortable lists cycle through ascending, descending and
    original order when you click a column heading.
 2. **Choose tracklist folder.** Select the final folder where the verified tracks should end up.
-3. **Find on Soulseek.** Follow the search progress and review which tracks were found, flagged or unresolved.
+3. **Find on Soulseek.** Follow the search progress and see which tracks were found, flagged or unresolved.
+   Use **Add a song…** to include a track by title and artist in the same transfer.
 4. **Review & confirm.** Inspect filenames, versions, formats, quality and alternatives. Confident matches
    are selected automatically under the default rules; flagged matches need your attention. Confirm the
    exact selection before any downloads begin.
@@ -92,8 +98,8 @@ image cannot be loaded, S2S shows that service's mark instead. Artwork does not 
    when needed, and choose **Done** to begin another playlist.
 
 After confirming downloads, steps 1–4 are locked for that run. **Cancel downloads** stops unfinished
-transfers and starts over; files already imported stay in the tracklist folder. Import history records
-unresolved, unselected and unsuccessful tracks as well as completed work.
+transfers and starts over; files already imported stay in the tracklist folder. Open **Transfer history**
+from the sidebar to browse completed and unfinished work, resume a transfer, or export its unfinished tracks.
 
 ### Two folders, two purposes
 
@@ -107,7 +113,8 @@ archive. You can use a different tracklist folder for each playlist. Files are n
 `Title (Version) - Artist.ext`; existing files are not overwritten. Unfinished transfers are kept in
 S2S's application data folder, separate from both locations.
 
-Keep **Downloads & import** open for automatic verification, copying, archiving and recovery checks.
+S2S continues checking saved transfers in the background while the app is running, including when you
+leave **Downloads & import**. Open that page to monitor a transfer or resolve files that need attention.
 When enabled, archiving moves processed source folders into `OLD` beneath the Soulseek downloads folder.
 Use ordinary folders for downloads and archives; nested symbolic links and Windows junctions need further
 hardening. Failed checks and file conflicts require attention before the affected source folder is archived.
@@ -170,12 +177,10 @@ the interval you choose, which defaults to 45 seconds. Available backup counts v
 
 S2S checks for updates at startup and through **More → Check for updates**. It downloads the installer for
 your computer, verifies its update signature, installs it and restarts. Settings, saved sessions and
-history are kept. Updates are not offered while downloads are running.
+history are kept. Active downloads can block installation.
 
-On Windows, updates started from **1.3.1 or later** show download progress and keep a separate installation
-window open while S2S closes and reopens. The installer preserves unchanged runtime files. Updating from
-1.2.0 still uses its older updater; install the current release manually to avoid that older experience.
-Versions 1.1.2 and earlier need a manual installation.
+On Windows, a separate progress window stays open while S2S closes and the installer runs.
+If an older copy cannot update itself, download and run the current installer from the releases page.
 
 **Report a Bug** in the sidebar prepares a GitHub issue draft with your description, reproduction steps,
 expected result, app/system versions and the recent scrubbed log. Logs are included automatically. Review the
@@ -241,8 +246,10 @@ See the [changelog](CHANGELOG.md), [installation guide](docs/INSTALL.md) and
 
 ## Support development
 
-S2S is free to use, with no paid features. If you would like to support its development,
-you can make an optional contribution through [GitHub Sponsors](https://github.com/sponsors/xanman04).
+S2S is free to use. You can support development with a monthly or one-time contribution through
+[GitHub Sponsors](https://github.com/sponsors/xanman04). The sponsor Preview channel is implemented
+and awaiting activation in public builds. Stable updates are available without GitHub sign-in.
+Monthly $10 sponsors can opt into public recognition under **More → Credits** in the app.
 
 ## License
 

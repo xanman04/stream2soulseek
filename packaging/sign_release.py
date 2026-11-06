@@ -19,16 +19,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 
-def main() -> None:
+def load_signing_key():
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from s2s.update_key import PUBLIC_KEY_B64
+    secret = os.environ.get("S2S_UPDATE_SIGNING_KEY", "").strip()
+    if not secret:
+        raise SystemExit("S2S_UPDATE_SIGNING_KEY is not set: add it under the repository's Actions secrets.")
+    try:
+        key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret, validate=True))
+    except ValueError:
+        raise SystemExit("S2S_UPDATE_SIGNING_KEY is not a valid Ed25519 private key.") from None
+    if key.public_key().public_bytes_raw() != base64.b64decode(PUBLIC_KEY_B64):
+        raise SystemExit("The signing key does not match the public key built into S2S.")
+    return key
+
+
+def main() -> None:
+    key = load_signing_key()
+    if sys.argv[1:] == ["--check-key"]:
+        print("Updater signing key matches the public key built into S2S.")
+        return
 
     from s2s.update_key import PUBLIC_KEY_B64
     from s2s.updater import signature_block, signed_message, verify_signature
 
-    secret = os.environ.get("S2S_UPDATE_SIGNING_KEY", "").strip()
-    if not secret:
-        raise SystemExit("S2S_UPDATE_SIGNING_KEY is not set: add it under the repository's Actions secrets.")
-    key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret))
     folder, notes = Path(sys.argv[1]), Path(sys.argv[2])
     installers = sorted([*folder.glob("S2S-*-setup.exe"), *folder.glob("S2S-*.dmg")])
     if not installers:

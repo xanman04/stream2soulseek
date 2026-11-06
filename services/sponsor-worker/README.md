@@ -38,4 +38,7 @@ node --test
 npx wrangler dev
 ```
 
-Before deploying, provide the three non-secret vars and `PREVIEW_REPO_TOKEN`, then validate sponsorship GraphQL access and private asset downloads with real accounts. This repository addition has not been deployed or checked against live credentials. No paid service is configured. Cloudflare account plan and current usage determine billing. Workers Logs are enabled with invocation logs disabled. Traces are disabled because Cloudflare's automatic fetch spans can include signed release-storage query URLs, and the current Wrangler config schema does not expose Cloudflare's `observability.redact_query_string` setting. Keep traces disabled until the deployment is configured to redact query strings through Cloudflare's Worker Script Settings API or Wrangler adds schema support.
+Before enabling Preview in a public build, verify the configured Worker with real sponsorship checks and
+private asset downloads. The desktop integration remains disabled while its public service URL is empty.
+Workers Logs are configured with invocation logs disabled. Keep tracing disabled unless the deployment
+redacts query strings, which can contain signed release-storage URLs.

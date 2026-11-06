@@ -7,6 +7,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      check_signing_only:
+        description: Verify the private preview signing key without building installers
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -38,10 +43,18 @@ jobs:
         env:
           S2S_RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
           S2S_REPO_PRIVATE: ${{ github.event.repository.private }}
+      - name: Check updater signing key before building
+        if: github.event_name == 'push' || inputs.check_signing_only
+        run: |
+          python -m pip install cryptography
+          python packaging/sign_release.py --check-key
+        env:
+          S2S_UPDATE_SIGNING_KEY: ${{ secrets.S2S_UPDATE_SIGNING_KEY }}
 
   build:
     name: Build ${{ matrix.label }}
     needs: classify
+    if: ${{ !inputs.check_signing_only }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

@@ -7,7 +7,7 @@ import sys
 import time
 from collections import deque
 
-from PySide6.QtCore import QTimer, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout
 
@@ -32,6 +32,32 @@ def change_headlines(notes: str, limit: int = 4) -> list[str]:
         if line:
             lines.append(line)
     return lines[:limit]
+
+
+class StartupUpdateCheck(QDialog):
+    """Show that S2S is still starting while the release lookup runs."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Starting S2S")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        title = QLabel("Checking for updates…")
+        title.setObjectName("sectionTitle")
+        _display_label(title)
+        progress = QProgressBar()
+        progress.setRange(0, 0)
+        progress.setTextVisible(False)
+        progress.setAccessibleName("Checking for updates")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.addWidget(title)
+        layout.addWidget(progress)
+        self.setMinimumWidth(320)
+
+    def reject(self) -> None:
+        # Escape must not dismiss the startup gate while the lookup is pending.
+        pass
 
 
 class UpdateDialog(QDialog):

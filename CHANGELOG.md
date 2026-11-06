@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Credits.** More > Credits lists supporters who chose to be named, under "Special thanks to".
+- Public documentation refreshed (README, install and setup guides, sponsor preview notes), and the private preview
+  release workflow can verify its updater signing key before building.
+
 ## 1.7.1 — 2026-11-06
 
 - **My Playlists.** Deleted folders no longer appear, and S2S starts loading track details in the background at launch.

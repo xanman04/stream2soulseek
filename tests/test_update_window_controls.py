@@ -32,7 +32,9 @@ $form.ShowInTaskbar = $false
 $form.Show()
 [Windows.Forms.Application]::DoEvents()
 Assert ($form.ControlBox -and $form.MinimizeBox -and -not $form.MaximizeBox) 'Missing native window controls'
-Assert $animation.Enabled 'Progress animation timer did not start'
+$firstPosition = $bar.Position
+Wait-UpdatePoll
+Assert ($bar.Position -ne $firstPosition) 'Installer polling did not advance the progress marker'
 function Get-BarPosition {
     $frame = New-Object Drawing.Bitmap($bar.Width, $bar.Height)
     try {
@@ -97,7 +99,6 @@ try {
     $timer.Stop()
     $timer.Dispose()
     $form.Dispose()
-    $animation.Dispose()
     Remove-Item -LiteralPath $active -Force -ErrorAction SilentlyContinue
 }
 '''

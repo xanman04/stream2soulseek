@@ -1,6 +1,8 @@
 # Stable and sponsor preview updates
 
-S2S uses one updater and one signed installation path. **Stable** is the default and needs no account. Sponsors can explicitly opt into **Preview** in Settings → Updates after GitHub verification; sponsorship never enrolls someone automatically.
+**Stable** is the public update channel and needs no GitHub account. Sponsor Preview is implemented and
+disabled in the public build. When enabled, eligible monthly sponsors will be able to opt in from
+**Settings → Updates** after GitHub verification.
 
 The app compares semantic versions, so `1.7.0-rc.9 < 1.7.0-rc.10 < 1.7.0`. Stable ignores prereleases even if GitHub labels a tag incorrectly. Preview considers stable releases and authorized preview releases together and offers the newest compatible signed installer. Switching to Stable never silently downgrades an installation. If the installed preview is ahead of Stable, it waits for a newer stable version. This does not guarantee that manually installing an older version can read newer saved data.
 
@@ -16,7 +18,8 @@ Only the configured service origin receives the user's authorization header; des
 
 ## Activating the preview channel
 
-The GitHub OAuth app and Cloudflare Worker are deployed. The desktop app keeps sponsor login disabled while its public service URL is empty.
+The public desktop app keeps sponsor login disabled while its service URL is empty. Before enabling it,
+verify the OAuth application, Worker deployment and private release repository together.
 
 1. Create a fine-grained GitHub token for the private preview repository only, with **Contents: Read-only**. In the Worker's Cloudflare settings, save it as the secret `PREVIEW_REPO_TOKEN`. Keep the token out of the app, repository, and chat.
 2. Seed the private repository with the reviewed S2S source and release workflow. Add the existing updater signing key as the private repository's GitHub Actions secret `S2S_UPDATE_SIGNING_KEY`. The Worker token and signing key serve separate purposes and go in different places.
@@ -31,6 +34,21 @@ Use a private repository containing the same reviewed app source and release wor
 The classification job rejects a preview version in a public repository **before** building or uploading CI artifacts. This is necessary because simply making the final release private would not protect installers uploaded by a public Actions run. Private previews are published with `prerelease=true` and `make_latest=false`. Public stable releases retain the existing complete-asset and signature checks and remain Latest.
 
 Switching an app to Preview does not bypass the per-platform signed-installer requirement. Drafts, malformed versions, unsigned assets and mislabelled prereleases are ignored. Keep a reasonable number of recent preview releases; the service bounds pagination and JSON size rather than making unbounded upstream requests.
+
+## Sponsor credits
+
+**Credits** in the footer and under **More** loads approved display names from the sponsor service
+when opened. After a sponsor explicitly approves public recognition and the exact name, add their
+GitHub GraphQL node ID and display name to the private Worker secret `SPONSOR_CREDITS_OPT_INS`
+as a JSON object. The Worker uses `SPONSOR_CREDITS_TOKEN`, a separate maintainer GitHub credential,
+to check for an active recurring $10 tier. Test the token with a real consenting sponsor before
+relying on it. Only approved names appear in the public response. Remove the opt-in entry on
+withdrawal. A sponsorship that ends or changes tiers drops out automatically on the next lookup.
+
+In the private preview repo, run **Actions → Release → Run workflow** with
+**Verify the private preview signing key without building installers** selected. The check verifies
+that the Actions secret matches the public key embedded in the app without exposing it or publishing
+anything. Tagged builds run the same check before building installers.
 
 ## Verification
 

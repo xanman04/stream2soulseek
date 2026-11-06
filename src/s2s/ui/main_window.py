@@ -21,6 +21,7 @@ from ..slskd.service import SlskdService
 from ..store import Store
 from . import theme
 from .context import AppContext
+from .credits_dialog import CreditsDialog
 from .destination_page import DestinationPage
 from .history_dialog import HistoryPage
 from .playlist_page import PlaylistPage
@@ -150,12 +151,17 @@ class MainWindow(QMainWindow):
         support_act = QAction("Support S2S", self)
         support_act.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(sponsor_url)))
         tools_menu.addAction(support_act)
-        support_link = theme.subtle(QLabel(f'Enjoying S2S? <a href="{sponsor_url}">Support the app</a>'))
+        credits_act = QAction("Credits", self)
+        credits_act.triggered.connect(lambda: CreditsDialog(self).exec())
+        tools_menu.addAction(credits_act)
+        support_link = theme.subtle(QLabel(
+            f'Enjoying S2S? <a href="{sponsor_url}">Support the app</a> · <a href="credits">Credits</a>'
+        ))
         support_link.setTextInteractionFlags(
             Qt.TextInteractionFlag.LinksAccessibleByMouse | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
         )
         support_link.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        support_link.linkActivated.connect(lambda _url: support_act.trigger())
+        support_link.linkActivated.connect(lambda url: (credits_act if url == "credits" else support_act).trigger())
         self.statusBar().insertPermanentWidget(0, support_link)
         tools_menu.addSeparator()
         tools_menu.addAction(quit_act)
@@ -231,11 +237,19 @@ class MainWindow(QMainWindow):
         self.go_step(STEP_PLAYLIST)
         if autostart:
             self.show_home()
-            QTimer.singleShot(0, self.startup)
-            QTimer.singleShot(0, self.startup_checks)
-            QTimer.singleShot(0, self, self._preload_playlists)
+            if getattr(sys, "frozen", False):
+                QTimer.singleShot(0, self, self._check_startup_update)
+            else:
+                self._continue_startup()
 
     # ------------------------------------------------------------ navigation
+
+    def _continue_startup(self) -> None:
+        if self._closing:
+            return
+        QTimer.singleShot(0, self, self.startup)
+        QTimer.singleShot(0, self, self.startup_checks)
+        QTimer.singleShot(0, self, self._preload_playlists)
 
     def _preload_playlists(self) -> None:
         if not self._closing:
@@ -509,7 +523,6 @@ class MainWindow(QMainWindow):
         if getattr(sys, "frozen", False):  # only the packaged app updates itself; source runs use git
             self._report_failed_update()
             self._run_job(updater_cleanup, lambda removed: None, lambda exc: None)  # leftovers of past updates
-            QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
 
     # ------------------------------------------------------------ problem reports and updates
 
@@ -520,7 +533,31 @@ class MainWindow(QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
-    def check_for_updates(self, *, manual: bool) -> None:
+    def _check_startup_update(self) -> None:
+        from .update_dialog import StartupUpdateCheck
+
+        if self._closing:
+            return
+        checking = StartupUpdateCheck(self)
+        checking.show()
+        pending = True
+
+        def finish(info) -> None:
+            nonlocal pending
+            if not pending or self._closing:
+                return
+            pending = False
+            checking.accept()
+            checking.deleteLater()
+            if info is not None:
+                self._offer_update(info)
+            self._continue_startup()
+
+        # An unreachable update service should not leave the application locked.
+        QTimer.singleShot(8000, self, lambda: finish(None))
+        self.check_for_updates(manual=False, startup_result=finish)
+
+    def check_for_updates(self, *, manual: bool, startup_result=None) -> None:
         """Look for a newer signed release (in the background). Automatic checks stay silent when nothing is new."""
         from .. import __version__, updater
         from ..sponsors import SponsorClient
@@ -530,12 +567,20 @@ class MainWindow(QMainWindow):
 
         def work():
             notices = []
+            http_get = None
+            preview_releases = preview_client.releases
+            if startup_result is not None:
+                http_get = lambda url: updater._http_get(url, timeout=3)
+                preview_releases = lambda: preview_client.releases(timeout=3)
             info = updater.check_for_update(__version__, channel=channel,
-                preview_releases=preview_client.releases, on_preview_error=notices.append)
+                http_get=http_get, preview_releases=preview_releases, on_preview_error=notices.append)
             return info, notices
 
         def done(result) -> None:
             info, notices = result
+            if startup_result is not None:
+                startup_result(info)
+                return
             if info is None:
                 if manual:
                     message = (f"No newer stable release is available for S2S {__version__}." if channel == "stable"
@@ -552,6 +597,8 @@ class MainWindow(QMainWindow):
             from ..applog import get
 
             get().info("Update check failed: %s", exc)
+            if startup_result is not None:
+                startup_result(None)
             if manual:
                 show_error(self, "Check for updates", str(exc))
             elif isinstance(exc, updater.UpdateError):  # offline or rate limited: keep trying while S2S is open

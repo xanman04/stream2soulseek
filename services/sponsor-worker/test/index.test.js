@@ -31,6 +31,27 @@ function fetchSequence(steps) {
   return { fetchImpl, calls, remaining: () => steps.length };
 }
 
+test("credits publish only opted-in active recurring $10 tier names", async () => {
+  const eligible = { isActive: true, isOneTimePayment: false,
+    tier: { monthlyPriceInCents: 1000, isCustomAmount: false } };
+  const node = (id, changes) => ({ id, sponsorshipForViewerAsSponsorable: { ...eligible, ...changes } });
+  const worker = createWorker((url, init) => {
+    assert.equal(url, "https://api.github.com/graphql");
+    assert.equal(init.headers.Authorization, "Bearer credits-token");
+    assert.deepEqual(JSON.parse(init.body).variables.ids, ["a", "b", "c", "d"]);
+    return response({ data: { viewer: { login: "owner" }, nodes: [
+      node("a"), node("b", { isActive: false }), node("c", { isOneTimePayment: true }),
+      node("d", { tier: { monthlyPriceInCents: 500, isCustomAmount: false } }), node("unlisted"),
+    ] } });
+  });
+  const result = await worker.fetch(request("/v1/credits", null), {
+    ...env, SPONSOR_CREDITS_TOKEN: "credits-token",
+    SPONSOR_CREDITS_OPT_INS: '{"a":"Approved DJ","b":"Expired","c":"One time","d":"Lower tier"}',
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { names: ["Approved DJ"] });
+});
+
 const identityStep = (login = "sponsor", status = 200) => () => response({ login }, status);
 const sponsorStep = (sponsorship) => (url, init) => {
   assert.equal(url, "https://api.github.com/graphql");

@@ -17,11 +17,15 @@ Python, slskd and FFmpeg are included. The **Source code** archives are for deve
 
 ## Installation
 
-**Mac:** Open the disk image, drag S2S onto Applications, and open it from Applications. **Windows:** Run the installer; S2S is added to the Start menu. Existing installations can update through **More > Check for updates** (or **Help > Check for updates** in older versions). See the [installation guide](https://github.com/xanman04/stream2soulseek/blob/main/docs/INSTALL.md) for first-launch security prompts, checksum checks and account setup.
+**Mac:** Drag S2S into Applications and launch it from there. If macOS blocks it, follow the [Open Anyway steps](https://github.com/xanman04/stream2soulseek/blob/main/docs/INSTALL.md#macos).
+
+**Windows:** Run the installer and open S2S from Start. If SmartScreen blocks it, follow the [Windows first-launch steps](https://github.com/xanman04/stream2soulseek/blob/main/docs/INSTALL.md#windows).
+
+Verify downloads using the [checksum instructions](https://github.com/xanman04/stream2soulseek/blob/main/docs/INSTALL.md#verify-a-download). Existing installations can update through **More → Check for updates**.
 
 ## Known limitations
 
-Sponsor Preview sign-in and installer delivery still require live validation.
+The public build uses the Stable update channel. Sponsor Preview is implemented and awaiting activation.
 
 SoundCloud's bot protection may require a slider challenge. Mac builds are ad hoc signed without Developer ID signing or notarization; Windows builds are not publisher-signed, so operating-system security prompts are expected.
 

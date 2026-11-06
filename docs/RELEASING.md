@@ -9,7 +9,9 @@ release notes consistent. Published tags are immutable; a correction gets a new 
    upstream tools and licence notices; never copy a user's application data or music into the build tree.
    The build's privacy check rejects settings, credentials, browser state, databases, playlists and audio files.
 4. Publication verifies the matching tag/package version and the complete three-archive/checksum set.
-   A manual workflow run produces build artifacts without publishing a release.
+   Publication signs the verified assets for the updater before publishing the draft. A manual workflow
+   run produces build artifacts without publishing a release. Preview tags are rejected in public
+   repositories. See [preview release setup](sponsor-preview-updates.md#producing-preview-releases).
 5. Audit the actual archives before recommending them to testers. Check bundled file paths and frozen Python
    contents; compare local private values only in memory and never print or commit them. A filename-based
    build check does not establish that source code contains no hardcoded credentials.

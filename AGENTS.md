@@ -1,6 +1,7 @@
 # S2S (Stream to Soulseek): development instructions and handoff
 
-Updated: 2026-10-25. Owner: the maintainer (see the repository owner).
+Owner: the repository maintainer. Current user workflows are documented in [README.md](README.md)
+and installation in [docs/INSTALL.md](docs/INSTALL.md). Dated implementation notes below are historical.
 
 This file is a standalone handoff for coding in T3 Code or another agent environment. Read it before implementing. All project files live in the repository checkout; anything outside it (the maintainer's music library and other workspaces) is not part of the project. This is a development plan, not evidence that the integrations work.
 
@@ -26,14 +27,16 @@ File workflow:
 
 ## Goal and scope
 
-Build a personal Windows desktop application that reads selected Apple Music playlists, searches Soulseek for the corresponding recordings, presents proposed files for review, and downloads only after explicit confirmation. Organize completed files into separate flat libraries under a library root the user chooses.
+S2S is a native Windows and macOS app that reads Apple Music, Spotify and SoundCloud playlist metadata,
+searches Soulseek for recordings, and queues reviewed files only after explicit confirmation. It organizes
+completed files into flat tracklist folders chosen by the user.
 
 - The user explicitly wants a native app-like GUI, not a localhost website or a browser-hosted interface.
-- Agreed direction: Python backend, PySide6/Qt native widgets, and Qt WebEngine embedded only where needed for Apple authentication.
+- Use a Python backend and PySide6 native widgets. Streaming-service sign-in uses embedded Qt WebEngine.
 - The user wants Apple sign-in contained inside the app window, then playlist browsing/selection in native controls. Do not silently substitute an external browser or require a share link as the normal workflow.
-- The owner authorized populating the existing GitHub repository on 2026-10-24 after initially deferring publication. This authorizes source synchronization; do not create releases or publish account/session data.
+- Publish release tags only at the maintainer's direction. Never publish account or session data.
 - The app must stay general, not tailored to the owner's folders: the user picks any download location, and personal paths are never defaults or requirements.
-- Spotify and SoundCloud are planned as further playlist sources (metadata only, through `src/s2s/sources/`). Research, blockers and a suggested order are in `docs/research/streaming-services.md`.
+- Spotify and SoundCloud are implemented as metadata sources. See the README for current connection options.
 - Other website sources are a later phase. Initially report tracks unavailable on Soulseek rather than adding external downloading.
 - AI is optional. Deterministic matching and review should enforce the rules; no paid AI dependency is required for the core workflow.
 
@@ -213,7 +216,7 @@ The user explicitly requires that personal credentials never become hardcoded or
 - Use placeholder-only templates. Review tracked files, history and explicit release contents before any future publication; ignore rules are not retroactive or sufficient alone.
 - Public release and legal review are deferred. Do not imply that private development makes unauthorized downloading/sharing lawful, or treat a disclaimer as legal protection.
 
-## Sharing with friends (future goal, requested 2026-10-24)
+## Packaging history (October 2026)
 
 The user wants, eventually, a single runnable Windows package (like the SoulseekQt installer) to send to friends, even without open-sourcing. Each friend signs in to their own Apple Music and Soulseek accounts and uses their own folders. Design for this now:
 

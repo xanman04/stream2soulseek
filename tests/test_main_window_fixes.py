@@ -59,6 +59,34 @@ def test_window_title_and_headers_are_concise(win):
     assert all(not hasattr(frame, "explain_label") for frame in win.frames)
 
 
+@pytest.mark.parametrize("result", ["update", "current", "timeout"])
+def test_startup_waits_for_update_decision_before_starting_other_windows(win, monkeypatch, result):
+    from types import SimpleNamespace
+
+    from s2s.ui import main_window
+    from s2s.ui.update_dialog import StartupUpdateCheck
+
+    checks, timers, events = [], [], []
+    monkeypatch.setattr(win, "check_for_updates", lambda *, manual, startup_result: checks.append(startup_result))
+    monkeypatch.setattr(main_window, "QTimer", SimpleNamespace(singleShot=lambda delay, owner, fn: timers.append(fn)))
+    monkeypatch.setattr(win, "_continue_startup", lambda: events.append("startup"))
+    monkeypatch.setattr(win, "_offer_update", lambda info: events.append(info))
+    win._check_startup_update()
+    checking = win.findChild(StartupUpdateCheck)
+    assert QApplication.activeModalWidget() is checking and not events
+    checking.reject()
+    assert checking.isVisible()
+
+    if result == "timeout":
+        timers[0]()
+        checks[0]("late update")
+    else:
+        checks[0]("update" if result == "update" else None)
+        timers[0]()
+    assert not checking.isVisible()
+    assert events == (["update", "startup"] if result == "update" else ["startup"])
+
+
 def test_signed_in_account_page_is_separate_from_playlist_step(win, monkeypatch):
     from s2s.secretstore import APPLE_DEVELOPER_TOKEN, APPLE_MEDIA_USER_TOKEN
 
@@ -424,3 +452,29 @@ def test_the_version_is_shown_in_the_corner(win):
     from s2s import __version__
 
     assert win.version_label.text() == f"S2S {__version__}"
+
+
+def test_credits_heading_does_not_state_a_price(qapp=None, monkeypatch=None):
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    from s2s.ui import credits_dialog
+
+    QApplication.instance() or QApplication([])
+    from s2s import sponsors
+
+    class Offline:
+        def __init__(self, *a, **k):
+            pass
+
+        def credits(self):
+            return []
+
+    original = credits_dialog.SponsorClient
+    credits_dialog.SponsorClient = Offline
+    try:
+        dialog = credits_dialog.CreditsDialog()
+        texts = [label.text() for label in dialog.findChildren(QLabel)]
+    finally:
+        credits_dialog.SponsorClient = original
+    assert "Special thanks to" in texts
+    assert not any("$" in text or "monthly" in text for text in texts)

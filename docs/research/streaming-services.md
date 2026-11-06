@@ -1,7 +1,8 @@
 # Spotify and SoundCloud as playlist sources: research notes
 
-Researched 2026-10-24 from official developer docs and blogs (sources at the end). Nothing here has been
-tried against a real account yet. These services change their API rules often, so recheck before building.
+Historical design notes from 2026-10-24. The proposals and API observations below describe that
+investigation, not the current implementation. See the [README](../../README.md#connect-your-accounts)
+and [SoundCloud guide](../SOUNDCLOUD.md) for the workflows S2S provides today.
 
 Goal: read a user's playlists and track metadata (title, artists, version text, duration) so the existing
 Soulseek search, review gate and import can run on them. The tracks themselves are never downloaded from

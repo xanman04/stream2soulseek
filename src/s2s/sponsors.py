@@ -49,12 +49,12 @@ class SponsorClient:
             raise SponsorError("Sponsor sign-in is not configured in this build. Stable updates remain available.")
         return self.service_url + path
 
-    def _json(self, method: str, url: str, *, token: str | None = None, data=None):
+    def _json(self, method: str, url: str, *, token: str | None = None, data=None, timeout: float = 20):
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = "Bearer " + token
         try:
-            with self.client_factory(timeout=20, follow_redirects=False) as client:
+            with self.client_factory(timeout=timeout, follow_redirects=False) as client:
                 response = client.request(method, url, headers=headers, data=data)
                 if response.status_code == 401:
                     raise SponsorError("Your GitHub sign-in has expired. Connect your account again.")
@@ -80,6 +80,14 @@ class SponsorClient:
         except (ValueError, TypeError, AttributeError):
             pass
         return {}
+
+    def credits(self) -> list[str]:
+        data = self._json("GET", self._url("/v1/credits"), timeout=10)
+        names = data.get("names") if isinstance(data, dict) else None
+        if (not isinstance(names, list) or len(names) > 100
+                or any(not isinstance(name, str) or not 1 <= len(name) <= 80 for name in names)):
+            raise SponsorError("The sponsor service returned invalid credits.")
+        return names
 
     def entitlement(self, *, token: str | None = None, cache: bool = True) -> dict:
         token = token or self.secrets.get(SPONSOR_GITHUB_TOKEN)
@@ -145,11 +153,11 @@ class SponsorClient:
         self.secrets.delete(SPONSOR_GITHUB_TOKEN)
         self.secrets.delete(SPONSOR_ENTITLEMENT)
 
-    def releases(self) -> list:
+    def releases(self, *, timeout: float = 20) -> list:
         token = self.secrets.get(SPONSOR_GITHUB_TOKEN)
         if not token:
             raise SponsorError("Connect your GitHub sponsor account again to check previews.")
-        data = self._json("GET", self._url("/v1/releases"), token=token)
+        data = self._json("GET", self._url("/v1/releases"), token=token, timeout=timeout)
         if not isinstance(data, list):
             raise SponsorError("The sponsor service returned an invalid preview list.")
         # Do not trust a URL in release metadata to receive the user's GitHub credential.

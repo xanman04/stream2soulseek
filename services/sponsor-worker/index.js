@@ -113,6 +113,55 @@ async function privateRepo(fetchImpl, env) {
   return repo;
 }
 
+async function creditsResponse(fetchImpl, env) {
+  try {
+    // Keys are immutable GitHub node IDs, values are explicitly approved public names.
+    const consent = JSON.parse(env.SPONSOR_CREDITS_OPT_INS || "{}");
+    const ids = Object.keys(consent);
+    if (ids.length === 0) return json({ names: [] });
+    if (ids.length > 100 || !env.SPONSOR_CREDITS_TOKEN) throw new Error("unconfigured");
+    const query = `query Credits($ids: [ID!]!) {
+      viewer { login }
+      nodes(ids: $ids) {
+        id
+        ... on Sponsorable {
+          sponsorshipForViewerAsSponsorable(activeOnly: true) {
+            isActive
+            isOneTimePayment
+            tier { monthlyPriceInCents isCustomAmount }
+          }
+        }
+      }
+    }`;
+    const response = await fetchImpl(`${API}/graphql`, {
+      method: "POST",
+      headers: { ...githubHeaders(env.SPONSOR_CREDITS_TOKEN), "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables: { ids } }),
+      redirect: "manual",
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) throw new Error("upstream");
+    const payload = await readJsonBounded(response);
+    if (payload.errors?.length || !env.SPONSOR_LOGIN
+        || payload.data?.viewer?.login?.toLowerCase() !== env.SPONSOR_LOGIN.toLowerCase()) {
+      throw new Error("upstream");
+    }
+    const names = new Set();
+    for (const node of payload.data.nodes) {
+      const s = node?.sponsorshipForViewerAsSponsorable;
+      if (s?.isActive !== true || s.isOneTimePayment !== false || s.tier?.monthlyPriceInCents !== 1000
+          || s.tier?.isCustomAmount !== false || !Object.hasOwn(consent, node.id)) continue;
+      const name = consent[node.id];
+      if (typeof name === "string" && name.trim() && name.length <= 80 && !/[\x00-\x1f\x7f]/.test(name)) {
+        names.add(name.trim());
+      }
+    }
+    return json({ names: [...names].sort((a, b) => a.localeCompare(b)) });
+  } catch {
+    return json({ error: "credits_unavailable" }, 503);
+  }
+}
+
 async function requireSponsor(fetchImpl, env, request) {
   const header = request.headers.get("authorization") || "";
   const match = /^Bearer ([A-Za-z0-9_\-.]+)$/.exec(header);
@@ -242,6 +291,10 @@ export function createWorker(fetchImpl = fetch) {
     async fetch(request, env) {
       const url = new URL(request.url);
       if (url.search) return json({ error: "invalid_request" }, 400);
+      if (url.pathname === "/v1/credits") {
+        if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, { Allow: "GET" });
+        return creditsResponse(fetchImpl, env);
+      }
       if (url.pathname === "/v1/config") {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, { Allow: "GET" });
         if (!env.GITHUB_CLIENT_ID) return json({ error: "unavailable" }, 503);

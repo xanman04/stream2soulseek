@@ -554,12 +554,12 @@ def launch_installer(cmd: list[str]):
                                 stderr=subprocess.DEVNULL)
 
 
-def _http_get(url: str):
+def _http_get(url: str, *, timeout: float = 60):
     """HTTPS GET limited to GitHub's release hosts (redirects followed only within them)."""
     import httpx
 
     current = url
-    with httpx.Client(timeout=60, follow_redirects=False, headers={"User-Agent": "S2S-updater",
+    with httpx.Client(timeout=timeout, follow_redirects=False, headers={"User-Agent": "S2S-updater",
                                                                     "Accept": "application/vnd.github+json"
                                                                     if "api.github.com" in url else "*/*"}) as client:
         for _ in range(5):

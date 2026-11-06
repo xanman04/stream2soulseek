@@ -11,47 +11,62 @@ Choose **Apple silicon** for an M-series chip, or **Intel** for an Intel process
 
 1. Open the `.dmg` and drag **S2S** onto the **Applications** shortcut beside it, then eject the disk image.
    Always open S2S from Applications: run from Downloads, macOS starts it from a temporary read-only copy.
-2. Open it. The app is ad hoc signed but does not have an Apple Developer ID signature or notarization.
-3. If macOS blocks it, try **System Settings → Privacy & Security → Open Anyway** after that launch attempt.
-   See [Apple's instructions](https://support.apple.com/en-us/102445).
-4. If that option is unavailable and you trust the release, remove quarantine from this app only:
+2. In Finder, open **Applications → S2S** once. S2S is ad hoc signed and has no Apple notarization.
+3. If macOS says it cannot verify the developer or check S2S for malicious software, dismiss the alert.
+   Verify the downloaded disk image using the [checksum instructions below](#verify-a-download).
+4. Open **System Settings → Privacy & Security**, scroll to **Security**, and select **Open Anyway**
+   for S2S. Confirm **Open** or **Open Anyway** and authenticate if prompted. Try opening S2S again
+   if the button is missing. See [Apple's Gatekeeper instructions](https://support.apple.com/en-us/102445).
+5. If the app is blocked only because it is quarantined and the verified copy is installed in Applications,
+   this Terminal command removes quarantine for that copy of S2S:
 
    ```sh
    xattr -dr com.apple.quarantine /Applications/S2S.app
    ```
 
-5. Saved logins are kept in your Keychain. S2S reads and writes them through macOS's own `security` tool,
-   so an update does not ask for Keychain access again.
+   Then open **Applications → S2S** again. If macOS specifically reports malware or damage, stop
+   and check the download. On a managed Mac, ask your administrator about enforced restrictions.
 
 ## Windows
 
-Use 64-bit Windows 10 (1809+) or Windows 11. Run `S2S-<version>-windows-x64-setup.exe`. It installs S2S for
-your user account into `%LOCALAPPDATA%\Programs\S2S` (no administrator rights), adds S2S to the Start menu
-(and the desktop if you tick it) and can be removed under **Settings → Apps**. Uninstalling keeps your settings
-and history in `%LOCALAPPDATA%\S2S`. If SmartScreen blocks the unsigned installer and you trust the release,
-choose **More info → Run anyway**, where offered.
+Use 64-bit Windows 10 (1809+) or Windows 11.
+
+1. Download `S2S-<version>-windows-x64-setup.exe` from GitHub Releases and
+   [verify the installer checksum](#verify-a-download).
+2. Open the installer from File Explorer. If Microsoft Defender SmartScreen shows **Windows protected
+   your PC**, select **More info**, check the filename, then select **Run anyway** if Windows offers it.
+3. Finish setup and open **S2S** from the Start menu. It installs into
+   `%LOCALAPPDATA%\Programs\S2S` for your user account.
+
+If **Run anyway** is unavailable, check whether Windows reports **Smart App Control** or an administrator
+policy. Smart App Control has no per-app exception. On a managed device, ask your administrator. A malware
+detection is a separate warning and should be reported with the exact message.
+[Microsoft's Smart App Control FAQ](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions)
 
 ## Verify a download
 
 The release text lists each installer's SHA-256 under **SHA-256 checksums**. Compare it with the output of:
 
 ```powershell
-Get-FileHash <file> -Algorithm SHA256
+Get-FileHash -LiteralPath "C:\path\to\S2S-version-windows-x64-setup.exe" -Algorithm SHA256
 ```
 
 On macOS:
 
 ```sh
-shasum -a 256 <file>
+shasum -a 256 "/path/to/S2S-version-macos-arm64.dmg"
 ```
 
-## First run and initial Mac testing
+Replace the example path with your downloaded file. If the checksum differs, download a fresh copy
+from the release page before trying to run it.
 
-Close any other Soulseek client using the same account. Choose a Soulseek downloads folder, sign in to
-Soulseek, and connect one streaming service. Use a small playlist and empty test folders initially.
+## First run
+
+Close any other Soulseek client using the same account. Sign in to Soulseek, then connect a streaming
+service or open a supported playlist link. Choose a separate final tracklist folder for a small test playlist.
 Search and review the results, then approve one or two files. Check that they reach the separate tracklist
 folder. Restart S2S to check that the connection and import history remain available.
 
 Report problems through [GitHub Issues](https://github.com/xanman04/stream2soulseek/issues), including the
-release version, macOS version, chip type, affected step and exact error. Remove account details from
+release version, Windows or macOS version, processor type, affected step and exact error. Remove account details from
 screenshots. Never attach passwords, cookies, tokens or the application's data folder.

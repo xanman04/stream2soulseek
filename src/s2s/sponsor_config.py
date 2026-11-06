@@ -5,3 +5,4 @@ An empty address keeps stable updates fully functional and sponsor connection un
 """
 
 SERVICE_URL = ""
+CREDITS_SERVICE_URL = "https://s2s-sponsor-worker.xnc2301.workers.dev"

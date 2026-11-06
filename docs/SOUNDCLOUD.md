@@ -4,7 +4,7 @@
 
 In **Choose playlist**, paste a public SoundCloud playlist link (`soundcloud.com/<user>/sets/<name>`, from the
 playlist's Share menu) next to the Spotify box and choose **Open**. A link-only playlist's secret link works too.
-This reads only SoundCloud's public metadata and needs no account.
+This reads playlist metadata available through the link and needs no account.
 
 ## Signing in to read your own playlists
 
@@ -12,9 +12,8 @@ Open **SoundCloud** in the sidebar and choose **Sign in to SoundCloud**, then si
 S2S. After the session is verified, S2S shows a native account status page, and **Choose playlist** lists the
 account's playlists. The remaining steps are shared with the other sources.
 
-Sign-in here is by email and password. Google, Apple and Facebook refuse sign-in inside any embedded browser
-window, so S2S hides those three buttons rather than leave a dead end, and SoundCloud's bot protection may show a
-slider challenge to solve. S2S does not disguise its browser to get around either. An account that only has
+Sign-in here is by email and password. S2S hides the Google, Apple and Facebook sign-in buttons in its
+embedded browser. SoundCloud's bot protection may show a slider challenge. An account that only has
 Google login can set a password from SoundCloud's "Need help?" link, or use the public-link route above.
 The list in **Choose playlist** shows the playlists you made, then the ones you saved (liked) from other people.
 Liked tracks, albums, EPs and singles are not listed. SoundCloud's cookie banner is answered with "Reject all" automatically.
@@ -30,8 +29,8 @@ streaming endpoints, and it does not change the source library. Website API chan
 
 The embedded browser uses a temporary profile. S2S accepts only the secure `oauth_token` cookie from
 SoundCloud domains, validates it against the account endpoint, then saves the token through the existing
-Windows-protected secret store outside the repository. Passwords and browser profiles are not saved.
-Sign out, or disable web sign-in, to remove S2S's local SoundCloud token. This does not sign out other apps.
+OS-protected secret store outside the repository (Windows DPAPI or macOS Keychain). Passwords and browser
+profiles are not saved. Sign out in S2S to remove its local SoundCloud token.
 
 ## Playlist and matching behavior
 

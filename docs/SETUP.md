@@ -1,4 +1,7 @@
-# slskd setup
+# slskd setup for source development
+
+The packaged Windows and macOS installers bundle slskd and FFmpeg. For a packaged install,
+follow the [installation guide](INSTALL.md). The steps below apply when running S2S from source.
 
 The steps below are for Windows. On macOS, download `slskd-<version>-osx-arm64.zip` (Apple silicon) or
 `-osx-x64.zip` (Intel), check its SHA-256, and unpack it to `~/Library/Application Support/slskd/<version>/`
@@ -13,13 +16,13 @@ The app runs [slskd](https://github.com/slskd/slskd) for you; you only install i
    SHA-256 against the digest GitHub shows, and unpack it to `%LOCALAPPDATA%\Programs\slskd\<version>\`.
    The app picks the newest version found there. To use another location, set `"slskd_exe"` under `extra`
    in `%LOCALAPPDATA%\S2S\settings.json`.
-2. **Start the app.** On first start it asks for the **slskd downloads folder** (for example
-   `C:\Music\Soulseek\complete`). Unfinished downloads are kept in S2S's own data folder
+2. **Start the app.** S2S chooses a default **Soulseek downloads folder** in its app data directory.
+   You can change the working folder in Settings. Unfinished downloads are kept in S2S's own data folder
    (`%LOCALAPPDATA%\S2S\slskd\incomplete`; override with `"slskd_incomplete_dir"` under `extra`).
 3. **Log in to Soulseek once.** The login popup appears when no login is saved. Close SoulseekQt or any other
    client using the same account first, because two clients on one account disconnect each other. Soulseek
    creates a new account if the username does not exist yet. The login is stored with DPAPI only after slskd
-   actually logged in, and is reused on every later start. **File > Soulseek login...** changes it.
+   actually logged in, and is reused on later launches. Use the Soulseek control in the sidebar to change it.
 
 What the app configures (`%LOCALAPPDATA%\S2S\slskd\slskd.yml`, regenerated on each start; do not edit):
 
