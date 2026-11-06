@@ -125,7 +125,7 @@ def test_opening_history_resumes_the_selected_saved_transfer(win, tmp_path, monk
         dialog.open_button.click()
         return dialog.result()
     monkeypatch.setattr(main_window.HistoryDialog, "exec", choose)
-    win.open_history()
+    win.sidebar.history_btn.click()
     assert win.ctx.import_id == iid
     assert win.stack.currentWidget() is win.frames[main_window.STEP_TRANSFERS]
 

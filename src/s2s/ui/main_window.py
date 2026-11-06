@@ -36,6 +36,7 @@ from .soulseek_login import SoulseekSession
 from .steps import STEPS, StepFrame
 from .finish_page import FinishPage
 from .home_page import HomePage
+from .my_playlists_page import MyPlaylistsPage
 from .track_search_page import TrackSearchPage
 from .single_download_dialog import SingleDownloadDialog
 from .transfers_page import TransfersPage
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
         self.home = HomePage(self.ctx)
         self.playlists.metadata_loaded.connect(self.home.refresh)
         self.track_search = TrackSearchPage(self.ctx)
+        self.my_playlists = MyPlaylistsPage(self.ctx)
         self.transfer_monitor = TransferMonitor(self.ctx, connected=lambda: self.soulseek.is_connected,
             skip_import=lambda: self.ctx.import_id if self.transfers.timer.isActive() else None,
             busy=lambda: self._queueing or self._closing, parent=self)
@@ -110,6 +112,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.soundcloud_service)
         self.stack.addWidget(self.home)
         self.stack.addWidget(self.track_search)
+        self.stack.addWidget(self.my_playlists)
 
         central = QWidget()
         h = QHBoxLayout(central)
@@ -118,7 +121,6 @@ class MainWindow(QMainWindow):
         h.addWidget(self.sidebar)
         h.addWidget(self.stack, 1)
         self.setCentralWidget(central)
-        self.statusBar().showMessage("Local app. Nothing is downloaded without your explicit confirmation.")
         from .. import __version__
 
         self.version_label = theme.subtle(QLabel(f"S2S {__version__}"))  # which version this is, at a glance
@@ -133,9 +135,7 @@ class MainWindow(QMainWindow):
         self.soulseek.status_changed.connect(self._soulseek_status)
 
         tools_menu = QMenu(self.sidebar.tools_btn)
-        history_act = QAction("Transfer history…", self)
-        history_act.triggered.connect(self.open_history)
-        tools_menu.addAction(history_act)
+        self.sidebar.history_requested.connect(self.open_history)
         quit_act = QAction("Quit S2S (pause transfers)", self)
         quit_act.triggered.connect(self.quit_application)
         quit_act.setShortcut(QKeySequence.StandardKey.Quit)
@@ -148,7 +148,10 @@ class MainWindow(QMainWindow):
         support_act.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(sponsor_url)))
         tools_menu.addAction(support_act)
         support_link = theme.subtle(QLabel(f'Enjoying S2S? <a href="{sponsor_url}">Support the app</a>'))
-        support_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        support_link.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
+        )
+        support_link.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         support_link.linkActivated.connect(lambda _url: support_act.trigger())
         self.statusBar().insertPermanentWidget(0, support_link)
         tools_menu.addSeparator()
@@ -163,6 +166,7 @@ class MainWindow(QMainWindow):
         self.sidebar.transfer_selected.connect(self.resume_import)
         self.sidebar.home_requested.connect(self.show_home)
         self.sidebar.track_search_requested.connect(self.open_track_search)
+        self.sidebar.my_playlists_requested.connect(self.show_my_playlists)
         self.home.playlist_requested.connect(self.start_playlist_from_home)
         self.home.quick_search_requested.connect(lambda: self.open_track_search("quick"))
         self.home.free_search_requested.connect(lambda: self.open_track_search("free"))
@@ -251,6 +255,19 @@ class MainWindow(QMainWindow):
         self.track_search.set_mode(mode)
         self.stack.setCurrentWidget(self.track_search)
         self.sidebar.show_track_search()
+        self._park_confirmed_transfer()
+
+    def show_my_playlists(self) -> None:
+        if self._closing or self._queueing:
+            self.sidebar.my_playlists_btn.setChecked(self.stack.currentWidget() is self.my_playlists)
+            return
+        self._navigation_generation += 1
+        self.spotify_service.leave()
+        self.soundcloud_service.leave()
+        self.transfers.stop()
+        self.my_playlists.refresh()
+        self.stack.setCurrentWidget(self.my_playlists)
+        self.sidebar.show_my_playlists()
         self._park_confirmed_transfer()
 
     def _park_confirmed_transfer(self) -> None:

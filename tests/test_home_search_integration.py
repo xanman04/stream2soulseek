@@ -80,6 +80,37 @@ def test_home_and_track_search_routes_preserve_unconfirmed_draft(env):
     assert_context_unchanged(win.ctx, before)
 
 
+def test_my_playlists_browses_saved_tracklist_without_changing_draft(env, monkeypatch):
+    from s2s.ui import my_playlists_page
+
+    win, store, tmp_path = env
+    before = active_context(win, tmp_path, approval=False)
+    folder = tmp_path / "House"
+    folder.mkdir()
+    (folder / "track.flac").write_bytes(b"audio")
+    (folder / "missing-tags.mp3").write_bytes(b"audio")
+    (folder / "notes.txt").write_text("notes")
+    store.create_import(Playlist("house", "House"), str(folder))
+    win.ctx.settings.recent_destinations = [str(folder)]
+    win.ctx.settings.ffprobe_path = "fixture-ffprobe"
+
+    def inspect(path, _ffprobe):
+        if path.endswith(".mp3"):
+            raise RuntimeError("could not read audio")
+        return {"tags": {"title": "Tagged title", "artist": "Tagged artist"}, "duration": 95.2}
+
+    monkeypatch.setattr(my_playlists_page, "inspect_audio", inspect)
+    win.sidebar.my_playlists_btn.click()
+
+    page = win.my_playlists
+    assert win.stack.currentWidget() is page and win.sidebar.my_playlists_btn.isChecked()
+    assert page.folders.count() == 1
+    assert page.model.rowCount() == 2
+    assert page.model.item(1, 0).text() == "Tagged title"
+    assert "1:35 known runtime (1 of 2 tracks)" in page.stats.text()
+    assert_context_unchanged(win.ctx, before)
+
+
 def test_start_playlist_from_home_returns_to_running_search_without_reset(env):
     win, _store, tmp_path = env
     before = active_context(win, tmp_path, approval=False)

@@ -344,6 +344,7 @@ class Settings:
     response_limit: int = 100
     file_limit: int = 10000
     recent_destinations: list[str] = field(default_factory=list)  # most recent first, max 10
+    playlist_folders: list[str] = field(default_factory=list)  # manually added local tracklist folders
     archive_dir_name: str = "OLD"  # subfolder of the downloads dir that receives finished peer folders
     auto_import: bool = True
     match_policy: MatchPolicy = field(default_factory=MatchPolicy)

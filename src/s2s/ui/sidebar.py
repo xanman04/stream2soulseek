@@ -319,6 +319,8 @@ def _card(name: str) -> tuple[QFrame, QVBoxLayout]:
 class Sidebar(QWidget):
     home_requested = Signal()
     track_search_requested = Signal()
+    history_requested = Signal()
+    my_playlists_requested = Signal()
     service_selected = Signal(str)
     step_selected = Signal(int)
     soulseek_login_requested = Signal()
@@ -360,6 +362,13 @@ class Sidebar(QWidget):
         self.track_search_btn.setMinimumHeight(38)
         self.track_search_btn.setObjectName("primaryNavigation")
         set_icon(self.track_search_btn, "search")
+        self.history_btn = QPushButton("Transfer history")
+        self.history_btn.setObjectName("primaryNavigation")
+        set_icon(self.history_btn, "history")
+        self.my_playlists_btn = QPushButton("My Playlists")
+        self.my_playlists_btn.setObjectName("primaryNavigation")
+        self.my_playlists_btn.setCheckable(True)
+        set_icon(self.my_playlists_btn, "playlist")
         self.workflow_toggle = _WorkflowButton("Playlist transfer")
         self.workflow_toggle.setAccessibleName("Expand playlist transfer steps")
         self.workflow_toggle.setCheckable(True)
@@ -460,7 +469,7 @@ class Sidebar(QWidget):
         lay = self._lay = QVBoxLayout(self)
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
         for widget in (brand, self.home_btn, self.workflow_toggle, steps_card, self.track_search_btn,
-                       self.transfer_panel):
+                       self.my_playlists_btn, self.history_btn, self.transfer_panel):
             lay.addWidget(widget)
         lay.addStretch(1)  # free height sits here, between the navigation and the accounts, never as a scroll bar
         lay.addWidget(accounts_card)
@@ -489,6 +498,8 @@ class Sidebar(QWidget):
         self.brand_btn.clicked.connect(self._home)
         self.report_btn.clicked.connect(self.report_requested)
         self.track_search_btn.clicked.connect(self._track_search)
+        self.history_btn.clicked.connect(self.history_requested)
+        self.my_playlists_btn.clicked.connect(self.my_playlists_requested)
         self.workflow_toggle.clicked.connect(self._toggle_workflow)
 
     # ------------------------------------------------------------ scaling
@@ -566,7 +577,8 @@ class Sidebar(QWidget):
         pad = 14 if self._mode < 2 else 10
         self._lay.setContentsMargins(px(pad), px(pad), px(pad), px(pad))
         self._lay.setSpacing(self._gap)
-        for button in (self.home_btn, self.track_search_btn, self.workflow_toggle):
+        for button in (self.home_btn, self.track_search_btn, self.workflow_toggle, self.my_playlists_btn,
+                       self.history_btn):
             button.setMinimumHeight(38 if self._mode < 2 else 34)
             button.setIconSize(QSize(20, 20))
         self._brand_row.setContentsMargins(px(6), px(4), px(6), px(12 if self._mode < 2 else 6))
@@ -710,6 +722,7 @@ class Sidebar(QWidget):
         self.updateGeometry()
 
     def show_service(self, key: str) -> None:
+        self.my_playlists_btn.setChecked(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
         for r in range(self.services.count()):
@@ -720,6 +733,7 @@ class Sidebar(QWidget):
         self._bold_current()
 
     def show_step(self, index: int) -> None:
+        self.my_playlists_btn.setChecked(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
         self._set_workflow_expanded(True)
@@ -729,6 +743,7 @@ class Sidebar(QWidget):
         self._update_workflow_label()
 
     def show_home(self) -> None:
+        self.my_playlists_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
         self._set_workflow_expanded(False)
@@ -737,12 +752,21 @@ class Sidebar(QWidget):
         self.track_search_btn.setChecked(False)
 
     def show_track_search(self) -> None:
+        self.my_playlists_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
         self._set_workflow_expanded(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setCheckable(True)
         self.track_search_btn.setChecked(True)
+
+    def show_my_playlists(self) -> None:
+        self._quiet(self.steps, -1)
+        self._quiet(self.services, -1)
+        self._set_workflow_expanded(False)
+        self.home_btn.setChecked(False)
+        self.track_search_btn.setChecked(False)
+        self.my_playlists_btn.setChecked(True)
 
     def set_service_state(self, key: str, text: str) -> None:
         for r in range(self.services.count()):
