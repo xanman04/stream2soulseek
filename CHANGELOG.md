@@ -1,8 +1,7 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 — 2026-11-06
 
-- **Documentation.** The README now describes Settings, the More and Help menus, update channels and the services S2S contacts. The sponsor-preview, worker, design and contributor notes are brought up to date.
 - **First launch.** A one-time welcome card on Home explains the four steps and links to the user guide. It never returns once dismissed, and people who already use S2S do not see it.
 - **What's new.** After updating to a new stable release, a small window lists that version's changes once. More > Help > What's new shows them again.
 - **Help menu.** More > Help has the user guide, Open log folder, Copy diagnostics (version, platform and a few settings, with no folders or logins) and Report a bug. Menu items no longer repeat "S2S": About, Quit.
@@ -14,6 +13,7 @@
 - **Updates.** A new stable release and a sponsor preview build now open different popups. The regular update popup is only for stable releases; previews have their own "Sponsor preview" popup.
 - **More button.** It no longer stays highlighted after its menu closes.
 - **Credits.** More > Credits lists supporters who chose to be named, under "Special thanks to".
+- **Documentation.** The README now describes Settings, the More and Help menus, update channels and the services S2S contacts. The sponsor-preview, worker, design and contributor notes are brought up to date.
 - The private preview release workflow can verify its updater signing key before building installers.
 
 ## 1.7.1 — 2026-11-06

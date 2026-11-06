@@ -16,7 +16,7 @@ def changelog_path() -> Path | None:
     return None
 
 
-def entries(version: str, text: str | None = None, limit: int = 10) -> list[tuple[str, str]]:
+def entries(version: str, text: str | None = None, limit: int = 12) -> list[tuple[str, str]]:
     """The change bullets of `## <version> - <date>` as (bold lead-in, rest) pairs; empty when there are none.
 
     Markdown links and code marks are removed. A bullet without a bold lead-in has an empty first part.
