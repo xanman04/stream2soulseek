@@ -6,17 +6,19 @@ import math
 import threading
 import time
 from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import QObject, QRectF, QTimer, Signal, Qt
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QHeaderView, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .. import config, workflow
 from .. import layouts as lay_mod
 from ..matching.formats import describe_policy
-from ..models import MatchResult, MatchStatus, Tier
+from ..models import AppleTrack, MatchResult, MatchStatus, Tier
 from ..slskd import search as search_mod
 from ..slskd.client import SlskdAuthError, SlskdError
 from .context import AppContext
@@ -151,6 +153,7 @@ class SearchPage(QWidget):
         self._cancel = threading.Event()
         self._discard_cancelled = False
         self._running = False
+        self._pending_songs: list[tuple[str, str]] = []
         self._row_of: dict[str, int] = {}
         self._track_position: dict[str, int] = {}
         self._shown: dict[str, MatchResult] = {}
@@ -170,6 +173,7 @@ class SearchPage(QWidget):
         self.start_btn = QPushButton("Start search")
         primary(self.start_btn)
         self.cancel_btn = QPushButton("Cancel transfer")
+        self.add_song_btn = QPushButton("Add a song…")
         self.bar = QProgressBar()
         self.bar.setRange(0, 0)
         self.bar.setTextVisible(False)
@@ -224,6 +228,7 @@ class SearchPage(QWidget):
         rules_row.addWidget(self.rules_btn)
         row = QHBoxLayout()
         row.addWidget(self.info, 1)
+        row.addWidget(self.add_song_btn)
         row.addWidget(self.cancel_btn)
         row.addWidget(self.start_btn)
         lay = QVBoxLayout(self)
@@ -241,6 +246,7 @@ class SearchPage(QWidget):
         lay.addWidget(self.table, 1)
         self.start_btn.clicked.connect(self.start)
         self.cancel_btn.clicked.connect(self.cancel_requested)
+        self.add_song_btn.clicked.connect(self._prompt_add_song)
         self.retry_btn.clicked.connect(lambda: self.start(retry=True))
         self.rules_btn.clicked.connect(self.change_rules)
         self.layout_combo.activated.connect(self._layout_chosen)
@@ -326,6 +332,67 @@ class SearchPage(QWidget):
         # are queued; "Start another playlist" on the Downloads page is the way to a fresh search.
         locked = self._downloads_queued() and not self._running
         self.start_btn.setEnabled(not self._running and not locked)
+        self.add_song_btn.setEnabled(bool(self.ctx.playlist and self.ctx.destination)
+                                     and not self._downloads_queued() and not (self._running and self._cancel.is_set()))
+
+    def _prompt_add_song(self) -> None:
+        selection = self._selection_key()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add a song")
+        form = QFormLayout(dialog)
+        title, artist = QLineEdit(), QLineEdit()
+        title.setPlaceholderText("Include the remix or version, if any")
+        form.addRow("Title", title)
+        form.addRow("Artist", artist)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        add = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        add.setText("Add & search")
+
+        def validate():
+            add.setEnabled(bool(title.text().strip() and artist.text().strip()))
+
+        title.textChanged.connect(validate)
+        artist.textChanged.connect(validate)
+        validate()
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() and selection == self._selection_key():
+            self._add_song(title.text().strip(), artist.text().strip())
+
+    def _add_song(self, title: str, artist: str) -> None:
+        if not (title and artist and self.ctx.playlist and self.ctx.destination) or self._downloads_queued():
+            return
+        if self._running and self._cancel.is_set():
+            return
+        self._pending_songs.append((title, artist))
+        if self._running:
+            count = len(self._pending_songs)
+            self.add_song_btn.setText(f"Add a song… ({count} waiting)")
+        else:
+            self._search_pending_songs()
+
+    def _take_pending_songs(self) -> list[AppleTrack]:
+        pending, self._pending_songs = self._pending_songs, []
+        self.add_song_btn.setText("Add a song…")
+        position = max((t.position for t in self.ctx.tracks), default=-1) + 1
+        tracks = [AppleTrack(f"manual:{uuid4().hex}", title, artist, position=position + i)
+                  for i, (title, artist) in enumerate(pending)]
+        if tracks:
+            self.ctx.tracks = [*self.ctx.tracks, *tracks]
+        return tracks
+
+    def _search_pending_songs(self) -> None:
+        added = self._take_pending_songs()
+        ctx = self.ctx
+        if ctx.import_id and ctx.results and ctx.results_policy == ctx.settings.match_policy.fingerprint():
+            # Preserve earlier results and leave failed additions eligible for the normal retry action.
+            ctx.results = [*ctx.results, *(MatchResult(t, MatchStatus.UNRESOLVED, None,
+                           note="search failed: added song has not been searched yet") for t in added)]
+            self.show_results(ctx.results)
+            self.start(added=added)
+        else:
+            self.start()
 
     def prepare(self) -> None:
         """Show one 'waiting' row per requested track."""
@@ -482,7 +549,7 @@ class SearchPage(QWidget):
         self.start()
         return self._running
 
-    def start(self, retry: bool = False) -> None:
+    def start(self, retry: bool = False, *, added: list[AppleTrack] | None = None) -> None:
         if self._running:
             return
         ctx = self.ctx
@@ -493,9 +560,9 @@ class SearchPage(QWidget):
             self.info.setText("Nothing to search: choose a playlist and a tracklist folder first.")
             return
         self._retry_old = None
-        if retry:
+        if retry or added:
             # Re-run only the tracks whose search could not run; results merge into the same import.
-            tracks = self._retry_candidates()
+            tracks = added or self._retry_candidates()
             if not tracks:
                 return
             ids = {t.apple_id for t in tracks}
@@ -542,7 +609,7 @@ class SearchPage(QWidget):
                 import_id = reuse
                 if import_id is None:
                     import_id = ctx.store.create_import(playlist, destination)
-                    ctx.store.save_tracks(import_id, tracks)
+                ctx.store.save_tracks(import_id, tracks)
                 results = workflow.search_and_match(
                     ctx.store, client, import_id, tracks, settings, cancel=cancel,
                     progress=lambda d, t, r: self._progress.step.emit(d, t, r), cache=cache,
@@ -557,6 +624,10 @@ class SearchPage(QWidget):
     def cancel(self, *, discard: bool = False) -> None:
         self._discard_cancelled = discard
         self._cancel.set()
+        if discard:
+            self._pending_songs.clear()
+            self.add_song_btn.setText("Add a song…")
+        self._refresh_start_text()
         self.info.setText("Cancelling...")
 
     def _set_running(self, running: bool) -> None:
@@ -573,6 +644,8 @@ class SearchPage(QWidget):
             set_banner(self.wait_banner, "", "warn")
             self.bar.setVisible(False)
         self.start_btn.setEnabled(not running and not self._downloads_queued())
+        self.add_song_btn.setEnabled(bool(self.ctx.playlist and self.ctx.destination)
+                                     and not self._downloads_queued() and not (running and self._cancel.is_set()))
         self.cancel_btn.setEnabled(True)
         self.layout_combo.setEnabled(not running)
         self.rules_btn.setEnabled(not running)
@@ -592,6 +665,8 @@ class SearchPage(QWidget):
         retry = self._retry_old
         self._retry_old = None
         if requested is not None and requested != current:
+            self._pending_songs.clear()
+            self.add_song_btn.setText("Add a song…")
             self._set_running(False)
             self.info.setText("The playlist or tracklist folder changed during this search. Search again for the current selection.")
             return
@@ -636,6 +711,13 @@ class SearchPage(QWidget):
                 f", {n['warn']} to check" if n["warn"] else "") + ". Next, review what was found.")
         self._refresh_start_text()
         self.refresh_rules()
+        if self._pending_songs:
+            if not cancelled:
+                self._search_pending_songs()
+                return
+            self._take_pending_songs()
+            self.ctx.results = workflow.fill_unsearched(self.ctx.tracks, self.ctx.results)
+            self.show_results(self.ctx.results)
         self.search_finished.emit(cancelled)
 
     def _failed(self, exc: object) -> None:
@@ -654,3 +736,8 @@ class SearchPage(QWidget):
             self._update_retry_button()
         set_banner(self.summary_label, f"Search failed: {self.ctx.describe(exc)}", "error")
         self.info.setText("The search could not run.")
+        if self._pending_songs:
+            self._take_pending_songs()
+            self.show_results(self.ctx.results)
+            set_banner(self.summary_label, "Search failed. Your added songs are still in this transfer. "
+                       "Use Start search or Search again to include them.", "error")

@@ -58,6 +58,50 @@ def test_activity_animation_cycles_and_stops_on_success(qapp):
     page.close()
 
 
+def test_manual_song_joins_running_playlist_and_reuses_its_import(qapp, monkeypatch):
+    from s2s.ui import search_page
+
+    page = _page(qapp, 1)
+    ctx = page.ctx
+    original = MatchResult(ctx.tracks[0], MatchStatus.PROPOSED, _candidate("peer"))
+    saved = []
+    ctx.store = SimpleNamespace(save_tracks=lambda iid, tracks: saved.append((iid, tracks)))
+    ctx.slskd_client = lambda: SimpleNamespace(is_connected=lambda: True, close=lambda: None)
+    monkeypatch.setattr(search_page.workflow, "search_and_match",
+                        lambda store, client, iid, tracks, settings, **kwargs:
+                        [MatchResult(tracks[0], MatchStatus.PROPOSED, _candidate("other"))])
+    jobs = []
+    monkeypatch.setattr(search_page, "run_async", lambda parent, work, done, failed: jobs.append((work, done)))
+    finished = []
+    page.search_finished.connect(finished.append)
+    page._set_running(True)
+    page._add_song("An Unreleased Song (VIP)", "An Artist")
+    assert len(ctx.tracks) == 1  # keep the active worker's selection stable
+    page._finished(("import", [original], False, ctx.settings.match_policy.fingerprint()))
+    assert not finished  # don't advance to Review until the added song has been searched
+    assert len(jobs) == 1
+    work, done = jobs.pop()
+    done(work())
+    added = ctx.tracks[1]
+    assert (added.name, added.artist, added.position) == ("An Unreleased Song (VIP)", "An Artist", 1)
+    assert saved == [("import", [added])]
+    assert ctx.results[0] == original
+    assert ctx.results[1].track == added
+    assert ctx.approval_id is None and finished == [False]
+    page.close()
+
+
+def test_cancelling_playlist_discards_pending_manual_song(qapp):
+    page = _page(qapp, 1)
+    page._set_running(True)
+    page._add_song("Another Song", "Artist")
+    page.cancel(discard=True)
+    page._finished(("import", [], True, page.ctx.settings.match_policy.fingerprint()))
+    assert len(page.ctx.tracks) == 1
+    assert not page._pending_songs
+    page.close()
+
+
 def test_segments_distinguish_found_flagged_unresolved_error_and_pending(qapp):
     page = _page(qapp)
     tracks = page.ctx.tracks
