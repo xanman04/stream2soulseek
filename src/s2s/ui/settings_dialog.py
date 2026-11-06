@@ -81,7 +81,14 @@ class SettingsDialog(QDialog):
         form.addRow(self.general_help)
         form.addRow("", self.auto_import)
         form.addRow("Extended search timeout (s):", self.timeout)
+        self.close_to_tray = QCheckBox("Closing the window (X) keeps S2S running in the system tray")
+        self.close_to_tray.setChecked(bool(s.close_to_tray))
+        tray_help = QLabel("Applies while transfers are in progress, so they are not interrupted. Turn this off if "
+                           "you would rather the X button quit S2S (you are asked first when transfers are running).")
+        tray_help.setWordWrap(True)
         advanced_form = QFormLayout()  # Advanced
+        advanced_form.addRow("", self.close_to_tray)
+        advanced_form.addRow(tray_help)
         advanced_form.addRow(self.folder_help)
         advanced_form.addRow("Soulseek download folder:", self._with_browse(self.downloads, True))
         reuse_help = QLabel("Scan these folders for completed downloads before searching Soulseek.")
@@ -238,6 +245,7 @@ class SettingsDialog(QDialog):
                 self.ctx.settings, slskd_url=self.url.text().strip(),
                 slskd_downloads_dir=downloads, local_reuse_folders=folders,
                 archive_dir_name=self.archive.text().strip() or "OLD", auto_import=self.auto_import.isChecked(),
+                close_to_tray=self.close_to_tray.isChecked(),
                 ffprobe_path=self.ffprobe.text().strip(), search_timeout_s=self.timeout.value(),
                 match_policy=self.rules.policy(),
                 rule_layouts=dict(self.rules.layouts), shared_folders=self.shared_folders(),

@@ -20,6 +20,7 @@ from ..secretstore import SecretStore
 from ..slskd.service import SlskdService
 from ..store import Store
 from . import theme
+from .about_dialog import AboutDialog
 from .context import AppContext
 from .credits_dialog import CreditsDialog
 from .destination_page import DestinationPage
@@ -140,8 +141,8 @@ class MainWindow(QMainWindow):
         tools_menu = QMenu(self.sidebar.tools_btn)
         self.sidebar.history_requested.connect(self.open_history)
         self.history.transfer_requested.connect(self.resume_import)
-        quit_act = QAction("Quit S2S (pause transfers)", self)
-        quit_act.triggered.connect(self.quit_application)
+        quit_act = QAction("Quit S2S", self)
+        quit_act.triggered.connect(self.request_quit)
         quit_act.setShortcut(QKeySequence.StandardKey.Quit)
         self.addAction(quit_act)
         update_act = QAction("Check for updates...", self)
@@ -154,6 +155,9 @@ class MainWindow(QMainWindow):
         credits_act = QAction("Credits", self)
         credits_act.triggered.connect(lambda: CreditsDialog(self).exec())
         tools_menu.addAction(credits_act)
+        about_act = QAction("About S2S", self)
+        about_act.triggered.connect(lambda: AboutDialog(self).exec())
+        tools_menu.addAction(about_act)
         support_link = theme.subtle(QLabel(
             f'Enjoying S2S? <a href="{sponsor_url}">Support the app</a> · <a href="credits">Credits</a>'
         ))
@@ -1058,28 +1062,52 @@ class MainWindow(QMainWindow):
             menu = QMenu(self)
             menu.addAction("Open S2S", self.show_from_tray)
             menu.addSeparator()
-            menu.addAction("Quit S2S (pause transfers)", self.quit_application)
+            menu.addAction("Quit S2S", self.request_quit)
             self._tray.setContextMenu(menu)
             self._tray.activated.connect(lambda reason: self.show_from_tray()
                 if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self._tray.show()
         return True
 
+    def _transfers_in_progress(self) -> bool:
+        return bool(self._queueing or self.transfers._inflight or self.transfer_monitor.inflight or any(
+            s.incomplete for s in transfer_sessions.sessions(self.ctx.store)))
+
+    def ask_quit(self) -> bool:
+        """Modal "are you sure" for quitting while transfers are running. True only for an explicit yes."""
+        box = QMessageBox(QMessageBox.Icon.Question, "Quit S2S?",
+                          "Transfers that are in progress will be paused until you open S2S again.\n\n"
+                          "Files that have already finished stay where they are.", parent=self)
+        go = box.addButton("Quit S2S", QMessageBox.ButtonRole.DestructiveRole)
+        stay = box.addButton("Keep S2S open", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay)
+        box.setEscapeButton(stay)
+        box.exec()
+        return box.clickedButton() is go
+
+    def request_quit(self) -> None:
+        """Quit from the menu, the tray or the keyboard: ask first only when transfers would be interrupted."""
+        if self._background_on_close and self._transfers_in_progress() and not self.ask_quit():
+            return
+        self.quit_application()
+
     def quit_application(self) -> None:
         self._force_exit = True
         self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        if not self._force_exit and self._background_on_close:
-            pending = self._queueing or self.transfers._inflight or self.transfer_monitor.inflight or any(
-                s.incomplete for s in transfer_sessions.sessions(self.ctx.store))
-            if pending:
-                event.ignore()
+        if not self._force_exit and self._background_on_close and self._transfers_in_progress():
+            if self.ctx.settings.close_to_tray:
+                event.ignore()  # X keeps downloads running; no question to ask
                 if self._show_tray():
                     self.hide()
                 else:
                     self.showMinimized()  # no invisible process when the desktop has no tray
                 return
+            if not self.ask_quit():  # X means quit here, which would interrupt transfers
+                event.ignore()
+                return
+            self._force_exit = True  # answered: later retries of this close must not ask again
         self._closing = True
         self.my_playlists.stop()
         self.transfer_monitor.stop()

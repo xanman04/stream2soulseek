@@ -254,3 +254,87 @@ def test_explicit_quit_retries_close_after_pending_jobs_drain(env, monkeypatch):
         win._background_on_close = False
         win._force_exit = False
         win._closing = False
+
+
+def _pending(monkeypatch):
+    monkeypatch.setattr(transfer_sessions, "sessions", lambda _store: [SimpleNamespace(incomplete=True)])
+
+
+def test_x_with_tray_setting_on_never_asks_and_hides(env, monkeypatch):
+    win, *_ = env
+    _pending(monkeypatch)
+    asked = []
+    monkeypatch.setattr(win, "ask_quit", lambda: asked.append(True) or True)
+    monkeypatch.setattr(win, "_show_tray", lambda: True)
+    win._background_on_close = True
+    win.ctx.settings.close_to_tray = True
+    win.show()
+    event = QCloseEvent()
+    try:
+        win.closeEvent(event)
+        assert not event.isAccepted() and win.isHidden()
+        assert asked == []
+    finally:
+        win._background_on_close = False
+        win._force_exit = False
+        win._closing = False
+
+
+def test_x_with_tray_setting_off_asks_and_stays_open_when_declined(env, monkeypatch):
+    win, *_ = env
+    _pending(monkeypatch)
+    monkeypatch.setattr(win, "ask_quit", lambda: False)
+    shutdowns = []
+    monkeypatch.setattr(win.soulseek, "shutdown", lambda: shutdowns.append(True))
+    win._background_on_close = True
+    win.ctx.settings.close_to_tray = False
+    win.show()
+    event = QCloseEvent()
+    try:
+        win.closeEvent(event)
+        assert not event.isAccepted() and not win.isHidden()
+        assert not win._closing and not win._force_exit and shutdowns == []
+    finally:
+        win.ctx.settings.close_to_tray = True
+        win._background_on_close = False
+
+
+def test_x_with_tray_setting_off_quits_after_one_yes(env, monkeypatch):
+    win, *_ = env
+    _pending(monkeypatch)
+    asked = []
+    monkeypatch.setattr(win, "ask_quit", lambda: asked.append(True) or True)
+    monkeypatch.setattr(win.soulseek, "shutdown", lambda: None)
+    import s2s.ui.main_window as main_window_module
+
+    monkeypatch.setattr(main_window_module, "QApplication", SimpleNamespace(
+        instance=lambda: SimpleNamespace(quit=lambda: None)))
+    win._background_on_close = True
+    win.ctx.settings.close_to_tray = False
+    win.show()
+    try:
+        win.closeEvent(QCloseEvent())
+        win.closeEvent(QCloseEvent())  # a retried close after the answer must not ask again
+        assert asked == [True]
+    finally:
+        win.ctx.settings.close_to_tray = True
+        win._background_on_close = False
+        win._force_exit = False
+        win._closing = False
+
+
+def test_menu_quit_asks_only_when_transfers_would_be_interrupted(env, monkeypatch):
+    win, *_ = env
+    quits, asked = [], []
+    monkeypatch.setattr(win, "quit_application", lambda: quits.append(True))
+    monkeypatch.setattr(win, "ask_quit", lambda: asked.append(True) or False)
+    win._background_on_close = True
+    try:
+        monkeypatch.setattr(transfer_sessions, "sessions", lambda _store: [])
+        win.request_quit()
+        assert quits == [True] and asked == []  # nothing running: no question
+        _pending(monkeypatch)
+        win.request_quit()
+        assert asked == [True] and quits == [True]  # declined: still open
+    finally:
+        win._background_on_close = False

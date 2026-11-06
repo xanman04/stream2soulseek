@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Quit.** The More menu says "Quit S2S" and asks before quitting only when transfers would be interrupted.
+- **Close button.** Settings > Advanced can turn off "Closing the window (X) keeps S2S running in the system tray" (on by default). With it off, X quits and asks first if transfers are running; with it on, X never asks.
+- **About S2S.** More > About S2S shows the version, licence (GPL-3.0-or-later), no-warranty and not-affiliated notices, and links to the source and third-party licences.
+- **More button.** It no longer stays highlighted after its menu closes.
 - **Credits.** More > Credits lists supporters who chose to be named, under "Special thanks to".
 - Public documentation refreshed (README, install and setup guides, sponsor preview notes), and the private preview
   release workflow can verify its updater signing key before building.

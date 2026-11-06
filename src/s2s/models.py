@@ -314,6 +314,17 @@ def bundled_tools_dir() -> Path | None:
     return folder if folder.is_dir() else None
 
 
+def bundled_licenses_dir() -> Path | None:
+    """The `licenses` folder shipped inside the packaged app; None when running from source or when absent."""
+    import sys
+
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve()
+    folder = exe.parent.parent / "Resources" / "licenses" if sys.platform == "darwin" else exe.parent / "licenses"
+    return folder if folder.is_dir() else None
+
+
 def find_tool(name: str) -> str | None:
     """A command-line tool shipped with the app, else on PATH, else in Homebrew's folders (macOS); or None."""
     tools = bundled_tools_dir()
@@ -347,6 +358,7 @@ class Settings:
     playlist_folders: list[str] = field(default_factory=list)  # manually added local tracklist folders
     archive_dir_name: str = "OLD"  # subfolder of the downloads dir that receives finished peer folders
     auto_import: bool = True
+    close_to_tray: bool = True  # X keeps S2S running in the tray while transfers are in progress; off: X quits
     match_policy: MatchPolicy = field(default_factory=MatchPolicy)
     rule_layouts: dict[str, MatchPolicy] = field(default_factory=dict)  # saved rule sets by name (see layouts.py)
     shared_folders: list[str] = field(default_factory=list)  # folders slskd shares with Soulseek; none by default

@@ -431,6 +431,9 @@ class Sidebar(QWidget):
         self.tools_btn = QPushButton("More")
         self.tools_btn.setAccessibleName("More app actions")
         self.tools_btn.setObjectName("sidebarSupport")
+        # A mouse click opens the menu without taking focus, so closing it leaves no stuck focus ring behind;
+        # Tab and the keyboard still reach the button.
+        self.tools_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._support_layout.addWidget(self.report_btn, 1)
         self._support_layout.addWidget(self.tools_btn)
 
