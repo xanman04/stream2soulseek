@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Help menu.** More > Help has the user guide, Open log folder, Copy diagnostics (version, platform and a few settings, with no folders or logins) and Report a bug. Menu items no longer repeat "S2S": About, Quit.
+- **Window.** S2S reopens at the size and place you last left it. Bug reports include the update channel and a few non-personal settings.
 - **Quit.** The More menu says "Quit S2S" and asks before quitting only when transfers would be interrupted.
 - **Close button.** Settings > Advanced can turn off "Closing the window (X) keeps S2S running in the system tray" (on by default). With it off, X quits and asks first if transfers are running; with it on, X never asks.
 - **About S2S.** More > About S2S shows the version, licence (GPL-3.0-or-later), no-warranty and not-affiliated notices, and links to the source and third-party licences.

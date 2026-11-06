@@ -32,7 +32,21 @@ def system_summary() -> str:
             f"Python {platform.python_version()} · Qt for Python {pyside}")
 
 
-def build_report(description: str, *, steps: str = "", expected: str = "") -> str:
+def diagnostics(settings=None) -> str:
+    """Version, platform and a few non-personal settings: safe to paste into a support message. It never includes
+    folder names, accounts, logins or the log."""
+    from .store import SCHEMA_VERSION
+
+    lines = [system_summary(), f"Database schema: {SCHEMA_VERSION}"]
+    if settings is not None:
+        lines.append(f"Update channel: {settings.update_channel}")
+        lines.append(f"Close button: {'keeps S2S in the tray' if settings.close_to_tray else 'quits S2S'}")
+        lines.append(f"Automatic import: {'on' if settings.auto_import else 'off'}")
+        lines.append(f"Shared folders: {len(settings.shared_folders)}")
+    return "\n".join(lines) + "\n"
+
+
+def build_report(description: str, *, steps: str = "", expected: str = "", settings=None) -> str:
     """Create report text with the scrubbed recent log included in every report."""
     from .applog import recent_log, scrub
 
@@ -40,7 +54,7 @@ def build_report(description: str, *, steps: str = "", expected: str = "") -> st
         "What happened:", scrub(description.strip()) or "(not described)",
         "", "Steps to reproduce:", scrub(steps.strip()) or "(not provided)",
         "", "Expected result:", scrub(expected.strip()) or "(not provided)",
-        "", "Version and platform:", system_summary(),
+        "", "Version and platform:", diagnostics(settings).rstrip("\n"),
     ]
     try:
         log = recent_log() or "(empty)"

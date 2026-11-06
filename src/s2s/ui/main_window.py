@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
+from PySide6.QtCore import QByteArray, Qt, QThreadPool, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
                                QStackedWidget, QSystemTrayIcon, QWidget)
@@ -56,6 +56,9 @@ NEXT_HINTS = {
 }
 
 
+USER_GUIDE_URL = "https://github.com/xanman04/stream2soulseek#readme"
+
+
 def updater_cleanup():
     from .. import updater
 
@@ -69,6 +72,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("S2S - Stream to Soulseek")
         self.resize(1400, 860)
         self.ctx = AppContext(store, secrets, settings)
+        self._restore_window_geometry()
         self._queueing = False
         self._aborting_search = False
         self._starting_playlist = False
@@ -141,13 +145,14 @@ class MainWindow(QMainWindow):
         tools_menu = QMenu(self.sidebar.tools_btn)
         self.sidebar.history_requested.connect(self.open_history)
         self.history.transfer_requested.connect(self.resume_import)
-        quit_act = QAction("Quit S2S", self)
+        quit_act = QAction("Quit", self)
         quit_act.triggered.connect(self.request_quit)
         quit_act.setShortcut(QKeySequence.StandardKey.Quit)
         self.addAction(quit_act)
         update_act = QAction("Check for updates...", self)
         update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
         tools_menu.addAction(update_act)
+        self._add_help_menu(tools_menu)
         sponsor_url = "https://github.com/sponsors/xanman04"
         support_act = QAction("Support S2S", self)
         support_act.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(sponsor_url)))
@@ -155,7 +160,7 @@ class MainWindow(QMainWindow):
         credits_act = QAction("Credits", self)
         credits_act.triggered.connect(lambda: CreditsDialog(self).exec())
         tools_menu.addAction(credits_act)
-        about_act = QAction("About S2S", self)
+        about_act = QAction("About", self)
         about_act.triggered.connect(lambda: AboutDialog(self).exec())
         tools_menu.addAction(about_act)
         support_link = theme.subtle(QLabel(
@@ -529,6 +534,38 @@ class MainWindow(QMainWindow):
             self._run_job(updater_cleanup, lambda removed: None, lambda exc: None)  # leftovers of past updates
 
     # ------------------------------------------------------------ problem reports and updates
+
+    def _add_help_menu(self, menu: QMenu) -> None:
+        help_menu = menu.addMenu("Help")
+        guide = QAction("User guide", self)
+        guide.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(USER_GUIDE_URL)))
+        help_menu.addAction(guide)
+        logs = QAction("Open log folder", self)
+        logs.triggered.connect(self.open_log_folder)
+        help_menu.addAction(logs)
+        diagnostics = QAction("Copy diagnostics", self)
+        diagnostics.triggered.connect(self.copy_diagnostics)
+        help_menu.addAction(diagnostics)
+        help_menu.addSeparator()
+        report = QAction("Report a bug...", self)
+        report.triggered.connect(self.report_problem)
+        help_menu.addAction(report)
+        self.help_menu = help_menu
+
+    def open_log_folder(self) -> None:
+        from .. import applog
+
+        try:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(applog.log_dir())))
+        except OSError as exc:
+            self.statusBar().showMessage(f"Could not open the log folder: {exc}", 8000)
+
+    def copy_diagnostics(self) -> None:
+        """Put version, platform and non-personal settings on the clipboard, for support messages."""
+        from .. import feedback
+
+        QApplication.clipboard().setText(feedback.diagnostics(self.ctx.settings))
+        self.statusBar().showMessage("Diagnostics copied. They contain no logins or folder names.", 8000)
 
     def report_problem(self) -> None:
         from .feedback_dialog import FeedbackDialog
@@ -1069,6 +1106,24 @@ class MainWindow(QMainWindow):
         self._tray.show()
         return True
 
+    def _restore_window_geometry(self) -> None:
+        """Reopen where and how large the window was last time (Qt keeps it on a screen that still exists)."""
+        saved = self.ctx.settings.extra.get("window_geometry")
+        if isinstance(saved, str) and saved:
+            try:
+                self.restoreGeometry(QByteArray.fromBase64(saved.encode("ascii")))
+            except Exception:  # noqa: BLE001 - a damaged value just means the default size
+                pass
+
+    def _save_window_geometry(self) -> None:
+        from .. import config
+
+        try:
+            self.ctx.settings.extra["window_geometry"] = bytes(self.saveGeometry().toBase64()).decode("ascii")
+            config.save_settings(self.ctx.settings)
+        except Exception:  # noqa: BLE001 - never block quitting over a remembered size
+            pass
+
     def _transfers_in_progress(self) -> bool:
         return bool(self._queueing or self.transfers._inflight or self.transfer_monitor.inflight or any(
             s.incomplete for s in transfer_sessions.sessions(self.ctx.store)))
@@ -1124,6 +1179,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Finishing the current file check before quitting…")
             QTimer.singleShot(100, self.close)
             return
+        self._save_window_geometry()
         self.spotify_service.dispose()
         self.soundcloud_service.dispose()
         self.soulseek.shutdown()  # stop the slskd this app started

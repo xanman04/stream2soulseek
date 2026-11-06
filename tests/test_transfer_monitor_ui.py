@@ -338,3 +338,13 @@ def test_menu_quit_asks_only_when_transfers_would_be_interrupted(env, monkeypatc
         assert asked == [True] and quits == [True]  # declined: still open
     finally:
         win._background_on_close = False
+
+
+def test_help_submenu_lists_support_actions(env):
+    win, *_ = env
+    help_menu = win.help_menu
+    assert [a.text() for a in help_menu.actions() if not a.isSeparator()] == [
+        "User guide", "Open log folder", "Copy diagnostics", "Report a bug..."]
+    win.copy_diagnostics()
+    from PySide6.QtWidgets import QApplication as App
+    assert "Database schema" in App.clipboard().text()

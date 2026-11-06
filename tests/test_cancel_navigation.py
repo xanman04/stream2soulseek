@@ -176,7 +176,7 @@ def test_home_logo_menu_bar_and_sidebar_support_controls(win):
     sidebar.report_btn.click()
     assert reports == [True]
     assert [a.text() for a in sidebar.tools_btn.menu().actions() if not a.isSeparator()] == [
-        "Check for updates...", "Support S2S", "Credits", "About S2S", "Quit S2S"]
+        "Check for updates...", "Help", "Support S2S", "Credits", "About", "Quit"]
 
 
 def test_support_action_opens_the_approved_public_sponsors_page(win, monkeypatch):

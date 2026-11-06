@@ -169,6 +169,7 @@ class FeedbackDialog(QDialog):
         return feedback.build_report(
             self.description.toPlainText(), steps=self.steps.toPlainText(),
             expected=self.expected.toPlainText(),
+            settings=getattr(getattr(self.parent(), "ctx", None), "settings", None),
         )
 
     def _refresh_preview(self, *_args: object) -> None:

@@ -78,3 +78,35 @@ def test_stable_and_preview_updates_use_different_popups():
     assert "Sponsor preview 1.8.1-rc.1" in preview_text and "sponsoring" in preview_text
     assert stable.windowTitle() == "Update S2S" and preview.windowTitle() == "S2S sponsor preview"
     assert stable.update_btn.text() == "Update" and preview.update_btn.text() == "Install preview"
+
+
+def test_diagnostics_have_versions_and_settings_but_no_folders_or_logins():
+    from s2s import feedback
+
+    secret_folder = r"C:\Users\someone\Music\Private"
+    text = feedback.diagnostics(Settings(slskd_downloads_dir=secret_folder, local_reuse_folders=[secret_folder],
+                                         shared_folders=[secret_folder], close_to_tray=False))
+    assert "S2S " in text and "Database schema" in text and "quits S2S" in text and "Shared folders: 1" in text
+    assert "someone" not in text and "Private" not in text
+    assert "Update channel: stable" in feedback.build_report("a", steps="b", expected="c", settings=Settings())
+
+
+def test_window_geometry_is_remembered_across_launches():
+    from PySide6.QtCore import QByteArray
+
+    from s2s.ui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    holder = SimpleNamespace(ctx=SimpleNamespace(settings=Settings()),
+                             restoreGeometry=lambda data: restored.append(bytes(data)))
+    restored = []
+    MainWindow._restore_window_geometry(holder)
+    assert restored == []  # nothing saved yet: default size
+    saved = QByteArray(b"synthetic").toBase64().data().decode()
+    holder.ctx.settings.extra["window_geometry"] = saved
+    MainWindow._restore_window_geometry(holder)
+    assert restored == [b"synthetic"]
+    holder.ctx.settings.extra["window_geometry"] = 5  # damaged value is ignored
+    MainWindow._restore_window_geometry(holder)
+    assert len(restored) == 1
+
