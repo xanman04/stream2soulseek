@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.1 — 2026-11-06
+
+- **My Playlists.** Deleted folders no longer appear, and S2S starts loading track details in the background at launch.
+- **Transfer history.** Opens in the main window, where you can still resume saved transfers.
+- **Sidebar.** Expanding or collapsing Playlist transfer keeps the other controls the same size.
+- **Updater.** Download estimates show individual seconds under a minute, and the Windows installer activity bar keeps moving.
+
 ## 1.7.0 — 2026-11-06
 
 - **My Playlists.** Browse local tracklist folders, search and sort tracks, and see total runtime and storage size. Add existing folders alongside your past transfer destinations.
