@@ -129,7 +129,7 @@ def populate(window, root, scenario):
     return window
 
 
-def capture(output, scenarios, sizes):
+def capture(output, scenarios, sizes, dark=True):
     # Set before Qt imports. Do not touch the caller's real app home or credentials.
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     os.environ.setdefault('QT_AUDIO_BACKEND', 'pulseaudio')
@@ -145,7 +145,7 @@ def capture(output, scenarios, sizes):
     output.mkdir(parents=True, exist_ok=True)
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication([])
-    apply_app_style(app)
+    apply_app_style(app, dark=dark)
     manifest = []
     with tempfile.TemporaryDirectory(prefix='s2s-gallery-') as directory, ExitStack() as stack:
         stack.enter_context(patch.dict(os.environ, {'S2S_HOME': directory}))
@@ -208,6 +208,7 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('build/ui-gallery'))
     parser.add_argument('--scenario', action='append', choices=SCENARIOS)
     parser.add_argument('--size', action='append', help='Requested WIDTHxHEIGHT; Qt minimum sizes may enlarge it')
+    parser.add_argument('--theme', choices=('dark', 'light'), default='dark', help='Colour scheme to render (default: dark)')
     args = parser.parse_args()
     sizes = []
     for value in args.size or ['1400x900', '1100x760']:
@@ -218,7 +219,7 @@ def main():
         except ValueError:
             parser.error('--size must be WIDTHxHEIGHT with both dimensions at least 320')
         sizes.append((width, height))
-    manifest = capture(args.output.resolve(), args.scenario or SCENARIOS, sizes)
+    manifest = capture(args.output.resolve(), args.scenario or SCENARIOS, sizes, dark=args.theme == 'dark')
     print(f'Captured {len(manifest)} images in {args.output.resolve()}')
 
 

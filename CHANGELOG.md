@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Settings.** Number fields (extended search timeout, minimum bitrate, length tolerance) are now sliders that show their value, and the remaining number boxes have visible up and down arrows.
+- **Documentation.** The README screenshots are dark mode.
+
 ## 1.8.0 — 2026-11-06
 
 - **First launch.** A one-time welcome card on Home explains the four steps and links to the user guide. It never returns once dismissed, and people who already use S2S do not see it.

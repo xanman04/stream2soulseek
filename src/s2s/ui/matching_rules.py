@@ -10,7 +10,7 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from .. import layouts as lay_mod
@@ -70,9 +70,10 @@ class MatchingRulesWidget(QWidget):
         self.formats.setFixedHeight(176)
         self.up_btn = QPushButton("Move up")
         self.down_btn = QPushButton("Move down")
-        self.min_kbps = QSpinBox()
+        self.min_kbps = settings_layout.SliderField(page_step=32)
         self.min_kbps.setRange(0, 320)
         self.min_kbps.setSuffix(" kbps")
+        self.min_kbps.setAccessibleName("Minimum bitrate")
         self.allow_vbr = QCheckBox("Also accept variable bitrate (VBR)")
         self.fmt_detail = QLabel("")
         side = QVBoxLayout()
@@ -88,7 +89,7 @@ class MatchingRulesWidget(QWidget):
             "Accepted file types", "Tick the types you accept. The order is the priority, best first.")
         fl.addLayout(top)
         fl.addWidget(self.fmt_detail)
-        fl.addWidget(settings_layout.field("Minimum bitrate", settings_layout.row(self.min_kbps)))
+        fl.addWidget(settings_layout.field("Minimum bitrate", self.min_kbps))
         fl.addWidget(self.allow_vbr)
 
         # ---- versions
@@ -110,13 +111,14 @@ class MatchingRulesWidget(QWidget):
         el.addWidget(settings_layout.help_label(EXCLUSION_HELP))
 
         # ---- review behaviour
-        self.tolerance = QSpinBox()
+        self.tolerance = settings_layout.SliderField(page_step=30)
         self.tolerance.setRange(0, 600)
         self.tolerance.setSuffix(" s")
+        self.tolerance.setAccessibleName("Length difference that flags a match")
         self.skip_flagged = QCheckBox("Leave flagged matches unticked in Review")
         rbox, rl = settings_layout.section_block("Review")
         rl.addWidget(settings_layout.field("Flag a match when its length differs by more than",
-                                           settings_layout.row(self.tolerance)))
+                                           self.tolerance))
         rl.addWidget(self.skip_flagged)
 
         self.restore_btn = QPushButton("Restore defaults")

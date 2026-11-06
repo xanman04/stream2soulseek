@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPlainTextEdit, QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
@@ -54,10 +54,11 @@ class SettingsDialog(QDialog):
         self.close_to_tray = QCheckBox("Closing the window (X) keeps S2S running in the system tray")
         self.close_to_tray.setChecked(bool(s.close_to_tray))
         self.ffprobe = QLineEdit(s.ffprobe_path)
-        self.timeout = QSpinBox()
+        self.timeout = settings_layout.SliderField()
         self.timeout.setRange(5, 300)
         self.timeout.setSuffix(" seconds")
         self.timeout.setValue(int(s.search_timeout_s))
+        self.timeout.setAccessibleName("Extended search timeout")
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         has_key = False
@@ -85,7 +86,7 @@ class SettingsDialog(QDialog):
             self.auto_import, "When a download finishes, its track is copied into your tracklist folder."))
         lay = general.section("Searching")
         lay.addWidget(settings_layout.field(
-            "Extended search timeout", settings_layout.row(self.timeout),
+            "Extended search timeout", self.timeout,
             "How long S2S waits on the broader second search when the first one finds no good source."))
         general.finish()
 

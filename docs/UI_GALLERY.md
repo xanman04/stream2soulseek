@@ -13,6 +13,8 @@ On Windows use `.venv\Scripts\python.exe`. The command writes 18 PNGs, a
 (ignored by Git). Open the HTML file locally or inspect individual PNGs. The HTML
 only displays screenshots; it is not a browser implementation of S2S.
 
+Screenshots are dark by default; add `--theme light` for the light palette.
+
 To capture a single state or a different window size:
 
 ```sh

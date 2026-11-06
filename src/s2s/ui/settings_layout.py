@@ -3,8 +3,9 @@ and fields with their label above and any help text below. Styling lives in them
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QScrollArea, QSlider, QVBoxLayout,
+                               QWidget)
 
 from . import theme
 
@@ -127,6 +128,75 @@ def page_around(widget: QWidget, title: str, intro: str = "") -> Page:
     page = Page(title, intro)
     page.column.addWidget(widget)
     return page.finish()
+
+
+class _Slider(QSlider):
+    """A slider that only reacts to the mouse wheel once it has focus, so scrolling a page never changes it."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class SliderField(QWidget):
+    """A number chosen on a slider, with its current value written beside it ("30 seconds").
+
+    It offers the parts of QSpinBox that settings code uses, so either can fill the same place. Arrow keys move one
+    step, Page Up and Page Down move ten, Home and End jump to the ends.
+    """
+
+    valueChanged = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None, *, page_step: int = 10) -> None:
+        super().__init__(parent)
+        self._suffix = ""
+        self.slider = _Slider(Qt.Orientation.Horizontal)
+        self.slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.slider.setPageStep(page_step)
+        self.readout = QLabel()
+        self.readout.setObjectName("settingsReadout")
+        self.readout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.setFocusProxy(self.slider)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(14)
+        lay.addWidget(self.slider, 1)
+        lay.addWidget(self.readout)
+        self.setMaximumWidth(460)
+        self.slider.valueChanged.connect(self._changed)
+        self._changed(self.slider.value())
+
+    def _changed(self, value: int) -> None:
+        self.readout.setText(f"{value}{self._suffix}")
+        self.valueChanged.emit(value)
+
+    def setRange(self, low: int, high: int) -> None:  # noqa: N802
+        self.slider.setRange(low, high)
+        self._fit_readout()
+
+    def setSuffix(self, suffix: str) -> None:  # noqa: N802
+        self._suffix = suffix
+        self.readout.setText(f"{self.value()}{suffix}")
+        self._fit_readout()
+
+    def setValue(self, value: int) -> None:  # noqa: N802
+        self.slider.setValue(int(value))
+
+    def value(self) -> int:
+        return self.slider.value()
+
+    def setAccessibleName(self, name: str) -> None:  # noqa: N802
+        super().setAccessibleName(name)
+        self.slider.setAccessibleName(name)
+
+    def _fit_readout(self) -> None:
+        """Keep the slider from shifting as the number gains digits: reserve room for the widest value."""
+        metrics = self.readout.fontMetrics()
+        widest = max((f"{self.slider.maximum()}{self._suffix}", f"{self.slider.minimum()}{self._suffix}"),
+                     key=len)
+        self.readout.setMinimumWidth(metrics.horizontalAdvance(widest) + 4)
 
 
 def tick(label: str, checked: bool = False) -> QCheckBox:

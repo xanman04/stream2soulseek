@@ -151,6 +151,10 @@ def update_appearance() -> dict:
 
 
 CHECK_ICON = (Path(__file__).with_name("assets") / "check.png").as_posix()
+
+
+def _spin_icon(direction: str, dark: bool) -> str:
+    return (Path(__file__).with_name("assets") / f"spin-{direction}-{'dark' if dark else 'light'}.png").as_posix()
 DISPLAY_FONT = "Clash Display"  # headings and the wordmark only; body text keeps the system font
 _FONT_DIR = Path(__file__).with_name("assets") / "fonts"
 _fonts_loaded = False
@@ -323,6 +327,28 @@ QRadioButton::indicator:checked {{ border-color: {c['primary']};
     stop:0.5 {c['primary']}, stop:0.56 {c['window']}, stop:1 {c['window']}); }}
 QCheckBox::indicator:disabled, QRadioButton::indicator:disabled, QListView::indicator:disabled {{
     border-color: {c['border']}; background: transparent; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 28px; }}
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; width: 24px; border: none; background: transparent; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 7px; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-position: bottom right;
+    border-bottom-right-radius: 7px; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::up-button:hover,
+QDoubleSpinBox::down-button:hover {{ background: {c['hover']}; }}
+QSpinBox::up-button:pressed, QSpinBox::down-button:pressed, QDoubleSpinBox::up-button:pressed,
+QDoubleSpinBox::down-button:pressed {{ background: {c['selection']}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({_spin_icon('up', dark)}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({_spin_icon('down', dark)}); width: 10px; height: 10px; }}
+QSlider::groove:horizontal {{ height: 4px; background: {c['border']}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {c['primary']}; border-radius: 2px; }}
+QSlider::add-page:horizontal {{ background: {c['border']}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -7px 0; border-radius: 9px;
+    background: {c['primary']}; border: 2px solid {c['panel']}; }}
+QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ background: {c['focus']}; }}
+QSlider::groove:horizontal:disabled, QSlider::sub-page:horizontal:disabled {{ background: {c['border']}; }}
+QSlider::handle:horizontal:disabled {{ background: {c['disabled']}; }}
+QSlider {{ min-height: 24px; }}
+QLabel#settingsReadout {{ font-weight: 600; }}
 QPlainTextEdit {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px 8px; }}
 QPlainTextEdit:focus {{ border-color: {c['focus']}; }}
 QDialog#settingsDialog {{ background: {c['window']}; }}

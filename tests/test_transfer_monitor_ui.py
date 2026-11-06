@@ -352,6 +352,9 @@ def test_help_submenu_lists_support_actions(env):
 
 def test_welcome_shows_on_a_first_launch_once_and_whats_new_only_after_an_update(env, monkeypatch):
     win, *_ = env
+    import s2s
+
+    monkeypatch.setattr(s2s, "__version__", "1.8.0")  # a stable version, whatever this build is
     from s2s import __version__
 
     shown = []

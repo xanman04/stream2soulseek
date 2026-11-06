@@ -134,3 +134,34 @@ def test_whats_new_dialog_shows_items_or_an_honest_empty_message():
     none = WhatsNewDialog(version="2.0", items=[])
     empty = " ".join(label.text() for label in none.findChildren(QLabel))
     assert "no release notes" in empty
+
+
+def test_slider_field_behaves_like_the_number_box_it_replaces():
+    from PySide6.QtCore import Qt
+    from s2s.ui.settings_layout import SliderField
+
+    QApplication.instance() or QApplication([])
+    field = SliderField(page_step=10)
+    seen = []
+    field.valueChanged.connect(seen.append)
+    field.setRange(5, 300)
+    field.setSuffix(" seconds")
+    field.setValue(30)
+    assert field.value() == 30 and field.readout.text() == "30 seconds" and seen[-1] == 30
+    field.setValue(999)  # clamped to the range like a spin box
+    assert field.value() == 300 and field.readout.text() == "300 seconds"
+    field.setEnabled(False)
+    assert not field.slider.isEnabled()
+    assert field.slider.focusPolicy() == Qt.FocusPolicy.StrongFocus  # the wheel only acts once it is focused
+
+
+def test_settings_use_sliders_for_timeout_bitrate_and_tolerance():
+    from s2s.ui.matching_rules import MatchingRulesWidget
+    from s2s.models import MatchPolicy
+    from s2s.ui.settings_layout import SliderField
+
+    QApplication.instance() or QApplication([])
+    rules = MatchingRulesWidget(MatchPolicy())
+    assert isinstance(rules.min_kbps, SliderField) and isinstance(rules.tolerance, SliderField)
+    rules.tolerance.setValue(45)
+    assert rules.policy().duration_tolerance_s == 45
