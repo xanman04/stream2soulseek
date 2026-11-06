@@ -287,6 +287,9 @@ QPushButton[primary="true"] {{ background: {c['primary']}; color: #ffffff; borde
 QPushButton[primary="true"]:hover {{ background: #507fa3; border-color: #507fa3; }}
 QPushButton[primary="true"]:pressed {{ background: #345d7e; }}
 QPushButton[primary="true"]:disabled {{ background: {c['hover']}; color: {c['disabled']}; border-color: {c['border']}; }}
+QPushButton#transportPlay {{ padding: 0; min-height: 38px; border-radius: 20px; }}
+QPushButton#transportPlay:focus {{ border-color: {c['focus']}; }}
+QPushButton#transportStop {{ padding: 0; min-height: 30px; border-radius: 16px; }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: {c['panel']}; border: 1px solid {c['border']};
     border-radius: 8px; padding: 7px 11px; min-height: 20px; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {c['focus']}; }}

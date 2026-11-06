@@ -112,6 +112,31 @@ def _dashboard(harness):
     return dashboard_module.TrackDashboard(Settings(ffprobe_path=None))
 
 
+def test_prefetched_selection_waits_for_same_render_and_other_selection_takes_priority(tmp_path, harness, monkeypatch):
+    widget = _dashboard(harness)
+    widget.show()
+    monkeypatch.setattr(dashboard_module, "ffmpeg_for", lambda _: "ffmpeg")
+    paths = [tmp_path / name for name in ("first.mp3", "next.mp3", "other.mp3")]
+    for path in paths:
+        path.write_bytes(b"fixture")
+
+    widget.set_entry(_entry(paths[0]))
+    widget.prefetch([str(paths[1])])
+    _, current_done, _ = harness.pop(0)
+    current_done(({}, "", None, ""))
+    assert widget._warming == str(paths[1])
+    assert len(harness) == 1
+
+    widget.set_entry(_entry(paths[1]))
+    assert len(harness) == 1  # selecting the warming track never launches a duplicate FFmpeg job
+    widget.set_entry(_entry(paths[2]))
+    assert len(harness) == 2  # another selection can start before the warmup finishes
+    _, warm_done, _ = harness.pop(0)
+    warm_done(None)
+    assert len(harness) == 1
+    widget.close()
+
+
 def test_constructs_public_dashboard_controls_and_selection_does_not_autoplay(tmp_path, harness):
     audio = tmp_path / "placeholder.mp3"
     audio.write_bytes(b"synthetic fixture")

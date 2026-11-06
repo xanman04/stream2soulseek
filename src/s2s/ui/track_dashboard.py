@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QUrl, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from .. import config, finalize, spectrogram
 from ..finalize import ChecklistEntry
 from . import theme
+from .icons import set_icon
 from .spectrogram_dialog import ffmpeg_for
 from .util import fmt_seconds
 from .workers import run_async
@@ -160,6 +161,8 @@ class TrackDashboard(QWidget):
         self._generation = 0
         self._busy = False
         self._pending: tuple | None = None
+        self._warm_paths: list[str] = []
+        self._warming: str | None = None
         self._duration = 0.0
         self._pending_seek: int | None = None
         self._expanded: QDialog | None = None
@@ -239,8 +242,18 @@ class TrackDashboard(QWidget):
         timeline.addWidget(self.current_label)
         timeline.addWidget(self.position_slider, 1)
         timeline.addWidget(self.duration_label)
-        self.play_button = theme.primary(QPushButton("Play", self))
-        self.stop_button = QPushButton("Stop", self)
+        self.play_button = QPushButton(self)
+        self.play_button.setObjectName("transportPlay")
+        theme.primary(self.play_button)
+        self.play_button.setFixedSize(40, 40)
+        self.play_button.setIconSize(QSize(22, 22))
+        self._playback_changed(self.player.playbackState())
+        self.stop_button = QPushButton(self)
+        self.stop_button.setObjectName("transportStop")
+        self.stop_button.setFixedSize(32, 32)
+        self.stop_button.setIconSize(QSize(18, 18))
+        self.stop_button.setAccessibleName("Stop")
+        set_icon(self.stop_button, "stop", 18)
         self.volume_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
@@ -249,7 +262,8 @@ class TrackDashboard(QWidget):
         controls = QHBoxLayout()
         controls.addWidget(self.play_button)
         controls.addWidget(self.stop_button)
-        controls.addWidget(self.volume_slider, 1)
+        controls.addStretch(1)
+        controls.addWidget(self.volume_slider)
         self.recovery_button = QPushButton("Find another file…", self)
         self.refresh_button = QPushButton("Check again", self)
         self.recovery_button.hide()
@@ -263,6 +277,8 @@ class TrackDashboard(QWidget):
         il.addWidget(self.status_label)
         il.addWidget(self.details_scroll, 1)
         self.player_panel = QWidget(self)
+        self.player_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.player_panel.setMinimumHeight(64)
         pl = QVBoxLayout(self.player_panel)
         pl.setContentsMargins(0, 0, 0, 0)
         pl.addLayout(timeline)
@@ -301,6 +317,7 @@ class TrackDashboard(QWidget):
         self.player.setSource(QUrl())
         self._generation += 1
         self._pending = None
+        self._warm_paths.clear()
         self.entry = entry
         self.original_filename = original_filename
         self._path = entry.path if entry and entry.in_folder and entry.path and Path(entry.path).is_file() else None
@@ -337,7 +354,7 @@ class TrackDashboard(QWidget):
         self._start_pending()
 
     def _start_pending(self):
-        if self._busy or self._pending is None:
+        if self._busy or self._pending is None or self._pending[1] == self._warming:
             return
         generation, path, ffprobe, ffmpeg = self._pending
         self._pending = None
@@ -354,9 +371,11 @@ class TrackDashboard(QWidget):
             if ffmpeg:
                 try:
                     bps = metadata.get("bit_rate")
+                    rate = metadata.get("sample_rate")
                     result = spectrogram.render(path, ffmpeg=ffmpeg, ffprobe=ffprobe, cache_dir=cache_dir,
                                                 codec=metadata.get("codec_name"),
-                                                bitrate_kbps=round(int(bps) / 1000) if bps else None, legend=False)
+                                                bitrate_kbps=round(int(bps) / 1000) if str(bps).isdigit() else None,
+                                                legend=False, sample_rate_hz=int(rate) if str(rate).isdigit() else None)
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                     error = "The spectrogram could not be drawn. You can still try playing this file."
             else:
@@ -379,14 +398,40 @@ class TrackDashboard(QWidget):
                     self.quality_label.setText(metadata_error)
                 self._sync_expanded()
             self._start_pending()
+            self._warm_next()
 
         def failed(exc):
             self._busy = False
             if generation == self._generation:
                 self.spectrum.set_message("This file could not be analyzed. Choose Check again to retry.")
             self._start_pending()
+            self._warm_next()
 
         run_async(self, work, done, failed)
+
+    def prefetch(self, paths: list[str]) -> None:
+        self._warm_paths = list(dict.fromkeys(path for path in paths if path != self._path))[:2]
+        self._warm_next()
+
+    def _warm_next(self) -> None:
+        if self._busy or self._pending or self._warming or not self.isVisible() or not self._warm_paths:
+            return
+        ffmpeg = ffmpeg_for(self.settings)
+        if not ffmpeg:
+            return
+        path = self._warming = self._warm_paths.pop(0)
+        ffprobe = getattr(self.settings, "ffprobe_path", None)
+        cache_dir = config.app_dir() / "spectrograms"
+
+        def work():
+            spectrogram.render(path, ffmpeg=ffmpeg, ffprobe=ffprobe, cache_dir=cache_dir, legend=False)
+
+        def finished(_):
+            self._warming = None
+            self._start_pending()
+            self._warm_next()
+
+        run_async(self, work, finished, finished)
 
     def _show_metadata(self, metadata: dict):
         def positive(value):
@@ -478,7 +523,9 @@ class TrackDashboard(QWidget):
             self._expanded_view.set_position(milliseconds / 1000)
 
     def _playback_changed(self, state):
-        self.play_button.setText("Pause" if state == QMediaPlayer.PlaybackState.PlayingState else "Play")
+        action = "Pause" if state == QMediaPlayer.PlaybackState.PlayingState else "Play"
+        self.play_button.setAccessibleName(action)
+        set_icon(self.play_button, action.lower(), 22, primary=True)
 
     def _media_error(self, error, message):
         if error != QMediaPlayer.Error.NoError and self._path:
@@ -544,6 +591,7 @@ class TrackDashboard(QWidget):
         self.details_scroll.setVisible(not compact or self.details_button.isChecked())
 
     def hideEvent(self, event):  # noqa: N802
+        self._warm_paths.clear()
         # Leaving the page (including closing to tray) must not leave invisible audio playing.
         self.stop()
         if self._expanded:

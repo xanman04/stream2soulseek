@@ -367,6 +367,11 @@ class FinishPage(QWidget):
     def _selection_changed(self) -> None:
         entry = self._selected_entry()
         self.dashboard.set_entry(entry, original_filename=self._original_names.get(entry.apple_id) if entry else None)
+        if entry and self.checklist:
+            row = self.table.selectionModel().selectedRows()[0].row()
+            paths = [candidate.path for i, candidate in enumerate(self.checklist.entries)
+                     if i > row and not self.table.isRowHidden(i) and candidate.in_folder and candidate.path]
+            self.dashboard.prefetch(paths)
         if entry and entry.status == finalize.NOT_DOWNLOADED and (
                 entry.apple_id in self.fixable or entry.reason == finalize.WAITING):
             self.dashboard.recovery_button.show()

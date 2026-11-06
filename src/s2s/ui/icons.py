@@ -42,6 +42,14 @@ def icon(name: str, size: int = 20, primary: bool = False, checked_primary: bool
             path.moveTo(19, 10); path.lineTo(19, 18)
             p.drawEllipse(QRectF(14, 17, 5, 4))
             path.moveTo(19, 10); path.lineTo(22, 9)
+        elif name == "history":
+            p.drawArc(QRectF(4, 4, 16, 16), 140 * 16, 305 * 16)
+            path.moveTo(4, 4)
+            path.lineTo(4, 9)
+            path.lineTo(9, 9)
+            path.moveTo(12, 8)
+            path.lineTo(12, 12)
+            path.lineTo(15, 14)
         elif name == "transfer":
             path.moveTo(7, 3); path.lineTo(7, 19); path.moveTo(3, 15)
             path.lineTo(7, 19); path.lineTo(11, 15)
@@ -65,6 +73,19 @@ def icon(name: str, size: int = 20, primary: bool = False, checked_primary: bool
         elif name == "close":
             path.moveTo(7, 7); path.lineTo(17, 17)
             path.moveTo(7, 17); path.lineTo(17, 7)
+        elif name in ("play", "pause", "stop"):
+            p.setBrush(QColor(color))
+            p.setPen(Qt.PenStyle.NoPen)
+            if name == "play":
+                path.moveTo(8, 5)
+                path.lineTo(19, 12)
+                path.lineTo(8, 19)
+                path.closeSubpath()
+            elif name == "pause":
+                path.addRoundedRect(QRectF(6, 5, 4, 14), 1, 1)
+                path.addRoundedRect(QRectF(14, 5, 4, 14), 1, 1)
+            else:
+                path.addRoundedRect(QRectF(6, 6, 12, 12), 1, 1)
         else:  # forward action
             path.moveTo(4, 12); path.lineTo(20, 12)
             path.moveTo(14, 6); path.lineTo(20, 12); path.lineTo(14, 18)

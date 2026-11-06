@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+from tempfile import NamedTemporaryFile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,7 @@ class Spectrogram:
 
 def _cache_key(audio: Path) -> str:
     st = audio.stat()
-    raw = f"{audio.resolve()}|{st.st_size}|{int(st.st_mtime)}"
+    raw = f"{audio.resolve()}|{st.st_size}|{st.st_mtime_ns}|{st.st_ctime_ns}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -106,7 +107,8 @@ def verdict_for(cutoff_hz: float | None, codec: str | None, bitrate_kbps: int | 
 
 def render(audio_path: str, *, ffmpeg: str, ffprobe: str | None, cache_dir: Path, codec: str | None = None,
            bitrate_kbps: int | None = None, runner: Callable = subprocess.run,
-           row_energy: Callable[[str], list[float]] | None = None, legend: bool = True) -> Spectrogram:
+           row_energy: Callable[[str], list[float]] | None = None, legend: bool = True,
+           sample_rate_hz: int | None = None) -> Spectrogram:
     """Render (or reuse) the spectrogram picture and estimate the cutoff. Raises OSError/RuntimeError on failure.
 
     `row_energy(path)` returns per-row brightness of an image (top row first); the default uses Qt's QImage.
@@ -118,19 +120,42 @@ def render(audio_path: str, *, ffmpeg: str, ffprobe: str | None, cache_dir: Path
     key = _cache_key(audio)
     picture = cache_dir / f"{key}{'' if legend else '-plot'}.png"
     plain = cache_dir / f"{key}-plain.png"
+    analysis = cache_dir / f"{key}-analysis.json"
+
+    def draw(output: Path, filter_: str) -> bool:
+        # Publish only complete pictures. Foreground and background work can overlap.
+        with NamedTemporaryFile(dir=cache_dir, suffix=".png", delete=False) as tmp:
+            staged = Path(tmp.name)
+        try:
+            res = _run(runner, [ffmpeg, "-v", "error", "-y", "-i", str(audio), "-lavfi", filter_, str(staged)])
+            if getattr(res, "returncode", 1) != 0 or not staged.stat().st_size:
+                return False
+            staged.replace(output)
+            return True
+        finally:
+            staged.unlink(missing_ok=True)
+
     if not picture.exists():
-        res = _run(runner, [ffmpeg, "-v", "error", "-y", "-i", str(audio), "-lavfi",
-                            f"showspectrumpic=s=1200x500:legend={int(legend)}:scale=log:color=intensity", str(picture)])
-        if getattr(res, "returncode", 1) != 0 or not picture.exists():
+        if not draw(picture, f"showspectrumpic=s=1200x500:legend={int(legend)}:scale=log:color=intensity"):
             raise RuntimeError("FFmpeg could not draw the spectrogram for this file.")
-    if not plain.exists():
-        _run(runner, [ffmpeg, "-v", "error", "-y", "-i", str(audio), "-lavfi",
-                      "showspectrumpic=s=400x512:legend=0:scale=log:color=channel:mode=combined", str(plain)])
-    sr = sample_rate(audio, ffprobe, runner)
+
+    sr = sample_rate_hz
     cutoff = None
-    if plain.exists() and sr:
-        rows = (row_energy or _qimage_row_energy)(str(plain))
-        cutoff = estimate_cutoff(rows, sr)
+    try:
+        cached_sr, cached_cutoff = json.loads(analysis.read_text(encoding="utf-8"))
+        sr, cutoff = int(cached_sr), float(cached_cutoff) if cached_cutoff is not None else None
+    except (OSError, ValueError, TypeError):
+        if not plain.exists():
+            draw(plain, "showspectrumpic=s=400x512:legend=0:scale=log:color=channel:mode=combined")
+        sr = sr or sample_rate(audio, ffprobe, runner)
+        if plain.exists() and sr:
+            rows = (row_energy or _qimage_row_energy)(str(plain))
+            cutoff = estimate_cutoff(rows, sr)
+            if rows:
+                try:
+                    analysis.write_text(json.dumps([sr, cutoff]), encoding="utf-8")
+                except OSError:
+                    pass  # optional metadata cache; the completed picture remains usable
     text, kind = verdict_for(cutoff, codec, bitrate_kbps)
     return Spectrogram(str(picture), cutoff, sr, text, kind)
 

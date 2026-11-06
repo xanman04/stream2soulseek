@@ -53,7 +53,7 @@ def test_render_runs_ffmpeg_with_argument_lists_and_caches(tmp_path):
     n = len(calls)
     sp.render(str(audio), ffmpeg="ffmpeg", ffprobe="ffprobe", cache_dir=tmp_path / "cache", codec="mp3",
               bitrate_kbps=320, runner=runner, row_energy=lambda p: rows)
-    assert len(calls) == n + 1  # both pictures reused from the cache; only the sample-rate probe repeats
+    assert len(calls) == n  # warm hits reuse both the picture and the cutoff analysis
 
 
 def test_render_reports_missing_file_and_ffmpeg_failure(tmp_path):
