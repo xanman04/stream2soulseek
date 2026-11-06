@@ -150,6 +150,7 @@ def update_appearance() -> dict:
     return colors
 
 
+CHECK_ICON = (Path(__file__).with_name("assets") / "check.png").as_posix()
 DISPLAY_FONT = "Clash Display"  # headings and the wordmark only; body text keeps the system font
 _FONT_DIR = Path(__file__).with_name("assets") / "fonts"
 _fonts_loaded = False
@@ -220,7 +221,7 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     existing = app.styleSheet().replace(previous, "") if previous else app.styleSheet()
     c = colors
     display = display_font_family()
-    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#sectionTitle {{ font-family: "{display}"; }}' + chr(10)
+    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#sectionTitle, QLabel#settingsPageTitle {{ font-family: "{display}"; }}' + chr(10)
                      if display else "")
     stylesheet = display_rules + f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}
@@ -309,6 +310,41 @@ QListWidget::item:selected {{ background: {c['selection']}; color: {c['selected'
 QListWidget#navigation {{ background: transparent; border: none; }}
 QListWidget#navigation::item {{ padding: 6px 9px; border: none; border-radius: 6px; }}
 QListWidget#navigation::item:disabled {{ color: {c['disabled']}; }}
+QCheckBox, QRadioButton {{ spacing: 10px; }}
+QCheckBox::indicator, QRadioButton::indicator, QListView::indicator {{ width: 16px; height: 16px;
+    border: 1px solid {c['muted']}; background: {c['window']}; }}
+QCheckBox::indicator, QListView::indicator {{ border-radius: 5px; }}
+QRadioButton::indicator {{ border-radius: 9px; }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover, QListView::indicator:hover {{ border-color: {c['focus']}; }}
+QCheckBox::indicator:checked, QListView::indicator:checked {{ background: {c['primary']}; border-color: {c['primary']};
+    image: url({CHECK_ICON}); }}
+QRadioButton::indicator:checked {{ border-color: {c['primary']};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {c['primary']},
+    stop:0.5 {c['primary']}, stop:0.56 {c['window']}, stop:1 {c['window']}); }}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled, QListView::indicator:disabled {{
+    border-color: {c['border']}; background: transparent; }}
+QPlainTextEdit {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px 8px; }}
+QPlainTextEdit:focus {{ border-color: {c['focus']}; }}
+QDialog#settingsDialog {{ background: {c['window']}; }}
+QDialog#settingsDialog QTabWidget::pane {{ border: none; }}
+QListWidget#settingsNav {{ background: {c['side']}; border: none; border-right: 1px solid {c['border']};
+    border-radius: 0; padding: 16px 10px; outline: 0; }}
+QListWidget#settingsNav::item {{ padding: 9px 12px; margin: 1px 0; border: 1px solid transparent; border-radius: 7px; }}
+QListWidget#settingsNav::item:hover {{ background: {c['hover']}; }}
+QListWidget#settingsNav::item:selected {{ background: {c['selection']}; color: {c['selected']};
+    border: 1px solid {c['focus']}; }}
+QScrollArea#settingsPage, QWidget#settingsBody {{ background: transparent; border: none; }}
+QLabel#settingsPageTitle {{ font-size: 22px; font-weight: 600; }}
+QLabel#settingsSectionTitle {{ font-size: 14px; font-weight: 600; }}
+QLabel#settingsFieldLabel {{ font-weight: 600; }}
+QLabel#settingsHelp {{ color: {c['muted']}; font-size: 12px; }}
+QFrame#settingsPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QFrame#settingsPanel QLabel {{ background: transparent; border: none; }}
+QFrame#settingsPanel QLineEdit, QFrame#settingsPanel QComboBox, QFrame#settingsPanel QSpinBox,
+QFrame#settingsPanel QPlainTextEdit, QFrame#settingsPanel QListWidget {{ background: {c['window']}; }}
+QFrame#settingsPanel QCheckBox::indicator:unchecked, QFrame#settingsPanel QRadioButton::indicator:unchecked {{
+    background: {c['window']}; }}
+QWidget#settingsFooter {{ border-top: 1px solid {c['border']}; background: {c['window']}; }}
 QGroupBox {{ border: 1px solid {c['border']}; border-radius: 10px; margin-top: 12px; padding: 12px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {c['muted']}; }}
 QTabWidget::pane {{ border: 1px solid {c['border']}; border-radius: 4px; }}

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QDialogButtonBox
 
 from ..secretstore import SPONSOR_ENTITLEMENT, SPONSOR_GITHUB_TOKEN
 from ..sponsors import SponsorClient, SponsorError
-from . import theme
+from . import settings_layout, theme
 from .workers import run_async
 
 
@@ -112,23 +112,24 @@ class UpdateSettingsWidget(QWidget):
         self.channel.addItem("Preview — sponsors", "preview")
         self.status = QLabel()
         self.status.setWordWrap(True)
-        help_ = theme.subtle(QLabel(
-            "Stable receives tested public releases. Preview also offers upcoming builds and may contain bugs. "
-            "Updates always require your confirmation. Switching back to Stable waits for a newer stable release; "
-            "it does not downgrade this installation or interrupt transfers."))
-        help_.setWordWrap(True)
         self.connect_button = QPushButton("Connect GitHub sponsor account…")
         self.disconnect_button = QPushButton("Disconnect GitHub")
         self.refresh_button = QPushButton("Refresh sponsor access")
-        lay.addWidget(QLabel("Release channel"))
-        lay.addWidget(self.channel)
-        lay.addWidget(help_)
-        lay.addSpacing(12)
-        lay.addWidget(self.status)
-        lay.addWidget(self.connect_button)
-        lay.addWidget(self.refresh_button)
-        lay.addWidget(self.disconnect_button)
-        lay.addStretch(1)
+        self.status.setObjectName("settingsHelp")
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(18)
+        block, channel_lay = settings_layout.section_block("Release channel")
+        channel_lay.addWidget(settings_layout.field(
+            "Updates to offer", self.channel,
+            "Stable receives tested public releases. Preview also offers upcoming builds and may contain bugs. "
+            "Updates always require your confirmation. Switching back to Stable waits for a newer stable release; "
+            "it does not downgrade this installation or interrupt transfers."))
+        lay.addWidget(block)
+        block, sponsor_lay = settings_layout.section_block(
+            "Sponsor preview access", "Preview builds are for GitHub sponsors. Stable updates never need an account.")
+        sponsor_lay.addWidget(self.status)
+        sponsor_lay.addWidget(settings_layout.row(self.connect_button, self.refresh_button, self.disconnect_button))
+        lay.addWidget(block)
         self.connect_button.clicked.connect(self.connect_account)
         self.disconnect_button.clicked.connect(self.disconnect_account)
         self.refresh_button.clicked.connect(self.refresh_account)

@@ -420,6 +420,8 @@ class Sidebar(QWidget):
         self.settings_btn = QPushButton("Settings...")
         set_icon(self.settings_btn, "settings")
         self.settings_btn.setObjectName("sidebarSettings")
+        # Opening a dialog with the mouse must not leave a focus ring on the button once the dialog closes.
+        self.settings_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         footer = QWidget()
         footer.setObjectName("sidebarFooter")
         self._support_layout = QHBoxLayout(footer)

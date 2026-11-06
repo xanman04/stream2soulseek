@@ -9,14 +9,14 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QCheckBox, QComboBox, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .. import layouts as lay_mod
 from ..matching.formats import NAMES
 from ..models import DEFAULT_MIN_KBPS, FORMAT_KINDS, LOSSY_KINDS, FormatRule, MatchPolicy
-from . import theme
+from . import settings_layout, theme
 
 EXCLUSION_HELP = (
     "S2S always looks for the version in your playlist: a radio edit or live recording is never used for the "
@@ -61,12 +61,13 @@ class MatchingRulesWidget(QWidget):
         lrow.addWidget(self.layout_combo, 1)
         for b in (self.load_btn, self.save_as_btn, self.delete_btn):
             lrow.addWidget(b)
-        lbox = QGroupBox("Layouts (saved sets of these rules; kept when you press Save)")
-        QVBoxLayout(lbox).addLayout(lrow)
+        lbox, ll = settings_layout.section_block(
+            "Layouts", "Saved sets of these rules. They are kept when you press Save.")
+        ll.addLayout(lrow)
 
         # ---- formats
         self.formats = QListWidget()
-        self.formats.setMaximumHeight(170)
+        self.formats.setFixedHeight(176)
         self.up_btn = QPushButton("Move up")
         self.down_btn = QPushButton("Move down")
         self.min_kbps = QSpinBox()
@@ -81,48 +82,42 @@ class MatchingRulesWidget(QWidget):
         top = QHBoxLayout()
         top.addWidget(self.formats, 1)
         top.addLayout(side)
-        detail = QFormLayout()
-        detail.addRow(self.fmt_detail)
-        detail.addRow("Minimum bitrate:", self.min_kbps)
-        detail.addRow("", self.allow_vbr)
-        fbox = QGroupBox("Accepted file types (tick to accept; the order is the priority, best first)")
-        fl = QVBoxLayout(fbox)
+        self.fmt_detail.setObjectName("settingsHelp")
+        self.fmt_detail.setWordWrap(True)
+        fbox, fl = settings_layout.section_block(
+            "Accepted file types", "Tick the types you accept. The order is the priority, best first.")
         fl.addLayout(top)
-        fl.addLayout(detail)
+        fl.addWidget(self.fmt_detail)
+        fl.addWidget(settings_layout.field("Minimum bitrate", settings_layout.row(self.min_kbps)))
+        fl.addWidget(self.allow_vbr)
 
         # ---- versions
         self.mode_exact = QRadioButton("Exact version only")
         self.mode_ext = QRadioButton("Exact version, or extended mix of the same version if no exact match")
         self.tier_first = QCheckBox("Prefer the right version over a better format")
-        vbox = QGroupBox("Versions")
-        vl = QVBoxLayout(vbox)
+        vbox, vl = settings_layout.section_block("Versions")
         vl.addWidget(self.mode_exact)
         vl.addWidget(self.mode_ext)
         vl.addWidget(self.tier_first)
-        vl.addWidget(QLabel(NEVER_NOTE))
+        vl.addWidget(settings_layout.help_label(NEVER_NOTE))
 
         # ---- labelled versions: only the choices that change anything
         self.ex_clean = QCheckBox("Reject clean (censored) versions")
         self.ex_mixed = QCheckBox("For DJ-mixed tracks in your playlist, find the song itself")
-        ebox = QGroupBox("Clean and DJ-mixed versions")
-        el = QVBoxLayout(ebox)
-        for w, text in ((self.ex_clean, CLEAN_HELP), (self.ex_mixed, MIXED_HELP), (None, EXCLUSION_HELP)):
-            if w is not None:
-                el.addWidget(w)
-            note = theme.subtle(QLabel(text))
-            note.setWordWrap(True)
-            note.setContentsMargins(22 if w is not None else 0, 0, 0, 6)
-            el.addWidget(note)
+        ebox, el = settings_layout.section_block("Clean and DJ-mixed versions")
+        el.addWidget(settings_layout.option(self.ex_clean, CLEAN_HELP))
+        el.addWidget(settings_layout.option(self.ex_mixed, MIXED_HELP))
+        el.addWidget(settings_layout.help_label(EXCLUSION_HELP))
 
         # ---- review behaviour
         self.tolerance = QSpinBox()
         self.tolerance.setRange(0, 600)
         self.tolerance.setSuffix(" s")
         self.skip_flagged = QCheckBox("Leave flagged matches unticked in Review")
-        rbox = QGroupBox("Review")
-        rl = QFormLayout(rbox)
-        rl.addRow("Flag a match when its length differs by more than:", self.tolerance)
-        rl.addRow("", self.skip_flagged)
+        rbox, rl = settings_layout.section_block("Review")
+        rl.addWidget(settings_layout.field("Flag a match when its length differs by more than",
+                                           settings_layout.row(self.tolerance)))
+        rl.addWidget(self.skip_flagged)
 
         self.restore_btn = QPushButton("Restore defaults")
         foot = QHBoxLayout()
@@ -130,6 +125,8 @@ class MatchingRulesWidget(QWidget):
         foot.addStretch(1)
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(18)
         for w in (lbox, fbox, vbox, ebox, rbox):
             lay.addWidget(w)
         lay.addLayout(foot)

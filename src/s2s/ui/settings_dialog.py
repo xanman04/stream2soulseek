@@ -5,9 +5,10 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QPlainTextEdit, QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
@@ -22,6 +23,7 @@ SHARING_HELP = (
     "you are comfortable sharing (for example your DJ library or the OLD archive). S2S refuses drives, your whole "
     "user folder, and anything containing its own data. Changes apply when slskd restarts (S2S restarts it after "
     "you press Save).")
+from . import settings_layout, theme
 from .context import AppContext
 from .matching_rules import MatchingRulesWidget
 from .util import show_error
@@ -33,28 +35,28 @@ class SettingsDialog(QDialog):
     def __init__(self, ctx: AppContext, parent: QWidget | None = None, *, matching: bool = False) -> None:
         super().__init__(parent)
         self.ctx = ctx
+        self.setObjectName("settingsDialog")
         self.setWindowTitle("Settings")
-        self.resize(760, 960)  # tall enough to show the whole Matching rules tab without scrolling
+        self.resize(920, 700)
+        self.setMinimumSize(780, 520)
         s = ctx.settings
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
         self.downloads.setPlaceholderText("Incoming downloads, kept in user/album folders")
         self.reuse_folders = QPlainTextEdit("\n".join(s.local_reuse_folders))
         self.reuse_folders.setPlaceholderText("One folder per line")
-        self.reuse_folders.setFixedHeight(72)
+        self.reuse_folders.setFixedHeight(84)
         add_reuse = QPushButton("Add folder…")
         add_reuse.clicked.connect(self._add_reuse_folder)
-        self.folder_help = QLabel(
-            "Soulseek downloads keep their user/album folders here. In Step 2, choose a separate "
-            "tracklist folder for the track files alone. Originals are kept in the archive subfolder after copying."
-        )
-        self.folder_help.setWordWrap(True)
         self.archive = QLineEdit(s.archive_dir_name)
         self.auto_import = QCheckBox("Import finished downloads and archive each peer folder automatically")
         self.auto_import.setChecked(bool(s.auto_import))
+        self.close_to_tray = QCheckBox("Closing the window (X) keeps S2S running in the system tray")
+        self.close_to_tray.setChecked(bool(s.close_to_tray))
         self.ffprobe = QLineEdit(s.ffprobe_path)
         self.timeout = QSpinBox()
         self.timeout.setRange(5, 300)
+        self.timeout.setSuffix(" seconds")
         self.timeout.setValue(int(s.search_timeout_s))
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -68,86 +70,115 @@ class SettingsDialog(QDialog):
         self.test_btn = QPushButton("Test connection")
         self.test_result = QLabel("")
         self.test_result.setWordWrap(True)
-
-        self.folder_help.setText(
+        self.folder_help = settings_layout.help_label(
             "Soulseek saves each download in its own user and album folders. S2S keeps those out of the way in a "
             "folder it creates for you, then copies the finished tracks into your tracklist folder (chosen on the "
             "Choose tracklist folder step). Change this only if you want the raw downloads somewhere else. "
             "Originals are kept in the archive subfolder after copying.")
-        self.general_help = QLabel("Your tracklist folder is chosen on the Choose tracklist folder step. "
-                                   "Soulseek's own download folder is under Advanced.")
-        self.general_help.setWordWrap(True)
-        form = QFormLayout()  # General
-        form.addRow(self.general_help)
-        form.addRow("", self.auto_import)
-        form.addRow("Extended search timeout (s):", self.timeout)
-        self.close_to_tray = QCheckBox("Closing the window (X) keeps S2S running in the system tray")
-        self.close_to_tray.setChecked(bool(s.close_to_tray))
-        tray_help = QLabel("Applies while transfers are in progress, so they are not interrupted. Turn this off if "
-                           "you would rather the X button quit S2S (you are asked first when transfers are running).")
-        tray_help.setWordWrap(True)
-        advanced_form = QFormLayout()  # Advanced
-        advanced_form.addRow("", self.close_to_tray)
-        advanced_form.addRow(tray_help)
-        advanced_form.addRow(self.folder_help)
-        advanced_form.addRow("Soulseek download folder:", self._with_browse(self.downloads, True))
-        reuse_help = QLabel("Scan these folders for completed downloads before searching Soulseek.")
-        reuse_help.setWordWrap(True)
-        advanced_form.addRow(reuse_help)
-        advanced_form.addRow("Other download folders:", self.reuse_folders)
-        advanced_form.addRow("", add_reuse)
-        advanced_form.addRow("Originals archive subfolder:", self.archive)
-        advanced_form.addRow("ffprobe path:", self._with_browse(self.ffprobe, False))
-        advanced_form.addRow("slskd URL (loopback):", self.url)
-        advanced_form.addRow("slskd API key:", self.key)
-        advanced_form.addRow("", self.clear_key)
-        advanced_form.addRow(self.test_btn, self.test_result)
+
+        # ---- General
+        general = settings_layout.Page(
+            "General", "Your tracklist folder is chosen on the Choose tracklist folder step. "
+                       "Soulseek's own download folder is under Advanced.")
+        lay = general.section("Finished downloads")
+        lay.addWidget(settings_layout.option(
+            self.auto_import, "When a download finishes, its track is copied into your tracklist folder."))
+        lay = general.section("Searching")
+        lay.addWidget(settings_layout.field(
+            "Extended search timeout", settings_layout.row(self.timeout),
+            "How long S2S waits on the broader second search when the first one finds no good source."))
+        general.finish()
+
+        # ---- Advanced
+        advanced = settings_layout.Page("Advanced", "Most people never need to change these.")
+        lay = advanced.section("Window")
+        lay.addWidget(settings_layout.option(
+            self.close_to_tray, "Applies while transfers are in progress, so they are not interrupted. Turn it off "
+                                "if you would rather the X button quit S2S; you are asked first when transfers are "
+                                "running."))
+        lay = advanced.section("Download folders")
+        lay.addWidget(settings_layout.field("Soulseek download folder", self._with_browse(self.downloads, True)))
+        lay.addWidget(self.folder_help)
+        lay.addWidget(settings_layout.field(
+            "Other download folders", self.reuse_folders,
+            "Scan these folders for completed downloads before searching Soulseek."))
+        lay.addWidget(settings_layout.row(add_reuse))
+        lay.addWidget(settings_layout.field("Originals archive subfolder", self.archive))
+        lay = advanced.section("Tools")
+        lay.addWidget(settings_layout.field("ffprobe path", self._with_browse(self.ffprobe, False)))
+        lay = advanced.section("Soulseek engine (slskd)")
+        lay.addWidget(settings_layout.field("slskd URL (loopback)", self.url))
+        lay.addWidget(settings_layout.field("slskd API key", self.key))
+        lay.addWidget(self.clear_key)
+        lay.addWidget(settings_layout.row(self.test_btn, self.test_result))
+        advanced.finish()
+
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        theme.primary(box.button(QDialogButtonBox.StandardButton.Save))
         box.accepted.connect(self.save)
         box.rejected.connect(self.reject)
-        general = QWidget()
-        general.setLayout(form)
-        advanced = QWidget()
-        advanced.setLayout(advanced_form)
         self.rules = MatchingRulesWidget(s.match_policy, layouts=s.rule_layouts)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.rules)
+        rules_page = settings_layout.Page(
+            "Matching rules", "Which files S2S accepts for each track. A different remix and a VIP mismatch are "
+                              "never accepted.")
+        rules_page.column.addWidget(self.rules)
+        rules_page.finish()
+
+        # ---- Sharing
         self.shares = QListWidget()
         self.shares.addItems(s.shared_folders)
+        self.shares.setMinimumHeight(140)
         self.add_share_btn = QPushButton("Add folder...")
         self.remove_share_btn = QPushButton("Remove")
-        help_ = QLabel(SHARING_HELP)
-        help_.setWordWrap(True)
-        self.shares_status = QLabel("")
-        self.shares_status.setWordWrap(True)
-        srow = QHBoxLayout()
-        srow.addWidget(self.add_share_btn)
-        srow.addWidget(self.remove_share_btn)
-        srow.addStretch(1)
-        sharing = QWidget()
-        sl = QVBoxLayout(sharing)
-        sl.addWidget(help_)
-        sl.addWidget(self.shares, 1)
-        sl.addLayout(srow)
-        sl.addWidget(self.shares_status)
+        self.shares_status = settings_layout.help_label("")
+        sharing = settings_layout.Page("Sharing", SHARING_HELP)
+        lay = sharing.section("Shared folders")
+        lay.addWidget(self.shares)
+        lay.addWidget(settings_layout.row(self.add_share_btn, self.remove_share_btn))
+        lay.addWidget(self.shares_status)
+        sharing.finish()
         self.add_share_btn.clicked.connect(self.add_share)
         self.remove_share_btn.clicked.connect(self.remove_share)
         self._update_shares_status()
 
         self.tabs = QTabWidget()
+        self.tabs.tabBar().hide()  # the list on the left is the navigation
         self.tabs.addTab(general, "General")
-        self.tabs.addTab(scroll, "Matching rules")
+        self.tabs.addTab(rules_page, "Matching rules")
         self.tabs.addTab(sharing, "Sharing")
         self.updates = UpdateSettingsWidget(ctx)
         self.finished.connect(self.updates.stop)
-        self.tabs.addTab(self.updates, "Updates")
+        self.tabs.addTab(settings_layout.page_around(
+            self.updates, "Updates", "Choose which releases S2S offers you."), "Updates")
         self.tabs.addTab(advanced, "Advanced")
+        self.nav = QListWidget()
+        self.nav.setObjectName("settingsNav")
+        self.nav.setFixedWidth(190)
+        self.nav.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        for i in range(self.tabs.count()):
+            item = QListWidgetItem(self.tabs.tabText(i))
+            item.setSizeHint(QSize(0, 40))
+            self.nav.addItem(item)
+        self.nav.setCurrentRow(0)
+        self.nav.currentRowChanged.connect(lambda row: self.tabs.setCurrentIndex(max(row, 0)))
+        self.tabs.currentChanged.connect(self.nav.setCurrentRow)
         if matching:
             self.tabs.setCurrentIndex(1)
+        footer = QWidget()
+        footer.setObjectName("settingsFooter")
+        foot = QHBoxLayout(footer)
+        foot.setContentsMargins(20, 12, 20, 12)
+        foot.addStretch(1)
+        foot.addWidget(box)
+        top = QHBoxLayout()
+        top.setSpacing(0)
+        top.addWidget(self.nav)
+        top.addWidget(self.tabs, 1)
         lay = QVBoxLayout(self)
-        lay.addWidget(self.tabs)
-        lay.addWidget(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addLayout(top, 1)
+        lay.addWidget(footer)
         self.test_btn.clicked.connect(self.test_connection)
 
     # ------------------------------------------------------------ sharing

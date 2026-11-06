@@ -48,3 +48,17 @@ def test_more_button_does_not_keep_focus_after_a_mouse_click():
     QApplication.instance() or QApplication([])
     side = Sidebar()
     assert side.tools_btn.focusPolicy() == Qt.FocusPolicy.TabFocus
+
+
+def test_settings_navigation_list_follows_the_pages():
+    from s2s.ui.settings_dialog import SettingsDialog
+
+    QApplication.instance() or QApplication([])
+    ctx = SimpleNamespace(settings=Settings(slskd_downloads_dir="X"), secrets=SimpleNamespace(get=lambda *_: None))
+    dlg = SettingsDialog(ctx)
+    names = [dlg.nav.item(i).text() for i in range(dlg.nav.count())]
+    assert names == [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
+    dlg.nav.setCurrentRow(2)
+    assert dlg.tabs.currentIndex() == 2
+    dlg.tabs.setCurrentIndex(4)
+    assert dlg.nav.currentRow() == 4 and not dlg.tabs.tabBar().isVisibleTo(dlg)
