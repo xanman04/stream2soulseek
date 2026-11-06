@@ -213,6 +213,15 @@ The embedded sign-in browser uses temporary profiles. Accepted sessions are stor
 out removes the selected service's saved session. S2S shares no music folders by default. Folders added
 in **Settings → Sharing** become visible to other Soulseek users.
 
+S2S has no analytics or telemetry. It contacts only these services:
+
+- **Apple Music, Spotify and SoundCloud**, for the playlists of the accounts you sign in to.
+- **Soulseek**, through the bundled slskd: your searches, your downloads, and any folders you chose to share.
+- **GitHub**, to look for new releases and download the installer you approve. Problem reports open a draft in
+  your browser that you review first; nothing is sent from the app.
+- **A small sponsor-credits service run on Cloudflare**, when you open **More → Credits**. The request carries
+  no personal data, although, like any web server, the service can see the connecting network address.
+
 Use S2S only for material you are authorized to obtain or share. S2S is not affiliated with Apple,
 Spotify, SoundCloud, Soulseek or slskd.
 
