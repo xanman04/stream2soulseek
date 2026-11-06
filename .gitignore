@@ -61,3 +61,7 @@ HANDOFF.md
 
 # Throwaway pytest base folders
 .pytest-tmp-*/
+
+# Private working files (sponsor page drafts and screenshots, search measurements, validation worktrees)
+local/
+.s2s-*
