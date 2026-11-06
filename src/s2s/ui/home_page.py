@@ -76,6 +76,8 @@ class HomePage(QWidget):
     quick_search_requested = Signal()
     free_search_requested = Signal()
     recent_requested = Signal(str)
+    welcome_dismissed = Signal()
+    guide_requested = Signal()
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -95,6 +97,34 @@ class HomePage(QWidget):
         font.setWeight(QFont.Weight.DemiBold)
         title.setFont(font)
         root.addWidget(title)
+
+        # Shown once, on a first launch (see MainWindow); hidden until then.
+        self.welcome = QFrame()
+        self.welcome.setObjectName("homeActionPanel")
+        welcome_layout = QVBoxLayout(self.welcome)
+        welcome_layout.setContentsMargins(18, 16, 18, 16)
+        welcome_layout.setSpacing(10)
+        welcome_title = QLabel("Welcome to S2S")
+        welcome_title.setObjectName("sectionTitle")
+        welcome_text = QLabel(
+            "Connect a streaming service and choose a playlist. S2S searches Soulseek for each track and shows you "
+            "what it found. Nothing downloads until you confirm, and finished tracks are copied into the folder you "
+            "choose.")
+        welcome_text.setObjectName("mutedText")
+        welcome_text.setWordWrap(True)
+        self.welcome_guide = QPushButton("Open the user guide")
+        self.welcome_done = theme.primary(QPushButton("Got it"))
+        welcome_buttons = QHBoxLayout()
+        welcome_buttons.addWidget(self.welcome_done)
+        welcome_buttons.addWidget(self.welcome_guide)
+        welcome_buttons.addStretch(1)
+        welcome_layout.addWidget(welcome_title)
+        welcome_layout.addWidget(welcome_text)
+        welcome_layout.addLayout(welcome_buttons)
+        self.welcome.hide()
+        root.addWidget(self.welcome)
+        self.welcome_done.clicked.connect(self._dismiss_welcome)
+        self.welcome_guide.clicked.connect(self.guide_requested)
 
         recent_heading = QLabel("Recently used playlists")
         recent_heading.setObjectName("sectionTitle")
@@ -170,6 +200,13 @@ class HomePage(QWidget):
         set_icon(self.quick_button, "quick", primary=True)
         set_icon(self.free_button, "search")
         self.refresh()
+
+    def show_welcome(self, visible: bool = True) -> None:
+        self.welcome.setVisible(visible)
+
+    def _dismiss_welcome(self) -> None:
+        self.welcome.hide()
+        self.welcome_dismissed.emit()
 
     @staticmethod
     def _action_panel(title: str, description: str, button_text: str) -> QFrame:

@@ -20,6 +20,7 @@ for package in ("spotapi", "curl_cffi"):
     datas += d
     binaries += b
     hidden += h
+datas += [(str(ROOT / "CHANGELOG.md"), "s2s")]  # the What's new window reads this copy
 datas += collect_data_files("s2s", includes=["ui/assets/*.png", "ui/assets/logos/*", "ui/assets/fonts/*", "update_windows.ps1"])
 
 a = Analysis(  # noqa: F821

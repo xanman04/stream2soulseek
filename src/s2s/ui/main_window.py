@@ -21,6 +21,7 @@ from ..slskd.service import SlskdService
 from ..store import Store
 from . import theme
 from .about_dialog import AboutDialog
+from .whats_new_dialog import WhatsNewDialog
 from .context import AppContext
 from .credits_dialog import CreditsDialog
 from .destination_page import DestinationPage
@@ -186,6 +187,8 @@ class MainWindow(QMainWindow):
         self.sidebar.track_search_requested.connect(self.open_track_search)
         self.sidebar.my_playlists_requested.connect(self.show_my_playlists)
         self.home.playlist_requested.connect(self.start_playlist_from_home)
+        self.home.welcome_dismissed.connect(lambda: self._remember("welcome_dismissed", True))
+        self.home.guide_requested.connect(lambda: QDesktopServices.openUrl(QUrl(USER_GUIDE_URL)))
         self.home.quick_search_requested.connect(lambda: self.open_track_search("quick"))
         self.home.free_search_requested.connect(lambda: self.open_track_search("free"))
         self.home.recent_requested.connect(self.resume_import)
@@ -259,6 +262,41 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self, self.startup)
         QTimer.singleShot(0, self, self.startup_checks)
         QTimer.singleShot(0, self, self._preload_playlists)
+        QTimer.singleShot(0, self, self._first_run_notices)
+
+    def _remember(self, key: str, value) -> None:
+        from .. import config
+
+        self.ctx.settings.extra[key] = value
+        try:
+            config.save_settings(self.ctx.settings)
+        except Exception:  # noqa: BLE001 - a notice that cannot be remembered may simply show again
+            pass
+
+    def _first_run_notices(self) -> None:
+        """The welcome card on a first launch, and What's new once after an update to a stable release."""
+        if self._closing:
+            return
+        from .. import __version__
+
+        extra = self.ctx.settings.extra
+        has_history = bool(self.ctx.store.list_imports())
+        if "welcome_dismissed" not in extra:
+            if has_history:
+                self._remember("welcome_dismissed", True)  # someone who already uses S2S needs no welcome
+            else:
+                self.home.show_welcome(True)
+        last = extra.get("last_seen_version")
+        if last != __version__:
+            self._remember("last_seen_version", __version__)
+            updated = last is not None or has_history  # a brand new installation is welcomed instead
+            if updated and "-" not in __version__:  # sponsor previews have their own popup
+                self.show_whats_new()
+
+    def show_whats_new(self) -> None:
+        dialog = WhatsNewDialog(self)
+        dialog.exec()
+        dialog.deleteLater()
 
     def _preload_playlists(self) -> None:
         if not self._closing:
@@ -540,6 +578,9 @@ class MainWindow(QMainWindow):
         guide = QAction("User guide", self)
         guide.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(USER_GUIDE_URL)))
         help_menu.addAction(guide)
+        whats_new = QAction("What's new", self)
+        whats_new.triggered.connect(self.show_whats_new)
+        help_menu.addAction(whats_new)
         logs = QAction("Open log folder", self)
         logs.triggered.connect(self.open_log_folder)
         help_menu.addAction(logs)

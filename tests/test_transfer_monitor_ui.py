@@ -344,7 +344,29 @@ def test_help_submenu_lists_support_actions(env):
     win, *_ = env
     help_menu = win.help_menu
     assert [a.text() for a in help_menu.actions() if not a.isSeparator()] == [
-        "User guide", "Open log folder", "Copy diagnostics", "Report a bug..."]
+        "User guide", "What's new", "Open log folder", "Copy diagnostics", "Report a bug..."]
     win.copy_diagnostics()
     from PySide6.QtWidgets import QApplication as App
     assert "Database schema" in App.clipboard().text()
+
+
+def test_welcome_shows_on_a_first_launch_once_and_whats_new_only_after_an_update(env, monkeypatch):
+    win, *_ = env
+    from s2s import __version__
+
+    shown = []
+    monkeypatch.setattr(win, "show_whats_new", lambda: shown.append(True))
+    monkeypatch.setattr(win, "_remember", lambda key, value: win.ctx.settings.extra.__setitem__(key, value))
+    monkeypatch.setattr(win.ctx.store, "list_imports", lambda: [])
+    win.ctx.settings.extra.clear()
+    win._first_run_notices()  # brand new installation: welcome, no What's new
+    assert not win.home.welcome.isHidden() and shown == []
+    assert win.ctx.settings.extra["last_seen_version"] == __version__
+    win.home._dismiss_welcome()
+    win.home.welcome_dismissed.connect(lambda: None)
+    win.ctx.settings.extra["welcome_dismissed"] = True
+    win.ctx.settings.extra["last_seen_version"] = "0.0.1"
+    win._first_run_notices()  # updated from an older version: What's new once
+    assert shown == [True] and win.home.welcome.isHidden()
+    win._first_run_notices()
+    assert shown == [True]  # not again for the same version

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **First launch.** A one-time welcome card on Home explains the four steps and links to the user guide. It never returns once dismissed, and people who already use S2S do not see it.
+- **What's new.** After updating to a new stable release, a small window lists that version's changes once. More > Help > What's new shows them again.
 - **Help menu.** More > Help has the user guide, Open log folder, Copy diagnostics (version, platform and a few settings, with no folders or logins) and Report a bug. Menu items no longer repeat "S2S": About, Quit.
 - **Window.** S2S reopens at the size and place you last left it. Bug reports include the update channel and a few non-personal settings.
 - **Quit.** The More menu says "Quit S2S" and asks before quitting only when transfers would be interrupted.

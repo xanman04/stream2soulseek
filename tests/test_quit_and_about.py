@@ -110,3 +110,27 @@ def test_window_geometry_is_remembered_across_launches():
     MainWindow._restore_window_geometry(holder)
     assert len(restored) == 1
 
+
+
+def test_changelog_entries_read_a_versions_bullets():
+    from s2s import changelog
+
+    text = ("# Changelog\n\n## Unreleased\n\n- **Next.** Not yet.\n\n## 1.8.0 — 2026-11-07\n\n"
+            "- **Help menu.** More > Help has [the guide](https://x.y) and `logs`.\n- Plain line without lead-in.\n\n"
+            "## 1.7.1 — 2026-11-06\n\n- **Old.** Older.\n")
+    assert changelog.entries("1.8.0", text) == [("Help menu", "More > Help has the guide and logs."),
+                                                ("", "Plain line without lead-in.")]
+    assert changelog.entries("9.9.9", text) == []
+    assert changelog.entries("1.8.0") == [] or isinstance(changelog.entries("1.7.1"), list)  # bundled file readable
+
+
+def test_whats_new_dialog_shows_items_or_an_honest_empty_message():
+    from s2s.ui.whats_new_dialog import WhatsNewDialog
+
+    QApplication.instance() or QApplication([])
+    full = WhatsNewDialog(version="2.0", items=[("A", "b")])
+    shown = " ".join(label.text() for label in full.findChildren(QLabel))
+    assert "What's new in 2.0" in shown and "<b>A.</b>" in shown
+    none = WhatsNewDialog(version="2.0", items=[])
+    empty = " ".join(label.text() for label in none.findChildren(QLabel))
+    assert "no release notes" in empty

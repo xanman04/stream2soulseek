@@ -23,6 +23,19 @@ through the bundled [slskd client](https://github.com/slskd/slskd).
 
 S2S does not download audio from the streaming services. No download starts until you confirm a selection.
 
+## Screenshots
+
+These use made-up playlists and uploaders; no real music or accounts are shown.
+
+<p align="center">
+  <img src="docs/assets/screenshots/home.png" alt="Home: recent playlists and the two ways to start" width="49%">
+  <img src="docs/assets/screenshots/review.png" alt="Review and confirm: every proposed file, with alternatives" width="49%">
+</p>
+<p align="center">
+  <img src="docs/assets/screenshots/downloads.png" alt="Downloads: progress and tracks that need attention" width="49%">
+  <img src="docs/assets/screenshots/settings.png" alt="Settings: matching rules for the files you accept" width="49%">
+</p>
+
 ## Download and install
 
 Download the installer from [the latest release](https://github.com/xanman04/stream2soulseek/releases/latest).
