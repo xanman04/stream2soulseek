@@ -22,7 +22,7 @@ from ..store import Store
 from . import theme
 from .context import AppContext
 from .destination_page import DestinationPage
-from .history_dialog import HistoryDialog
+from .history_dialog import HistoryPage
 from .playlist_page import PlaylistPage
 from .review_page import ReviewPage
 from .queued_recovery_dialog import QueuedRecoveryDialog
@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self.playlists.metadata_loaded.connect(self.home.refresh)
         self.track_search = TrackSearchPage(self.ctx)
         self.my_playlists = MyPlaylistsPage(self.ctx)
+        self.history = HistoryPage(self.ctx)
         self.transfer_monitor = TransferMonitor(self.ctx, connected=lambda: self.soulseek.is_connected,
             skip_import=lambda: self.ctx.import_id if self.transfers.timer.isActive() else None,
             busy=lambda: self._queueing or self._closing, parent=self)
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.home)
         self.stack.addWidget(self.track_search)
         self.stack.addWidget(self.my_playlists)
+        self.stack.addWidget(self.history)
 
         central = QWidget()
         h = QHBoxLayout(central)
@@ -136,6 +138,7 @@ class MainWindow(QMainWindow):
 
         tools_menu = QMenu(self.sidebar.tools_btn)
         self.sidebar.history_requested.connect(self.open_history)
+        self.history.transfer_requested.connect(self.resume_import)
         quit_act = QAction("Quit S2S (pause transfers)", self)
         quit_act.triggered.connect(self.quit_application)
         quit_act.setShortcut(QKeySequence.StandardKey.Quit)
@@ -230,8 +233,13 @@ class MainWindow(QMainWindow):
             self.show_home()
             QTimer.singleShot(0, self.startup)
             QTimer.singleShot(0, self.startup_checks)
+            QTimer.singleShot(0, self, self._preload_playlists)
 
     # ------------------------------------------------------------ navigation
+
+    def _preload_playlists(self) -> None:
+        if not self._closing:
+            self.my_playlists.refresh()
 
     def show_home(self) -> None:
         if self._closing or self._queueing:
@@ -265,7 +273,7 @@ class MainWindow(QMainWindow):
         self.spotify_service.leave()
         self.soundcloud_service.leave()
         self.transfers.stop()
-        self.my_playlists.refresh()
+        self.my_playlists.refresh(recheck=True)
         self.stack.setCurrentWidget(self.my_playlists)
         self.sidebar.show_my_playlists()
         self._park_confirmed_transfer()
@@ -375,6 +383,7 @@ class MainWindow(QMainWindow):
         """Update sidebar states and every page's Next button from the current application state."""
         done, avail = self.step_done(), self.step_available()
         self.sidebar.set_step_states(done, avail)
+        self.history.set_open_blocked(self._queueing or self.search._running)
         for key, page in self._service_pages.items():
             self.sidebar.set_service_state(key, page.state_text())
         for f in self.frames:
@@ -755,13 +764,16 @@ class MainWindow(QMainWindow):
             fn()
 
     def open_history(self) -> None:
-        dialog = HistoryDialog(self.ctx, self, import_id=self.ctx.import_id,
-                               open_blocked=self._queueing or self.search._running)
-        dialog.exec()
-        selected = dialog.requested_import_id
-        dialog.deleteLater()
-        if selected:
-            self.resume_import(selected)
+        if self._closing:
+            return
+        self._navigation_generation += 1
+        self.spotify_service.leave()
+        self.soundcloud_service.leave()
+        self.transfers.stop()
+        self.history.set_open_blocked(self._queueing or self.search._running)
+        self.history.refresh(select_id=self.ctx.import_id)
+        self.stack.setCurrentWidget(self.history)
+        self.sidebar.show_history()
 
     def review_queued_backups(self) -> None:
         if self._queueing or not self.ctx.import_id:
@@ -808,6 +820,7 @@ class MainWindow(QMainWindow):
 
     def _queueing_changed(self, busy: bool) -> None:
         self._queueing = busy
+        self.history.set_open_blocked(busy or self.search._running)
         self.sidebar.setEnabled(not busy)
         for frame in self.frames:
             frame.next_btn.setEnabled(not busy)
@@ -1021,6 +1034,7 @@ class MainWindow(QMainWindow):
                     self.showMinimized()  # no invisible process when the desktop has no tray
                 return
         self._closing = True
+        self.my_playlists.stop()
         self.transfer_monitor.stop()
         self.transfers.stop()
         self.transfers._shutdown = True

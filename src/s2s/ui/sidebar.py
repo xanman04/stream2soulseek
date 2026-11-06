@@ -364,6 +364,7 @@ class Sidebar(QWidget):
         set_icon(self.track_search_btn, "search")
         self.history_btn = QPushButton("Transfer history")
         self.history_btn.setObjectName("primaryNavigation")
+        self.history_btn.setCheckable(True)
         set_icon(self.history_btn, "history")
         self.my_playlists_btn = QPushButton("My Playlists")
         self.my_playlists_btn.setObjectName("primaryNavigation")
@@ -529,6 +530,9 @@ class Sidebar(QWidget):
             chosen = len(_MODES) - 1
             for mode in range(len(_MODES)):
                 self._apply_mode(mode)
+                # Choose a size that also fits the expanded workflow at this window height.
+                self._steps_card.setVisible(not self._steps_menu_mode)
+                self.steps.setVisible(not self._steps_menu_mode)
                 self._invalidate()  # the rows just changed height: measure the new layout, not the cached one
                 if self._lay.totalMinimumSize().height() <= self.height():
                     chosen = mode
@@ -536,6 +540,8 @@ class Sidebar(QWidget):
             else:
                 self._apply_mode(chosen)
         finally:
+            self._steps_card.setVisible(self._workflow_expanded and not self._steps_menu_mode)
+            self.steps.setVisible(self._workflow_expanded and not self._steps_menu_mode)
             self._fitting = False
 
     def _invalidate(self) -> None:
@@ -682,7 +688,6 @@ class Sidebar(QWidget):
         )
         self.steps.setVisible(expanded and not self._steps_menu_mode)
         self._steps_card.setVisible(expanded and not self._steps_menu_mode)
-        self._fit()
 
     def _step_row(self, row: int) -> None:
         if row < 0:
@@ -722,6 +727,7 @@ class Sidebar(QWidget):
         self.updateGeometry()
 
     def show_service(self, key: str) -> None:
+        self.history_btn.setChecked(False)
         self.my_playlists_btn.setChecked(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
@@ -733,6 +739,7 @@ class Sidebar(QWidget):
         self._bold_current()
 
     def show_step(self, index: int) -> None:
+        self.history_btn.setChecked(False)
         self.my_playlists_btn.setChecked(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
@@ -743,6 +750,7 @@ class Sidebar(QWidget):
         self._update_workflow_label()
 
     def show_home(self) -> None:
+        self.history_btn.setChecked(False)
         self.my_playlists_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
@@ -752,6 +760,7 @@ class Sidebar(QWidget):
         self.track_search_btn.setChecked(False)
 
     def show_track_search(self) -> None:
+        self.history_btn.setChecked(False)
         self.my_playlists_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
@@ -761,12 +770,22 @@ class Sidebar(QWidget):
         self.track_search_btn.setChecked(True)
 
     def show_my_playlists(self) -> None:
+        self.history_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
         self._set_workflow_expanded(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
         self.my_playlists_btn.setChecked(True)
+
+    def show_history(self) -> None:
+        self._quiet(self.steps, -1)
+        self._quiet(self.services, -1)
+        self._set_workflow_expanded(False)
+        self.home_btn.setChecked(False)
+        self.track_search_btn.setChecked(False)
+        self.my_playlists_btn.setChecked(False)
+        self.history_btn.setChecked(True)
 
     def set_service_state(self, key: str, text: str) -> None:
         for r in range(self.services.count()):

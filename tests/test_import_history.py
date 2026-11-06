@@ -7,7 +7,7 @@ from s2s.models import (
 )
 from s2s.store import Store
 from s2s.ui.context import AppContext
-from s2s.ui.history_dialog import HistoryDialog
+from s2s.ui.history_dialog import HistoryPage
 from PySide6.QtWidgets import QFileDialog
 
 
@@ -82,7 +82,7 @@ def test_history_accounts_for_all_64_tracks_and_latest_replacement(tmp_path, mon
         assert store._conn.execute("SELECT COUNT(*) FROM import_results").fetchone()[0] == before
 
         ctx = AppContext(store=store, secrets=None, settings=None)
-        dialog = HistoryDialog(ctx, import_id=iid)
+        dialog = HistoryPage(ctx, import_id=iid)
         assert dialog.table.rowCount() == 64
         dialog.status_filter.setCurrentIndex(dialog.status_filter.findData("missing"))
         assert dialog.table.rowCount() == 63

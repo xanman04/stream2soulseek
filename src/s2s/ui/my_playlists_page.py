@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 from threading import Event
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt, QUrl
+from PySide6.QtCore import QSortFilterProxyModel, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
@@ -59,16 +59,21 @@ def _scan(folder: Path, ffprobe: str, cancel: Event) -> list[tuple]:
 
 
 class MyPlaylistsPage(QWidget):
+    folder_scanned = Signal(object, str, object)
+
     def __init__(self, ctx, parent=None):
         super().__init__(parent)
         self.ctx = ctx
         self._scan_cancel = Event()
+        self._folders_to_scan = None
+        self._snapshots = {}
+        self.folder_scanned.connect(self._folder_scanned)
         title = QLabel("My Playlists")
         title.setObjectName("pageTitle")
         add = QPushButton("Add folder…")
         add.clicked.connect(self._add_folder)
         refresh = QPushButton("Refresh")
-        refresh.clicked.connect(lambda: self.refresh())
+        refresh.clicked.connect(lambda: self.refresh(force=True))
         header = QHBoxLayout()
         header.addWidget(title, 1)
         header.addWidget(refresh)
@@ -146,7 +151,7 @@ class MyPlaylistsPage(QWidget):
         current = self.folders.currentItem()
         return current.data(Qt.ItemDataRole.UserRole) if current else None
 
-    def refresh(self, select: str | None = None) -> None:
+    def refresh(self, select: str | None = None, *, force: bool = False, recheck: bool = False) -> None:
         selected = select or self._selected_path()
         settings = self.ctx.settings
         paths = [*settings.playlist_folders, *settings.recent_destinations]
@@ -154,14 +159,16 @@ class MyPlaylistsPage(QWidget):
         self.folders.blockSignals(True)
         self.folders.clear()
         seen = set()
+        existing = []
         selected_row = 0
         for path in paths:
             if not path:
                 continue
             key = os.path.normcase(os.path.normpath(path))
-            if key in seen:
+            if key in seen or not Path(path).is_dir():
                 continue
             seen.add(key)
+            existing.append(path)
             entry = QListWidgetItem(Path(path).name or path)
             entry.setData(Qt.ItemDataRole.UserRole, path)
             if selected and key == os.path.normcase(os.path.normpath(selected)):
@@ -169,6 +176,25 @@ class MyPlaylistsPage(QWidget):
             self.folders.addItem(entry)
         self.folders.setCurrentRow(selected_row)
         self.folders.blockSignals(False)
+        scan_key = (tuple(existing), settings.ffprobe_path)
+        if force or scan_key != self._folders_to_scan or (recheck and all(p in self._snapshots for p in existing)):
+            self._scan_cancel.set()
+            cancel = self._scan_cancel = Event()
+            self._folders_to_scan = scan_key
+            self._snapshots = {path: self._snapshots[path] for path in existing if path in self._snapshots}
+            first = self._selected_path()
+
+            def scan_all():
+                for path in sorted(existing, key=lambda path: path != first):
+                    if cancel.is_set():
+                        return
+                    try:
+                        tracks = _scan(Path(path), scan_key[1], cancel)
+                    except OSError:
+                        tracks = None
+                    self.folder_scanned.emit(cancel, path, tracks)
+
+            run_async(self, scan_all)
         self._load_folder()
 
     def _add_folder(self) -> None:
@@ -193,18 +219,19 @@ class MyPlaylistsPage(QWidget):
         if path and not QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
             set_banner(self.notice, "The folder could not be opened.", "error")
 
-    def hideEvent(self, event) -> None:
+    def stop(self) -> None:
         self._scan_cancel.set()
-        super().hideEvent(event)
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        if self._scan_cancel.is_set():
-            self.refresh()
+    def _folder_scanned(self, cancel, path, tracks) -> None:
+        if cancel.is_set():
+            return
+        self._snapshots[path] = tracks
+        if path == self._selected_path():
+            query = self.filter.text()
+            self._load_folder()
+            self.filter.setText(query)
 
     def _load_folder(self, *_args) -> None:
-        self._scan_cancel.set()
-        cancel = self._scan_cancel = Event()
         path = self._selected_path()
         self.model.removeRows(0, self.model.rowCount())
         self.filter.clear()
@@ -214,23 +241,16 @@ class MyPlaylistsPage(QWidget):
         self.open_button.setEnabled(False)
         self.filter.setEnabled(False)
         set_banner(self.notice, "", "error")
-        if not path:
+        if not path or path not in self._snapshots:
             return
-        ffprobe = self.ctx.settings.ffprobe_path
-
-        def done(tracks):
-            if cancel.is_set():
-                return
-            self.open_button.setEnabled(True)
-            self.filter.setEnabled(bool(tracks))
-            self._show_tracks(tracks)
-
-        def failed(exc):
-            if not cancel.is_set():
-                self.stats.clear()
-                set_banner(self.notice, "This folder is missing or cannot be read.", "error")
-
-        run_async(self, lambda: _scan(Path(path), ffprobe, cancel), done, failed)
+        tracks = self._snapshots[path]
+        if tracks is None:
+            self.stats.clear()
+            set_banner(self.notice, "This folder is missing or cannot be read.", "error")
+            return
+        self.open_button.setEnabled(True)
+        self.filter.setEnabled(bool(tracks))
+        self._show_tracks(tracks)
 
     def _show_tracks(self, tracks: list[tuple]) -> None:
         durations = []

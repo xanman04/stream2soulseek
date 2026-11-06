@@ -6,10 +6,10 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
+    QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -46,23 +46,18 @@ def _date_label(value: str) -> str:
         return "Date unavailable"
 
 
-class HistoryDialog(QDialog):
+class HistoryPage(QWidget):
+    transfer_requested = Signal(str)
+
     def __init__(self, ctx: AppContext, parent=None, import_id: str | None = None,
                  *, open_blocked: bool = False) -> None:
         super().__init__(parent)
         self.ctx = ctx
-        self.requested_import_id = None
         self._records = []
         self._record = None
         self._shown: list[HistoryRow] = []
         self.rows: list[HistoryRow] = []
         self._open_blocked = open_blocked
-        self.setWindowTitle("Transfer history")
-        self.setMinimumSize(740, 540)
-        self.resize(1120, 680)
-        if self.screen():
-            room = self.screen().availableGeometry()
-            self.resize(min(1120, room.width() - 60), min(680, room.height() - 60))
 
         title = QLabel("Transfer history")
         title.setObjectName("pageTitle")
@@ -180,7 +175,6 @@ class HistoryDialog(QDialog):
         self.notice.hide()
         self.export_button = QPushButton("Export unfinished CSV…")
         self.open_button = theme.primary(QPushButton("Open transfer"))
-        close = QPushButton("Close")
         self.open_hint = theme.subtle(QLabel("Open a saved transfer to retry or choose another file. Downloads still require confirmation."))
         self.open_hint.setWordWrap(True)
         if open_blocked:
@@ -189,7 +183,6 @@ class HistoryDialog(QDialog):
         footer.setSpacing(8)
         footer.addWidget(self.export_button)
         footer.addStretch(1)
-        footer.addWidget(close)
         footer.addWidget(self.open_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -213,11 +206,11 @@ class HistoryDialog(QDialog):
         self.export_button.clicked.connect(self.export_outstanding)
         self.open_button.clicked.connect(self.open_selected)
         self.open_folder_button.clicked.connect(self.open_folder)
-        close.clicked.connect(self.reject)
         self.timer = QTimer(self)
         self.timer.setInterval(5000)
         self.timer.timeout.connect(self.refresh)
-        self.refresh(select_id=import_id)
+        if import_id is not None:
+            self.refresh(select_id=import_id)
         self._fit_layout()
 
     @property
@@ -358,8 +351,15 @@ class HistoryDialog(QDialog):
 
     def open_selected(self):
         if self.selected_import_id and not self._open_blocked:
-            self.requested_import_id = self.selected_import_id
-            self.accept()
+            self.transfer_requested.emit(self.selected_import_id)
+
+    def set_open_blocked(self, blocked: bool) -> None:
+        self._open_blocked = blocked
+        self.open_button.setEnabled(bool(self.selected_import_id) and not blocked)
+        self.open_hint.setText(
+            "Finish the current search or wait for downloads to finish submitting before opening another transfer."
+            if blocked else "Open a saved transfer to retry or choose another file. Downloads still require confirmation."
+        )
 
     def open_folder(self):
         if self._record and Path(self._record.destination).is_dir():

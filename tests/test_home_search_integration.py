@@ -91,6 +91,11 @@ def test_my_playlists_browses_saved_tracklist_without_changing_draft(env, monkey
     (folder / "missing-tags.mp3").write_bytes(b"audio")
     (folder / "notes.txt").write_text("notes")
     store.create_import(Playlist("house", "House"), str(folder))
+    store.create_import(Playlist("deleted", "Deleted"), str(tmp_path / "deleted"))
+    second = tmp_path / "Techno"
+    second.mkdir()
+    (second / "second.wav").write_bytes(b"audio")
+    store.create_import(Playlist("techno", "Techno"), str(second))
     win.ctx.settings.recent_destinations = [str(folder)]
     win.ctx.settings.ffprobe_path = "fixture-ffprobe"
 
@@ -100,15 +105,35 @@ def test_my_playlists_browses_saved_tracklist_without_changing_draft(env, monkey
         return {"tags": {"title": "Tagged title", "artist": "Tagged artist"}, "duration": 95.2}
 
     monkeypatch.setattr(my_playlists_page, "inspect_audio", inspect)
+    win._preload_playlists()
+    assert str(second) in win.my_playlists._snapshots
     win.sidebar.my_playlists_btn.click()
 
     page = win.my_playlists
     assert win.stack.currentWidget() is page and win.sidebar.my_playlists_btn.isChecked()
-    assert page.folders.count() == 1
+    assert page.folders.count() == 2
     assert page.model.rowCount() == 2
     assert page.model.item(1, 0).text() == "Tagged title"
     assert "1:35 known runtime (1 of 2 tracks)" in page.stats.text()
+    page.folders.setCurrentRow(1)
+    assert page.model.rowCount() == 1
     assert_context_unchanged(win.ctx, before)
+
+
+def test_expanding_workflow_keeps_sidebar_control_sizes(env):
+    win, _, _ = env
+    win.show_home()
+    win.resize(1100, 850)
+    win.show()
+    QApplication.processEvents()
+    sidebar = win.sidebar
+    before = (sidebar._mode, sidebar._service_h, sidebar.history_btn.height())
+    sidebar._set_workflow_expanded(True)
+    QApplication.processEvents()
+    assert (sidebar._mode, sidebar._service_h, sidebar.history_btn.height()) == before
+    sidebar._set_workflow_expanded(False)
+    QApplication.processEvents()
+    assert (sidebar._mode, sidebar._service_h, sidebar.history_btn.height()) == before
 
 
 def test_start_playlist_from_home_returns_to_running_search_without_reset(env):

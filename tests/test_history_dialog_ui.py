@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from s2s.models import AppleTrack, Approval, Playlist, SelectionItem, TransferState, TransferStatus
 from s2s.store import Store
-from s2s.ui.history_dialog import HistoryDialog, _date_label
+from s2s.ui.history_dialog import HistoryPage, _date_label
 from test_main_window_fixes import win  # noqa: F401
 
 
@@ -34,7 +34,7 @@ def history(tmp_path):
     iid = _saved(store, folder, cancelled=True, name="Search: 04-yo_speed-dizzy_and_hollow",
                  ident="s2s:standalone:free:synthetic")
     ctx = SimpleNamespace(store=store, describe=lambda exc: str(exc))
-    dialog = HistoryDialog(ctx, import_id=iid)
+    dialog = HistoryPage(ctx, import_id=iid)
     yield dialog, store, folder, iid
     dialog.close()
     dialog.deleteLater()
@@ -96,8 +96,10 @@ def test_folder_and_open_transfer_actions_do_not_queue_anything(history, monkeyp
     before = store._conn.total_changes
     dialog.open_folder_button.click()
     assert [Path(path) for path in opened] == [folder]
+    requested = []
+    dialog.transfer_requested.connect(requested.append)
     dialog.open_button.click()
-    assert dialog.requested_import_id == iid
+    assert requested == [iid]
     assert store._conn.total_changes == before
 
 
@@ -118,14 +120,13 @@ def test_local_refresh_timer_stops_when_history_is_closed(history):
     assert not dialog.timer.isActive()
 
 
-def test_opening_history_resumes_the_selected_saved_transfer(win, tmp_path, monkeypatch):
+def test_opening_history_resumes_the_selected_saved_transfer(win, tmp_path):
     from s2s.ui import main_window
     iid = _saved(win.ctx.store, tmp_path, cancelled=True)
-    def choose(dialog):
-        dialog.open_button.click()
-        return dialog.result()
-    monkeypatch.setattr(main_window.HistoryDialog, "exec", choose)
     win.sidebar.history_btn.click()
+    assert win.stack.currentWidget() is win.history
+    assert win.sidebar.history_btn.isChecked()
+    win.history.open_button.click()
     assert win.ctx.import_id == iid
     assert win.stack.currentWidget() is win.frames[main_window.STEP_TRANSFERS]
 
@@ -134,10 +135,12 @@ def test_busy_workflow_cannot_be_replaced_from_history(tmp_path):
     store = Store(tmp_path / "busy.sqlite3")
     try:
         iid = _saved(store, tmp_path)
-        dialog = HistoryDialog(SimpleNamespace(store=store), import_id=iid, open_blocked=True)
+        dialog = HistoryPage(SimpleNamespace(store=store), import_id=iid, open_blocked=True)
+        requested = []
+        dialog.transfer_requested.connect(requested.append)
         assert not dialog.open_button.isEnabled()
         dialog.open_selected()
-        assert dialog.requested_import_id is None
+        assert requested == []
         dialog.deleteLater()
     finally:
         store.close()
