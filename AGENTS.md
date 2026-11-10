@@ -77,6 +77,11 @@ completed files into flat tracklist folders chosen by the user.
 
 ## Working norms
 
+- Stay inside this repository folder. The workspace folder that contains it belongs to the maintainer and holds
+  other, unrelated work: never create, move or delete anything there. Run commands, tests (including any
+  `--basetemp`), builds and screenshot tools from this folder, and put scratch files, captures and temporary
+  worktrees under `local/` (gitignored), or in the system temp folder. If you find S2S leftovers outside this
+  folder, move them into `local/` and say so rather than leaving them.
 - Account for every saved playlist track through import history, including unresolved, unselected, excluded, queued, failed, and missing-file cases. Report current transfer counts by latest approval per track; replacement attempts are not additional playlist tracks. Exporting outstanding titles must remain an explicit local action.
 - A historical import record alone must not suppress searching: the recorded final file must still exist in the chosen destination. Keep confirmation navigation stable, discard stale background callbacks after selection/navigation changes, and require explicit approval for replacement downloads.
 - Update local `HANDOFF.md` as work progresses and at the end of each development turn, including test results, uncommitted work, and remaining limits. Do not publish that file or private playlist data.

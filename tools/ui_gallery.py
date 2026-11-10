@@ -220,7 +220,7 @@ def capture(output, scenarios, sizes, dark=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path('build/ui-gallery'))
+    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1] / 'build' / 'ui-gallery')
     parser.add_argument('--scenario', action='append', choices=SCENARIOS)
     parser.add_argument('--size', action='append', help='Requested WIDTHxHEIGHT; Qt minimum sizes may enlarge it')
     parser.add_argument('--theme', choices=('dark', 'light'), default='dark', help='Colour scheme to render (default: dark)')
