@@ -1,6 +1,10 @@
 ## What's changed
 
-- **Home redesign.** Reopen unfinished transfers from Home and see their progress at a glance.
+- **Step bar.** The six playlist steps run along the top of each transfer page, so you can see where you are and go back.
+- **Transfers on Home.** Reopen unfinished transfers from Home, including one you are still searching, and see their progress.
+- **Several transfers at once.** Start another playlist while others download. Searches share one allowance, and a notice tells you when it slows a new search.
+- **Update time.** The update window now says how long an update should take.
+- **Home redesign.** A larger heading, a playlist carousel and page headers that say what each page is for.
 - **Recently imported playlists.** Open a downloaded tracklist directly from its carousel tile.
 - **Steadier sidebar.** Navigation sizes and padding stay fixed while resizing.
 - **GitHub sign-in.** The popup closes once Preview is available and explains denied access or verification errors.
