@@ -225,7 +225,7 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     existing = app.styleSheet().replace(previous, "") if previous else app.styleSheet()
     c = colors
     display = display_font_family()
-    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#sectionTitle, QLabel#settingsPageTitle {{ font-family: "{display}"; }}' + chr(10)
+    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#homePageTitle, QLabel#sectionTitle, QLabel#settingsPageTitle {{ font-family: "{display}"; }}' + chr(10)
                      if display else "")
     stylesheet = display_rules + f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}
@@ -249,6 +249,7 @@ QListWidget#stepList::item:selected {{ background: {c['selection']}; color: {c['
 QListWidget#stepList::item:disabled {{ color: {c['disabled']}; }}
 QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
 QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
+QLabel#homePageTitle {{ font-size: 38px; font-weight: 600; padding: 0 0 5px; }}
 QLabel#sectionTitle {{ font-size: 17px; font-weight: 600; }}
 QLabel#reportFieldLabel {{ font-weight: 600; }}
 QLabel#historyDetailTitle {{ font-weight: 600; margin-top: 6px; }}
@@ -264,6 +265,14 @@ QScrollArea#reportScroll {{ background: transparent; border: none; }}
 QFrame#reportFooter {{ border: none; border-top: 1px solid {c['border']}; }}
 QLabel#mutedText {{ color: {c['muted']}; }}
 QFrame#homeActionPanel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; }}
+QFrame#homeRecentShelf, QFrame#homeWorkflowPanel {{
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 {c['panel']}, stop: 1 {c['side']});
+    border: 1px solid {c['border']}; border-radius: 12px;
+}}
+QScrollArea#homeRecentScroll, QWidget#homeRecentViewport, QWidget#homeRecentRow {{
+    background: transparent; border: none;
+}}
+QScrollArea#homePageScroll, QWidget#homePageBody {{ background: {c['window']}; border: none; }}
 QFrame#searchControls {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 10px; }}
 QLabel#resultSummary {{ font-weight: 600; }}
 QWidget#pageFooter {{ border-top: 1px solid {c['border']}; }}

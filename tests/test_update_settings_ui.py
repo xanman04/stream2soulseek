@@ -92,23 +92,52 @@ def test_cancelled_sign_in_never_persists_late_token(monkeypatch):
     dialog.reject()
     queued[0][1](client.start_sign_in())  # late device-start response is ignored
     dialog._polled("late-token")
+    assert len(queued) == 1
     assert client.secrets.get(SPONSOR_GITHUB_TOKEN) is None
     dialog.deleteLater()
 
 
-def test_cancellation_during_verification_does_not_save_credentials(monkeypatch):
+def test_ineligible_account_keeps_sign_in_dialog_open(monkeypatch):
+    monkeypatch.setattr(workers, "RUN_INLINE", True)
+    client = FakeClient()
+    client.start_sign_in = lambda: DeviceSignIn("device", "client", "code", "https://github.com/login/device",
+        time.time() + 900, 5)
+    client.entitlement = lambda **kwargs: {"login": "tester", "allowed": False}
+    dialog = SponsorSignInDialog(client)
+    finished = []
+    dialog.finished.connect(finished.append)
+    dialog._polled("synthetic-token")
+    assert not finished
+    assert "active monthly sponsorship" in dialog.message.text()
+    assert client.secrets.get(SPONSOR_GITHUB_TOKEN) is None
+    dialog.reject()
+    dialog.deleteLater()
+
+
+def test_connect_enables_preview_before_closing_sign_in_dialog(monkeypatch):
     queued = []
     monkeypatch.setattr("s2s.ui.update_settings.run_async", lambda owner, work, done, failed: queued.append((work, done)))
     client = FakeClient()
     client.start_sign_in = lambda: None
     client.entitlement = lambda **kwargs: {"login": "tester", "allowed": True, "checked_at": time.time()}
-    dialog = SponsorSignInDialog(client)
-    dialog._polled("synthetic-token")
-    dialog.reject()
-    work, done = queued[-1]
-    done(work())
-    assert client.secrets.get(SPONSOR_GITHUB_TOKEN) is None
-    dialog.deleteLater()
+    widget = UpdateSettingsWidget(SimpleNamespace(settings=Settings()), client=client)
+    enabled_at_close = []
+
+    def exec_sign_in(dialog):
+        dialog.finished.connect(lambda _: enabled_at_close.append(widget.channel.model().item(1).isEnabled()))
+        dialog._polled("synthetic-token")
+        assert not widget.channel.model().item(1).isEnabled()
+        assert not enabled_at_close
+        work, done = queued.pop()
+        done(work())
+        return dialog.result()
+
+    monkeypatch.setattr(SponsorSignInDialog, "exec", exec_sign_in)
+    widget.connect_account()
+    assert client.secrets.get(SPONSOR_GITHUB_TOKEN) == "synthetic-token"
+    assert enabled_at_close == [True]
+    assert widget.selected_channel() == "stable"
+    widget.deleteLater()
 
 
 def test_expired_cache_preserves_existing_preview_choice_and_stable_can_be_selected():

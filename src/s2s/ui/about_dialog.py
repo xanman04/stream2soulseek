@@ -1,4 +1,4 @@
-"""About S2S: version, licence, third-party notices and the plain disclaimers."""
+"""About S2S: version, license, third-party notices and the plain disclaimers."""
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -33,7 +33,7 @@ class AboutDialog(QDialog):
             "S2S is not affiliated with or endorsed by Soulseek, slskd, Apple, Spotify or SoundCloud. You are "
             "responsible for following the rules of those services and for having the right to download and keep "
             "the music you fetch.<br><br>"
-            f'<a href="{SOURCE_URL}">Source code</a> · <a href="{LICENSE_URL}">Licence</a> · '
+            f'<a href="{SOURCE_URL}">Source code</a> · <a href="{LICENSE_URL}">License</a> · '
             f'<a href="{NOTICES_URL}">Third-party software</a>')
         body.setWordWrap(True)
         body.setMinimumWidth(460)
@@ -42,7 +42,7 @@ class AboutDialog(QDialog):
         layout.addWidget(body)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        self.licenses_btn = QPushButton("Open licence files")
+        self.licenses_btn = QPushButton("Open license files")
         self.licenses_btn.clicked.connect(self._open_licenses)
         buttons.addButton(self.licenses_btn, QDialogButtonBox.ButtonRole.ActionRole)
         self.licenses_btn.setVisible(bundled_licenses_dir() is not None)  # after addButton, which shows it

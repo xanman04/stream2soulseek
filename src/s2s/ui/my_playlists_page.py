@@ -160,7 +160,7 @@ class MyPlaylistsPage(QWidget):
         self.folders.clear()
         seen = set()
         existing = []
-        selected_row = 0
+        selected_row = -1 if select else 0
         for path in paths:
             if not path:
                 continue
@@ -196,6 +196,10 @@ class MyPlaylistsPage(QWidget):
 
             run_async(self, scan_all)
         self._load_folder()
+        if select and selected_row == -1:
+            self.folder_name.setText("Tracklist folder unavailable")
+            self.folder_path.setText(select)
+            self.stats.setText("Choose another folder from the list or add it again if it moved.")
 
     def _add_folder(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Add a tracklist folder", self._selected_path() or "")

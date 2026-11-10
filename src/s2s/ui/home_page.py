@@ -5,14 +5,15 @@ from __future__ import annotations
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QBoxLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QApplication, QBoxLayout, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from .context import AppContext
 from ..track_search import STANDALONE_PREFIX
 from .workers import run_async
 from . import theme
-from .icons import set_icon
+from .icons import icon, set_icon
 from .service_identity import BRANDS, logo_renderer
 
 
@@ -29,13 +30,13 @@ class _RecentPlaylistButton(QPushButton):
         self.record, self.count = record, count
         self._service = _provider(record.playlist_id)
         self._logo = logo_renderer(self._service)
-        self.setAccessibleName(f"Open recently used playlist {record.playlist_name}")
-        self.setFixedSize(184, 264)
+        self.setAccessibleName(f"Open recently imported playlist {record.playlist_name}")
+        self.setFixedSize(self.sizeHint())
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def sizeHint(self):  # noqa: N802
-        return QSize(184, 264)
+        return QSize(184, 250)
 
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
@@ -51,24 +52,59 @@ class _RecentPlaylistButton(QPushButton):
         p.drawRoundedRect(tile, 10, 10)
         p.setBrush(wash)
         p.drawRoundedRect(tile, 10, 10)
-        edge = QColor(brand)
-        edge.setAlpha(110 if self.hasFocus() else 60)
         p.setBrush(Qt.BrushStyle.NoBrush)
+        groove = QColor(brand)
+        groove.setAlpha(36 if self.underMouse() else 24)
+        p.setPen(QPen(groove, 1))
+        for radius in (46, 53, 60, 67, 74, 81):
+            p.drawEllipse(tile.center(), radius, radius)
+        edge = QColor(colors.get("focus", self.palette().color(QPalette.ColorRole.Highlight).name()))
+        if not self.hasFocus():
+            edge = QColor(brand)
+            edge.setAlpha(60)
         p.setPen(QPen(edge, 1.5 if self.hasFocus() else 1))
         p.drawRoundedRect(tile.adjusted(0.5, 0.5, -0.5, -0.5), 10, 10)
-        self._logo.render(p, QRectF(54, 54, 80, 80))
+        self._logo.render(p, QRectF(60, 60, 64, 64))
         font = QFont(self.font())
-        font.setWeight(QFont.Weight.Medium)
+        font.setWeight(QFont.Weight.DemiBold)
         p.setFont(font)
         p.setPen(QColor(colors.get("text", self.palette().color(QPalette.ColorRole.Text).name())))
-        p.drawText(QRectF(2, 191, self.width() - 4, 40), Qt.AlignmentFlag.AlignLeft |
+        p.drawText(QRectF(2, 192, self.width() - 4, 35), Qt.AlignmentFlag.AlignLeft |
                    Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap, self.record.playlist_name)
         service = BRANDS[self._service][0]
         p.setPen(QColor(colors.get("muted", self.palette().color(QPalette.ColorRole.PlaceholderText).name())))
         font.setPointSizeF(max(9, font.pointSizeF() - 1))
+        font.setWeight(QFont.Weight.Normal)
         p.setFont(font)
         subtitle = service + (f" · {self.count} tracks" if self.count is not None else "")
-        p.drawText(QRectF(2, 238, self.width() - 4, 22), Qt.AlignmentFlag.AlignLeft, subtitle)
+        p.drawText(QRectF(2, 227, self.width() - 4, 22), Qt.AlignmentFlag.AlignLeft, subtitle)
+
+
+class _ActionArtwork(QWidget):
+    """Quiet line art beside the Home actions, drawn in the current theme."""
+
+    def __init__(self, action: str):
+        super().__init__()
+        self.action = action
+        self.setFixedSize(148, 154)
+        self.hide()
+
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        accent = self.palette().color(QPalette.ColorRole.Link)
+        accent.setAlpha(65)
+        painter.setPen(QPen(accent, 1))
+        if self.action == "playlist":
+            for offset in (18, 9, 0):
+                painter.drawRoundedRect(QRectF(24 + offset, 29 - offset, 86, 96), 12, 12)
+            bounds = QRectF(45, 55, 44, 44)
+        else:
+            center = QRectF(self.rect()).center()
+            for radius in (30, 43, 56, 69):
+                painter.drawEllipse(center, radius, radius)
+            bounds = QRectF(52, 55, 44, 44)
+        icon(self.action, 36).paint(painter, bounds.toRect())
 
 
 class HomePage(QWidget):
@@ -76,6 +112,8 @@ class HomePage(QWidget):
     quick_search_requested = Signal()
     free_search_requested = Signal()
     recent_requested = Signal(str)
+    transfer_requested = Signal(str)
+    history_requested = Signal()
     welcome_dismissed = Signal()
     guide_requested = Signal()
 
@@ -85,17 +123,25 @@ class HomePage(QWidget):
         self._refresh_generation = 0
         self._imports = []
         self._counts = {}
+        self._in_progress = ()
 
-        root = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setObjectName("homePageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        page = QWidget()
+        page.setObjectName("homePageBody")
+        scroll.setWidget(page)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+        root = QVBoxLayout(page)
         root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(16)
 
         title = QLabel("Home")
-        title.setObjectName("pageTitle")
-        font = QFont(title.font())
-        font.setPointSizeF(font.pointSizeF() * 1.7)
-        font.setWeight(QFont.Weight.DemiBold)
-        title.setFont(font)
+        title.setObjectName("homePageTitle")
         root.addWidget(title)
 
         # Shown once, on a first launch (see MainWindow); hidden until then.
@@ -126,7 +172,14 @@ class HomePage(QWidget):
         self.welcome_done.clicked.connect(self._dismiss_welcome)
         self.welcome_guide.clicked.connect(self.guide_requested)
 
-        recent_heading = QLabel("Recently used playlists")
+        shelf = QFrame()
+        shelf.setObjectName("homeRecentShelf")
+        shelf_layout = QVBoxLayout(shelf)
+        shelf_layout.setContentsMargins(16, 12, 16, 12)
+        shelf_layout.setSpacing(12)
+        root.addWidget(shelf)
+
+        recent_heading = QLabel("Recently imported playlists")
         recent_heading.setObjectName("sectionTitle")
         head = QHBoxLayout()
         head.addWidget(recent_heading)
@@ -140,25 +193,29 @@ class HomePage(QWidget):
             button.setFixedSize(34, 32)
         head.addWidget(self.previous_button)
         head.addWidget(self.next_button)
-        root.addLayout(head)
+        shelf_layout.addLayout(head)
         self.recent_status = QLabel("Loading recent playlists…")
         self.recent_status.setObjectName("mutedText")
         self.recent_status.setWordWrap(True)
-        root.addWidget(self.recent_status)
+        shelf_layout.addWidget(self.recent_status)
         self.recent_scroll = QScrollArea()
+        self.recent_scroll.setObjectName("homeRecentScroll")
+        self.recent_scroll.viewport().setObjectName("homeRecentViewport")
         self.recent_scroll.setWidgetResizable(True)
         self.recent_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.recent_row = QWidget()
+        self.recent_row.setObjectName("homeRecentRow")
         self.recent_row.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         self.recent_layout = QHBoxLayout(self.recent_row)
         self.recent_layout.setContentsMargins(0, 0, 0, 0)
         self.recent_layout.setSpacing(14)
         self.recent_layout.addStretch(1)
         self.recent_scroll.setWidget(self.recent_row)
-        self.recent_scroll.setFixedHeight(282)
-        root.addWidget(self.recent_scroll)
+        self.recent_scroll.setFixedHeight(266)
+        self.recent_scroll.hide()
+        shelf_layout.addWidget(self.recent_scroll)
         bar = self.recent_scroll.horizontalScrollBar()
         self.previous_button.clicked.connect(lambda: bar.setValue(bar.value() - self.recent_scroll.viewport().width()))
         self.next_button.clicked.connect(lambda: bar.setValue(bar.value() + self.recent_scroll.viewport().width()))
@@ -169,15 +226,18 @@ class HomePage(QWidget):
         self.empty_action.setAccessibleName("Browse playlists")
         self.empty_action.setVisible(False)
         self.empty_action.clicked.connect(self.playlist_requested)
-        root.addWidget(self.empty_action, 0, Qt.AlignmentFlag.AlignLeft)
+        shelf_layout.addWidget(self.empty_action, 0, Qt.AlignmentFlag.AlignLeft)
+        self.previous_button.hide()
+        self.next_button.hide()
 
         actions = self.actions = QHBoxLayout()
         actions.setSpacing(18)
         self.choose_panel = self._action_panel(
-            "Transfer a playlist", "Choose a connected playlist and review its matches before downloading.", "Choose playlist"
+            "Transfer a playlist", "Choose a connected playlist and review its matches before downloading.",
+            "Choose playlist", "playlist"
         )
         self.find_panel = self._action_panel(
-            "Find a track", "Match a title and artist, or search Soulseek freely in your own words.", ""
+            "Find a track", "Match a title and artist, or search Soulseek freely in your own words.", "", "search"
         )
         self.choose_button = self.choose_panel.findChild(QPushButton)
         self.quick_button = QPushButton("Quick search")
@@ -189,7 +249,38 @@ class HomePage(QWidget):
         actions.addWidget(self.choose_panel, 1)
         actions.addWidget(self.find_panel, 1)
         root.addLayout(actions)
-        root.addStretch(1)
+
+        self.progress_panel = QFrame()
+        self.progress_panel.setObjectName("homeWorkflowPanel")
+        progress_layout = QVBoxLayout(self.progress_panel)
+        progress_layout.setContentsMargins(16, 12, 16, 12)
+        progress_heading = QLabel("In progress")
+        progress_heading.setObjectName("sectionTitle")
+        progress_header = QHBoxLayout()
+        progress_header.addWidget(progress_heading)
+        progress_header.addStretch()
+        history_button = QPushButton("Transfer history")
+        history_button.clicked.connect(self.history_requested)
+        progress_header.addWidget(history_button)
+        progress_layout.addLayout(progress_header)
+        self.progress_rows = QVBoxLayout()
+        progress_layout.addLayout(self.progress_rows)
+        self.progress_empty = QWidget()
+        empty_layout = QVBoxLayout(self.progress_empty)
+        empty_layout.setContentsMargins(0, 18, 0, 18)
+        empty_layout.setSpacing(6)
+        empty_layout.addStretch()
+        empty_title = QLabel("No transfers in progress")
+        empty_title.setObjectName("sectionTitle")
+        empty_help = theme.subtle(QLabel("Downloads and transfers that need attention will appear here."))
+        for label in (empty_title, empty_help):
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            empty_layout.addWidget(label)
+        empty_layout.addStretch()
+        progress_layout.addWidget(self.progress_empty, 1)
+        progress_layout.addStretch()
+        root.addWidget(self.progress_panel, 1)
 
         self.choose_button.clicked.connect(self.playlist_requested)
         self.quick_button.clicked.connect(self.quick_search_requested)
@@ -209,13 +300,16 @@ class HomePage(QWidget):
         self.welcome_dismissed.emit()
 
     @staticmethod
-    def _action_panel(title: str, description: str, button_text: str) -> QFrame:
+    def _action_panel(title: str, description: str, button_text: str, action: str) -> QFrame:
         panel = QFrame()
-        panel.setObjectName("homeActionPanel")
+        panel.setObjectName("homeWorkflowPanel")
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(18, 16, 18, 16)
+        body = QHBoxLayout(panel)
+        body.setContentsMargins(18, 16, 18, 16)
+        body.setSpacing(14)
+        layout = QVBoxLayout()
         layout.setSpacing(10)
+        layout.addStretch()
         heading = QLabel(title)
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
@@ -233,6 +327,9 @@ class HomePage(QWidget):
             row_layout.addWidget(button)
         row_layout.addStretch(1)
         layout.addWidget(row)
+        layout.addStretch()
+        body.addLayout(layout, 1)
+        body.addWidget(_ActionArtwork(action))
         return panel
 
     def refresh(self) -> None:
@@ -243,30 +340,23 @@ class HomePage(QWidget):
         self.empty_action.setVisible(False)
 
         def work():
-            imports = self.ctx.store.list_imports()
-            loader = getattr(self.ctx.store, "load_tracks", None)
-            counts = {r.id: len(loader(r.id)) for r in imports[:24]} if callable(loader) else {}
+            store = self.ctx.store
+            imports = store.recent_imported_playlists(exclude_prefix=STANDALONE_PREFIX, limit=8)
+            counts = {r.id: len(store.load_tracks(r.id)) for r in imports}
             return imports, counts
 
         def loaded(payload) -> None:
             if generation != self._refresh_generation:
                 return
-            imports, self._counts = payload
-            seen = set()
-            self._imports = []
-            for record in imports or []:
-                if str(record.playlist_id).startswith(STANDALONE_PREFIX) or record.playlist_id in seen:
-                    continue
-                seen.add(record.playlist_id)
-                self._imports.append(record)
+            self._imports, self._counts = payload
             self._render_recent()
 
         def failed(_exc) -> None:
             if generation != self._refresh_generation:
                 return
             self._imports = []
+            self._render_recent()
             self.recent_status.setText("Recent playlists could not be loaded. You can still browse your playlists.")
-            self.empty_action.setVisible(True)
 
         run_async(self, work, loaded, failed)
 
@@ -292,11 +382,48 @@ class HomePage(QWidget):
         for record in self._imports[:8]:
             button = _RecentPlaylistButton(record, self._counts.get(record.id))
             button.setObjectName("recentPlaylist")
-            button.setAccessibleName(f"Open recently used playlist {record.playlist_name}")
-            button.clicked.connect(lambda _checked=False, iid=record.id: self.recent_requested.emit(iid))
+            button.clicked.connect(lambda _checked=False, path=record.destination: self.recent_requested.emit(path))
             self.recent_layout.addWidget(button)
         self.recent_layout.addStretch(1)
         self._update_arrows()
+
+    def set_transfer_sessions(self, summaries) -> None:
+        visible = tuple(s for s in summaries if s.incomplete)[:3]
+        if visible == self._in_progress:
+            return
+        self._in_progress = visible
+        while self.progress_rows.count():
+            row = self.progress_rows.takeAt(0).widget()
+            row.hide()
+            row.deleteLater()
+        for session in visible:
+            row = QWidget()
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            details = QVBoxLayout()
+            details.setSpacing(3)
+            name = QLabel(session.playlist_name)
+            name.setTextFormat(Qt.TextFormat.PlainText)
+            name.setWordWrap(True)
+            details.addWidget(name)
+            status = QLabel(f"{session.finished}/{session.total} imported · {session.status}")
+            status.setObjectName("mutedText")
+            status.setWordWrap(True)
+            details.addWidget(status)
+            bar = QProgressBar()
+            bar.setRange(0, session.total)
+            bar.setValue(session.finished)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(8)
+            bar.setAccessibleName(f"Import progress for {session.playlist_name}")
+            details.addWidget(bar)
+            layout.addLayout(details, 1)
+            button = QPushButton("Open transfer")
+            button.setAccessibleName(f"Open transfer for {session.playlist_name}")
+            button.clicked.connect(lambda _checked=False, iid=session.import_id: self.transfer_requested.emit(iid))
+            layout.addWidget(button)
+            self.progress_rows.addWidget(row)
+        self.progress_empty.setVisible(not visible)
 
     def _update_arrows(self):
         bar = self.recent_scroll.horizontalScrollBar()
@@ -305,5 +432,8 @@ class HomePage(QWidget):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        self.actions.setDirection(QBoxLayout.Direction.TopToBottom if self.width() < 620 else QBoxLayout.Direction.LeftToRight)
+        stacked = self.width() < 620
+        self.actions.setDirection(QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight)
+        for art in self.findChildren(_ActionArtwork):
+            art.setVisible(self.width() >= 1020)
 

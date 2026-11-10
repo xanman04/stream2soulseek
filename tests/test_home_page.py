@@ -20,7 +20,7 @@ class _Store:
         self.imports = list(imports)
         self.error = error
 
-    def list_imports(self):
+    def recent_imported_playlists(self, **_kwargs):
         if self.error:
             raise self.error
         return self.imports
@@ -30,13 +30,23 @@ def _context(store):
     return AppContext(store=store, secrets=None, settings=None)
 
 
-def test_home_shows_real_recent_imports_and_emits_import_id(qapp, monkeypatch):
-    from s2s.store import ImportRecord
+def test_home_shows_only_playlists_with_copied_tracks(qapp, monkeypatch, tmp_path):
+    from s2s.models import ImportOutcome, ImportResult, Playlist
+    from s2s.store import Store
 
     monkeypatch.setattr(workers, "RUN_INLINE", True)
-    playlist = ImportRecord("real-id", "apple:42", "Night drive", "C:/Library/House", "2026-01-01T00:00:00Z")
-    standalone = ImportRecord("manual-id", "s2s:standalone:quick:1", "Song", "C:/Library/House", "2026-01-02T00:00:00Z")
-    page = HomePage(_context(_Store([standalone, playlist])))
+    store = Store(tmp_path / "home.sqlite3")
+    destination = str(tmp_path)
+    playlist = Playlist("apple:42", "Night drive")
+    imported = store.create_import(playlist, destination)
+    store.create_import(playlist, destination)  # a newer search must not displace the completed import
+    standalone = store.create_import(Playlist("s2s:standalone:quick:1", "Song"), destination)
+    skipped = store.create_import(Playlist("apple:99", "Already present"), destination)
+    for iid in (imported, standalone):
+        store.record_import_result(iid, ImportResult("track", ImportOutcome.COPIED, None, destination + "/track.mp3"))
+    store.record_import_result(skipped, ImportResult("track", ImportOutcome.ALREADY_PRESENT, None,
+                                                     destination + "/track.mp3"))
+    page = HomePage(_context(store))
     opened = []
     page.recent_requested.connect(opened.append)
 
@@ -46,8 +56,34 @@ def test_home_shows_real_recent_imports_and_emits_import_id(qapp, monkeypatch):
     assert "Night drive" in button.text()
     assert button.toolTip() == ""
     button.click()
-    assert opened == ["real-id"]
+    assert opened == [destination]
 
+    page.deleteLater()
+    store.close()
+
+
+def test_home_progress_opens_unfinished_transfer_and_shows_empty_message_when_complete(qapp, monkeypatch):
+    from dataclasses import replace
+    from PySide6.QtWidgets import QProgressBar, QPushButton
+    from s2s.transfer_sessions import TransferSession
+
+    monkeypatch.setattr(workers, "RUN_INLINE", True)
+    page = HomePage(_context(_Store()))
+    session = TransferSession("saved", "Night drive", "library", 3, 2, 1, 0, 0, 0, 0)
+    assert not page.progress_panel.isHidden()
+    assert not page.progress_empty.isHidden()
+    page.set_transfer_sessions([session])
+    assert not page.progress_panel.isHidden()
+    assert page.progress_empty.isHidden()
+    assert page.progress_panel.findChild(QProgressBar).value() == 2
+    opened = []
+    page.transfer_requested.connect(opened.append)
+    row = page.progress_rows.itemAt(0).widget()
+    row.findChild(QPushButton).click()
+    assert opened == ["saved"]
+    page.set_transfer_sessions([replace(session, finished=3, waiting=0)])
+    assert not page.progress_panel.isHidden()
+    assert not page.progress_empty.isHidden()
     page.deleteLater()
 
 

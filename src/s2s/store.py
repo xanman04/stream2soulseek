@@ -355,6 +355,29 @@ class Store:
             rows = self._conn.execute("SELECT * FROM imports ORDER BY created_at DESC, rowid DESC").fetchall()
         return [ImportRecord(**dict(r)) for r in rows]
 
+    def recent_imported_playlists(self, *, exclude_prefix: str, limit: int) -> list[ImportRecord]:
+        """Return one session per playlist, ordered by its latest actual library addition."""
+        with self._lock:
+            rows = self._conn.execute("""
+                WITH copied AS (
+                    SELECT import_id, created_at FROM library_additions
+                    UNION ALL
+                    SELECT import_id, created_at FROM import_results
+                    WHERE outcome='copied' AND final_path IS NOT NULL
+                ), last_copy AS (
+                    SELECT import_id, MAX(created_at) AS copied_at FROM copied GROUP BY import_id
+                ), ranked AS (
+                    SELECT i.id, c.copied_at, ROW_NUMBER() OVER (
+                        PARTITION BY i.playlist_id ORDER BY c.copied_at DESC, i.rowid DESC
+                    ) AS rank
+                    FROM imports i JOIN last_copy c ON c.import_id=i.id
+                    WHERE i.playlist_id NOT LIKE ?
+                )
+                SELECT i.* FROM ranked r JOIN imports i ON i.id=r.id
+                WHERE r.rank=1 ORDER BY r.copied_at DESC, i.rowid DESC LIMIT ?
+                """, (exclude_prefix + "%", limit)).fetchall()
+        return [ImportRecord(**dict(r)) for r in rows]
+
     def _upsert_track(self, import_id: str, t: AppleTrack) -> None:
         self._conn.execute(
             "INSERT OR REPLACE INTO tracks VALUES (?,?,?,?,?,?,?,?)",

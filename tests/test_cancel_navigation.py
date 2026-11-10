@@ -124,18 +124,12 @@ def test_failed_discarded_worker_takes_the_cancel_reset_path(win, monkeypatch, t
 
 def test_new_playlist_keeps_saved_sessions_and_background_monitor(win, tmp_path, monkeypatch):
     from s2s.models import Playlist
+    from s2s.transfer_sessions import TransferSession
 
     saved_id = win.ctx.store.create_import(Playlist("saved-1", "Earlier playlist"), str(tmp_path / "old-library"))
-    summary = type("Summary", (), {
-        "import_id": saved_id,
-        "playlist_name": "Earlier playlist",
-        "finished": 1,
-        "total": 2,
-        "folder_name": "old-library",
-        "unseen_added": 0,
-        "status": "Downloading",
-        "destination": str(tmp_path / "old-library"),
-    })()
+    summary = TransferSession(saved_id, "Earlier playlist", str(tmp_path / "old-library"),
+                              total=2, finished=1, waiting=0, downloading=1, attention=0,
+                              unseen_added=0, event_cursor=0)
     refreshes = []
     monkeypatch.setattr(win.transfer_monitor, "refresh", lambda: refreshes.append(True))
     win.transfer_monitor.start()

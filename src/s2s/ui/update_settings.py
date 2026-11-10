@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from PySide6.QtCore import QTimer, QUrl, Qt
+from PySide6.QtCore import QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QDialogButtonBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -16,11 +16,12 @@ from .workers import run_async
 
 
 class SponsorSignInDialog(QDialog):
+    access_verified = Signal(str, object)
+
     def __init__(self, client: SponsorClient, parent=None):
         super().__init__(parent)
         self.client = client
         self.session = None
-        self.result_info = None
         self._active = True
         self.setWindowTitle("Connect GitHub sponsor account")
         self.setMinimumWidth(460)
@@ -40,6 +41,7 @@ class SponsorSignInDialog(QDialog):
         lay.addWidget(buttons)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
+        self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self._poll)
         self.finished.connect(self._closed)
         # A persistent signal owner lets an in-flight HTTP request drain after the dialog closes.
@@ -58,8 +60,8 @@ class SponsorSignInDialog(QDialog):
         self.timer.start(session.interval * 1000)
 
     def _open(self):
-        if self.session:
-            QDesktopServices.openUrl(QUrl(self.session.verification_uri))
+        if self.session and QDesktopServices.openUrl(QUrl(self.session.verification_uri)):
+            self.message.setText("Approve S2S on GitHub to check your Preview access.")
 
     def _poll(self):
         if not self._active or self.session is None:
@@ -76,15 +78,20 @@ class SponsorSignInDialog(QDialog):
         if token is None:
             self.timer.start(self.session.interval * 1000)
             return
-        self.message.setText("Checking your sponsorship…")
+        self.message.setText("GitHub sign-in complete. Checking Preview access…")
+        self.code.clear()
+        self.open_button.setEnabled(False)
         client = self.client
 
         def verified(info):
             if not self._active:
                 return
-            client.secrets.set(SPONSOR_GITHUB_TOKEN, token)
-            client.secrets.set(SPONSOR_ENTITLEMENT, json.dumps(info))
-            self.result_info = info
+            if info.get("allowed") is not True:
+                self.message.setText(
+                    f"GitHub confirmed sign-in as {info['login']}. An active monthly sponsorship is needed for Preview."
+                )
+                return
+            self.access_verified.emit(token, info)
             self.accept()
 
         run_async(QApplication.instance(), lambda: client.entitlement(token=token, cache=False), verified, self._failed)
@@ -199,10 +206,18 @@ class UpdateSettingsWidget(QWidget):
         previous = self.channel.currentData()
         self._account_generation += 1  # in-flight refreshes belong to the old account
         dialog = SponsorSignInDialog(self.client, self)
-        if dialog.exec() and dialog.result_info:
-            self._denied = dialog.result_info.get("allowed") is not True
-            self.refresh(dialog.result_info)
-        else:
+
+        def connected(token, info):
+            self.client.secrets.delete(SPONSOR_ENTITLEMENT)
+            self.client.secrets.set(SPONSOR_GITHUB_TOKEN, token)
+            self.client.secrets.set(SPONSOR_ENTITLEMENT, json.dumps(info))
+            self._denied = False
+            self.refresh(info)
+            if previous == "preview":
+                self.channel.setCurrentIndex(1)
+
+        dialog.access_verified.connect(connected)
+        if not dialog.exec():
             self.refresh()
             if previous == "preview" and self._saved_channel == "preview" and not self._denied:
                 self.channel.setCurrentIndex(1)

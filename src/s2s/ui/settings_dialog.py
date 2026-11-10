@@ -7,8 +7,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPlainTextEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMenu, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
@@ -43,15 +43,20 @@ class SettingsDialog(QDialog):
         self.url = QLineEdit(s.slskd_url)
         self.downloads = QLineEdit(s.slskd_downloads_dir)
         self.downloads.setPlaceholderText("Incoming downloads, kept in user/album folders")
-        self.reuse_folders = QPlainTextEdit("\n".join(s.local_reuse_folders))
-        self.reuse_folders.setPlaceholderText("One folder per line")
-        self.reuse_folders.setFixedHeight(84)
+        self.reuse_folders = QListWidget()
+        self.reuse_folders.setAccessibleName("Other download folders")
+        self.reuse_folders.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.reuse_folders.setMaximumHeight(120)
+        self.reuse_folders.addItems(s.local_reuse_folders)
+        self.reuse_folders.setVisible(bool(self.reuse_folders.count()))
+        self.reuse_folders.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.reuse_folders.customContextMenuRequested.connect(self._reuse_folder_menu)
         add_reuse = QPushButton("Add folder…")
         add_reuse.clicked.connect(self._add_reuse_folder)
         self.archive = QLineEdit(s.archive_dir_name)
         self.auto_import = QCheckBox("Import finished downloads and archive each peer folder automatically")
         self.auto_import.setChecked(bool(s.auto_import))
-        self.close_to_tray = QCheckBox("Closing the window (X) keeps S2S running in the system tray")
+        self.close_to_tray = QCheckBox("Closing the window keeps S2S running in the system tray")
         self.close_to_tray.setChecked(bool(s.close_to_tray))
         self.ffprobe = QLineEdit(s.ffprobe_path)
         self.timeout = settings_layout.SliderField()
@@ -101,9 +106,9 @@ class SettingsDialog(QDialog):
         lay.addWidget(settings_layout.field("Soulseek download folder", self._with_browse(self.downloads, True)))
         lay.addWidget(self.folder_help)
         lay.addWidget(settings_layout.field(
-            "Other download folders", self.reuse_folders,
+            "Other download folders", settings_layout.row(add_reuse),
             "Scan these folders for completed downloads before searching Soulseek."))
-        lay.addWidget(settings_layout.row(add_reuse))
+        lay.addWidget(self.reuse_folders)
         lay.addWidget(settings_layout.field("Originals archive subfolder", self.archive))
         lay = advanced.section("Tools")
         lay.addWidget(settings_layout.field("ffprobe path", self._with_browse(self.ffprobe, False)))
@@ -260,13 +265,25 @@ class SettingsDialog(QDialog):
 
     def _add_reuse_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose a completed download folder")
-        if folder:
-            self.reuse_folders.appendPlainText(folder)
+        if folder and all(Path(folder) != Path(self.reuse_folders.item(row).text())
+                          for row in range(self.reuse_folders.count())):
+            self.reuse_folders.addItem(str(Path(folder)))
+            self.reuse_folders.show()
+
+    def _reuse_folder_menu(self, position) -> None:
+        item = self.reuse_folders.itemAt(position)
+        if item is None:
+            return
+        menu = QMenu(self.reuse_folders)
+        remove = menu.addAction("Remove folder")
+        if menu.exec(self.reuse_folders.viewport().mapToGlobal(position)) == remove:
+            self.reuse_folders.takeItem(self.reuse_folders.row(item))
+            self.reuse_folders.setVisible(bool(self.reuse_folders.count()))
 
     def save(self) -> None:
         try:
             downloads = self.downloads.text().strip()
-            folders = [line.strip() for line in self.reuse_folders.toPlainText().splitlines() if line.strip()]
+            folders = [self.reuse_folders.item(row).text() for row in range(self.reuse_folders.count())]
             previous = self.ctx.settings.slskd_downloads_dir
             if previous and Path(previous) != Path(downloads):
                 folders.append(previous)

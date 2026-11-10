@@ -191,7 +191,9 @@ class MainWindow(QMainWindow):
         self.home.guide_requested.connect(lambda: QDesktopServices.openUrl(QUrl(USER_GUIDE_URL)))
         self.home.quick_search_requested.connect(lambda: self.open_track_search("quick"))
         self.home.free_search_requested.connect(lambda: self.open_track_search("free"))
-        self.home.recent_requested.connect(self.resume_import)
+        self.home.recent_requested.connect(self.show_my_playlists)
+        self.home.transfer_requested.connect(self.resume_import)
+        self.home.history_requested.connect(self.open_history)
         self.track_search.download_requested.connect(self.review_individual_download)
         self.track_search.search_cancelled.connect(self.show_home)
         # Review has no Next: "Confirm selection" is the only way on (it opens Downloads by itself).
@@ -326,7 +328,7 @@ class MainWindow(QMainWindow):
         self.sidebar.show_track_search()
         self._park_confirmed_transfer()
 
-    def show_my_playlists(self) -> None:
+    def show_my_playlists(self, folder: str | None = None) -> None:
         if self._closing or self._queueing:
             self.sidebar.my_playlists_btn.setChecked(self.stack.currentWidget() is self.my_playlists)
             return
@@ -334,7 +336,7 @@ class MainWindow(QMainWindow):
         self.spotify_service.leave()
         self.soundcloud_service.leave()
         self.transfers.stop()
-        self.my_playlists.refresh(recheck=True)
+        self.my_playlists.refresh(select=folder, recheck=True)
         self.stack.setCurrentWidget(self.my_playlists)
         self.sidebar.show_my_playlists()
         self._park_confirmed_transfer()
@@ -494,8 +496,13 @@ class MainWindow(QMainWindow):
             self.transfer_monitor.refresh()
 
     def _transfer_sessions_changed(self, summaries) -> None:
+        additions = any(s.event_cursor > getattr(self._session_snapshots.get(s.import_id), "event_cursor", 0)
+                        for s in summaries)
         self._session_snapshots = {s.import_id: s for s in summaries}
         self.sidebar.set_transfer_sessions(summaries, self.ctx.import_id)
+        self.home.set_transfer_sessions(summaries)
+        if additions and self.stack.currentWidget() is self.home:
+            self.home.refresh()
 
     def _open_service(self, key: str = APPLE_KEY) -> None:
         if self._queueing or self._closing:

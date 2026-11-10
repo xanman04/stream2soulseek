@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QStyle,
@@ -29,16 +29,16 @@ SERVICES = [
 ]
 
 STEP_HEIGHT = 34
-SERVICE_HEIGHT = 44
+SERVICE_HEIGHT = 38
 TRANSFER_HEIGHT = 68  # a saved session: three lines and a progress line
 TRANSFER_ROWS_SHOWN = 2  # whole rows only; more sessions scroll inside the panel instead of pushing the groups below
 # The sidebar never scrolls. When the window is too short for everything, it steps down this ladder until it fits:
-# tighter rows, then one saved transfer as a single line, then the playlist steps in a menu instead of a list.
+# Fewer saved transfers, then a compact transfer summary, then the workflow steps in a menu.
 _MODES = (
-    dict(step=34, service=44, transfers=2, compact=False, gap=8, popup=False),
-    dict(step=31, service=38, transfers=1, compact=False, gap=6, popup=False),
-    dict(step=28, service=34, transfers=1, compact=True, gap=5, popup=False),
-    dict(step=28, service=34, transfers=1, compact=True, gap=4, popup=True),
+    dict(transfers=2, compact=False, popup=False),
+    dict(transfers=1, compact=False, popup=False),
+    dict(transfers=1, compact=True, popup=False),
+    dict(transfers=1, compact=True, popup=True),
 )
 TRANSFER_COMPACT_HEIGHT = 34
 _STEP_TEXT = re.compile(r"^(✓ )?(\d+)\. (.*)$")
@@ -473,6 +473,8 @@ class Sidebar(QWidget):
         self._connection_layout.addWidget(self.soulseek_btn)
 
         lay = self._lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
         for widget in (brand, self.home_btn, self.workflow_toggle, steps_card, self.track_search_btn,
                        self.my_playlists_btn, self.history_btn, self.transfer_panel):
@@ -486,6 +488,7 @@ class Sidebar(QWidget):
         self._steps_menu_mode = False
         self._min_height = 0
         self._fitting = False
+        self._mode_heights = ()
         self._apply_mode(len(_MODES) - 1)
         self._invalidate()
         self._min_height = lay.totalMinimumSize().height()  # what the tightest layout needs
@@ -522,32 +525,45 @@ class Sidebar(QWidget):
         super().showEvent(event)
         self._fit()
 
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._mode_heights = ()
+
     def _fit(self) -> None:
         """Use the roomiest layout that fits the height we have. Nothing ever scrolls."""
-        if self._fitting:
-            return
-        if not self.isVisible():  # not on screen yet (no real height to fit): the roomiest layout until it is shown
-            if self._mode != 0:
-                self._apply_mode(0)
+        if self._fitting or not self.isVisible():
             return
         self._fitting = True
         try:
-            chosen = len(_MODES) - 1
-            for mode in range(len(_MODES)):
-                self._apply_mode(mode)
-                # Choose a size that also fits the expanded workflow at this window height.
-                self._steps_card.setVisible(not self._steps_menu_mode)
-                self.steps.setVisible(not self._steps_menu_mode)
-                self._invalidate()  # the rows just changed height: measure the new layout, not the cached one
-                if self._lay.totalMinimumSize().height() <= self.height():
-                    chosen = mode
-                    break
-            else:
+            if not self._mode_heights:
+                self._measure_mode_heights()
+            chosen = next((mode for mode, height in enumerate(self._mode_heights) if height <= self.height()),
+                          len(_MODES) - 1)
+            if self._mode != chosen:
                 self._apply_mode(chosen)
         finally:
-            self._steps_card.setVisible(self._workflow_expanded and not self._steps_menu_mode)
-            self.steps.setVisible(self._workflow_expanded and not self._steps_menu_mode)
             self._fitting = False
+
+    def _measure_mode_heights(self) -> None:
+        """Measure the expanded workflow once per content change, without painting intermediate layouts."""
+        previous = self._mode
+        updates = self.updatesEnabled()
+        if updates:
+            self.setUpdatesEnabled(False)
+        try:
+            heights = []
+            for mode in range(len(_MODES)):
+                self._apply_mode(mode)
+                self._steps_card.setVisible(not self._steps_menu_mode)
+                self.steps.setVisible(not self._steps_menu_mode)
+                self._invalidate()
+                heights.append(self._lay.totalMinimumSize().height())
+            self._mode_heights = tuple(heights)
+        finally:
+            self._apply_mode(previous)
+            if updates:
+                self.setUpdatesEnabled(True)
 
     def _invalidate(self) -> None:
         """Forget every cached size (the cards' own layouts too) so the next measurement sees the new row heights."""
@@ -560,10 +576,8 @@ class Sidebar(QWidget):
     def _apply_mode(self, mode: int) -> None:
         self._mode = mode
         spec = _MODES[mode]
-        self._step_h, self._service_h, self._gap = spec["step"], spec["service"], spec["gap"]
         self._transfer_rows, self._transfer_compact = spec["transfers"], spec["compact"]
         self._steps_menu_mode = spec["popup"]
-        self._step_delegate.row_height, self._service_delegate.row_height = self._step_h, self._service_h
         self._apply_scale(1.0)
         self._steps_card.setVisible(self._workflow_expanded and not self._steps_menu_mode)
         self.steps.setVisible(self._workflow_expanded and not self._steps_menu_mode)
@@ -585,16 +599,13 @@ class Sidebar(QWidget):
         px = lambda base: max(1, round(base * scale))  # noqa: E731 - a measurement that grows with the sidebar
         for delegate in (self._step_delegate, self._service_delegate, self._transfer_delegate):
             delegate.scale = scale
-        pad = 14 if self._mode < 2 else 10
-        self._lay.setContentsMargins(px(pad), px(pad), px(pad), px(pad))
-        self._lay.setSpacing(self._gap)
         for button in (self.home_btn, self.track_search_btn, self.workflow_toggle, self.my_playlists_btn,
                        self.history_btn):
-            button.setMinimumHeight(38 if self._mode < 2 else 34)
             button.setIconSize(QSize(20, 20))
-        self._brand_row.setContentsMargins(px(6), px(4), px(6), px(12 if self._mode < 2 else 6))
+            button.setFixedHeight(max(38, button.sizeHint().height()))
+        self._brand_row.setContentsMargins(px(6), px(4), px(6), px(6))
         self._brand_row.setSpacing(px(10))
-        mark = 34 if self._mode < 2 else 28
+        mark = 34
         self._mark.setPixmap(self._icon.scaled(mark, mark, Qt.AspectRatioMode.KeepAspectRatio,
                                                Qt.TransformationMode.SmoothTransformation))
         self._name.setStyleSheet(f"font-size: {round(23 * t)}px;")
@@ -607,7 +618,7 @@ class Sidebar(QWidget):
                                 (self._transfer_layout, (6, 4, 6, 6)), (self._connection_layout, (10, 10, 10, 10))):
             layout.setContentsMargins(*(px(m) for m in margins))
             layout.setSpacing(px(2) if layout is not self._connection_layout else px(9))
-        for lst, rows, row_height in ((self.steps, len(STEPS), self._step_h), (self.services, len(SERVICES), self._service_h)):
+        for lst, rows, row_height in ((self.steps, len(STEPS), STEP_HEIGHT), (self.services, len(SERVICES), SERVICE_HEIGHT)):
             height = px(row_height)
             for i in range(lst.count()):
                 lst.item(i).setSizeHint(QSize(0, height))
@@ -727,7 +738,7 @@ class Sidebar(QWidget):
         self.transfer_panel.setVisible(bool(sessions))
         self._fit_transfers()
         if visible != bool(sessions) or rows != min(len(sessions), TRANSFER_ROWS_SHOWN):
-            # This optional group changed size: measure the sidebar again at scale 1, then scale it to the window.
+            self._mode_heights = ()
             self._fit()
         self.updateGeometry()
 
@@ -799,7 +810,10 @@ class Sidebar(QWidget):
                 it.setText(text)
 
     def set_soulseek_text(self, text: str) -> None:
-        self.soulseek_label.setText(text)
+        if text != self.soulseek_label.text():
+            self.soulseek_label.setText(text)
+            self._mode_heights = ()
+            self._fit()
 
     def set_step_states(self, done: list[bool], available: list[bool]) -> None:
         was_blocked = self.steps.blockSignals(True)
