@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -19,6 +21,33 @@ from .matching import match
 
 CANCELLED_BACKUP = "backup_superseded"
 _ACTIVE = (TransferState.QUEUED, TransferState.IN_PROGRESS, TransferState.NOT_QUEUED, TransferState.UNKNOWN)
+
+
+class AttemptPacer:
+    """How fast new backup downloads may be started, across every transfer together.
+
+    Each stalled track moves to another uploader on its own schedule, so with several transfers open many tracks
+    can come due in the same moment. A token bucket spreads those starts out instead of sending them all at once:
+    a small burst, then `per_second` after that. A track that is refused simply tries again on the next check.
+    """
+
+    def __init__(self, burst: int = 6, per_second: float = 1.0, clock=time.monotonic) -> None:
+        self._burst, self._rate, self._clock = max(1, int(burst)), max(0.01, float(per_second)), clock
+        self._tokens, self._at = float(self._burst), clock()
+        self._lock = threading.Lock()
+
+    def take(self) -> bool:
+        with self._lock:
+            now = self._clock()
+            self._tokens = min(float(self._burst), self._tokens + (now - self._at) * self._rate)
+            self._at = now
+            if self._tokens < 1.0:
+                return False
+            self._tokens -= 1.0
+            return True
+
+
+RECOVERY_PACER = AttemptPacer()  # one for the whole app: the background monitor and an open Downloads page share it
 
 
 def _key(item):
@@ -202,7 +231,7 @@ def _elapsed(now, value):
     return max(0.0, (now - previous).total_seconds())
 
 
-def advance(store, service, approval_id, remote, policy_fingerprint, *, now=None):
+def advance(store, service, approval_id, remote, policy_fingerprint, *, now=None, pacer: AttemptPacer | None = None):
     from .download import _PRIORITY
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -286,6 +315,8 @@ def advance(store, service, approval_id, remote, policy_fingerprint, *, now=None
                 store.update_fallback_plan(plan["id"], status="exhausted", error="All reviewed backups were tried; review another source or wait")
                 # Keep observing existing attempts, which may still start later.
                 continue
+            if pacer is not None and not pacer.take():
+                continue  # many tracks came due together: this one waits for the next check
             active = [r for r in rows if TransferState(r["state"]) in _ACTIVE and r["raw_state"] != CANCELLED_BACKUP]
             # One uploader at a time, whatever older plans stored: two attempts waiting side by side could both
             # start and finish (a small file takes seconds) before the slower one is cancelled, downloading the

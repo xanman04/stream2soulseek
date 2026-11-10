@@ -75,6 +75,14 @@ def _fresh_search_limits(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _unpaced_recovery(monkeypatch):
+    """Starting backup downloads is paced app-wide; tests start many in an instant, so they get a bucket that never runs dry."""
+    from s2s import queue_recovery
+
+    monkeypatch.setattr(queue_recovery, "RECOVERY_PACER", queue_recovery.AttemptPacer(burst=100_000))
+
+
+@pytest.fixture(autouse=True)
 def _fresh_failed_checks():
     """The import pass remembers failed checks process-wide; every test starts without any."""
     from s2s import workflow

@@ -260,14 +260,14 @@ class DownloadService:
     # -------------------------------------------------------------- reviewed backup recovery
 
     def recover_queued(self, approval_id: str, policy_fingerprint: str, *, now=None, remote=None) -> None:
-        from .queue_recovery import advance
+        from .queue_recovery import RECOVERY_PACER, advance
         approval = self._store.get_approval(approval_id)
         if approval is None or not any(p["primary_approval_id"] == approval_id
                                        for p in self._store.fallback_plans(approval.import_id)):
             return
         with _RECOVERY_LOCK, self._lock:
             advance(self._store, self, approval_id, self._client.list_downloads() if remote is None else remote,
-                    policy_fingerprint, now=now)
+                    policy_fingerprint, now=now, pacer=RECOVERY_PACER)
 
     def enqueue_backup(self, plan_id: str, ordinal: int) -> TransferStatus:
         from .queue_recovery import _save_status, verified_plan
