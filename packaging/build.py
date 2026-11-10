@@ -45,9 +45,9 @@ _RIEDL = "https://ffmpeg.martin-riedl.de/download/macos"
 FFMPEG = {
     # Shared build: ffmpeg.exe and ffprobe.exe use one set of DLLs instead of carrying ~100 MB each, which keeps
     # the installer small (a large unknown installer is scanned for seconds before Windows opens it). LGPL variant.
-    "windows-x64": [("https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-26-14-25/"
-                     "ffmpeg-n9.0.2-36-g6882969ce9-win64-lgpl-shared-9.0.zip",
-                     "6be6e82a5cdc08aa173cf0a7b746682b4f16492d79473dc09d7c41be834e507b")],
+    "windows-x64": [("https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-09-12-42/"
+                     "ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip",
+                     "b0981aea79d223dd78e769ce3c9106e4b3f62f56464e243537e8976d957bb2a6")],
     "macos-arm64": [(f"{_RIEDL}/arm64/1789931890_9.0.2/ffmpeg.zip",
                      "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924"),
                     (f"{_RIEDL}/arm64/1789931890_9.0.2/ffprobe.zip",
