@@ -4,9 +4,13 @@
 
 - **Home redesign.** A larger heading, a recessed playlist carousel, and illustrated action panels make Home easier to scan.
 - **Recently imported playlists.** The carousel shows playlists that added tracks to your library. Select one to open its downloaded tracklist in My Playlists.
-- **Transfers on Home.** See progress and reopen unfinished transfers directly from Home. Transfer history is available from the same panel.
+- **Transfers on Home.** See progress and reopen unfinished transfers directly from Home, including one you are still setting up: while a search runs or its results await review, it shows under In progress with a Continue button. Transfer history is available from the same panel.
 - **Steadier sidebar.** The logo, navigation items, and padding keep their size while you resize the window.
+- **Step bar.** The six playlist steps now run along the top of each transfer page, next to the title, so you can see where you are and go back to any open step. The sidebar's Playlist transfer button no longer expands: it opens Choose playlist, or the step you left the transfer on. The bar uses no page height, so Downloads and Check files keep all their room.
+- **Several transfers at once.** Start another playlist while earlier ones download. All searches share one allowance, and S2S now shows a notice when earlier searches have used much of it, so a new search will be slower. Switching stalled downloads to another uploader is also paced, so many stalled tracks across transfers no longer switch at the same moment.
+- **Page titles.** Home, Find a track, My Playlists, Transfer history and the transfer pages share one header: a larger title, a short line saying what the page is for, and a divider.
 - **GitHub sign-in.** The popup closes after Preview becomes available. If the account is ineligible or verification fails, the popup explains what happened.
+- **Update time.** The update popup now says how long the update should take, using the installer's size and your connection speed, before you choose to install. While an update downloads, the time left stays on screen as "Recalculating" instead of disappearing when the speed changes.
 - **Settings and About.** Add other download folders with a folder picker and remove entries from the read-only list. The tray setting and license labels use simpler wording.
 
 ## 1.8.1 — 2026-11-06

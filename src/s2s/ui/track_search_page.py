@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 from ..matching.formats import describe_policy, ext_of
 from ..models import Candidate, RemoteFile, Tier
 from . import theme
+from . import rate_notice
+from .page_header import PageHeader
 from .util import SORT_ROLE, fmt_mib, fmt_seconds, item, make_table
 from .workers import run_async
 from .icons import set_icon
@@ -274,12 +276,7 @@ class TrackSearchPage(QWidget):
         self._filter_popup: _FilterPopup | None = None
         self._sort_state: tuple[int, Qt.SortOrder] | None = None
 
-        heading = QLabel("Find a track")
-        heading.setObjectName("pageTitle")
-        font = heading.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 2)
-        heading.setFont(font)
+        heading = PageHeader("Find a track", "Match a title and artist, or search Soulseek freely in your own words.")
         heading.setVisible(not embedded)
         self.mode_tabs = QWidget(self)
         self.mode_tabs.setVisible(not embedded)
@@ -386,8 +383,8 @@ class TrackSearchPage(QWidget):
         self.progress.hide()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(*(0, 0, 0, 0) if embedded else (28, 26, 28, 18))
-        layout.setSpacing(8 if embedded else 16)
+        layout.setContentsMargins(*(0, 0, 0, 0) if embedded else (28, 18, 28, 18))
+        layout.setSpacing(8 if embedded else 14)
         layout.addWidget(heading)
         query_panel = QFrame()
         query_panel.setObjectName("embeddedSearchControls" if embedded else "searchControls")
@@ -503,6 +500,7 @@ class TrackSearchPage(QWidget):
         self._result_snapshot = None
         cancel_event = threading.Event()
         self._cancel_event = cancel_event
+        rate_notice.maybe_show(self, self.ctx.settings, 3)  # a quick search walks up to three query rungs
         self._set_busy(True)
         self._files.clear()
         self._candidates.clear()

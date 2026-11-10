@@ -478,3 +478,78 @@ def test_credits_heading_does_not_state_a_price(qapp=None, monkeypatch=None):
         credits_dialog.SponsorClient = original
     assert "Special thanks to" in texts
     assert not any("$" in text or "monthly" in text for text in texts)
+
+
+def test_clicking_playlist_transfer_opens_choose_playlist_from_another_page(win):
+    win.stack.setCurrentIndex(0)  # Home
+    win.sidebar.show_home()
+    assert not win.sidebar.workflow_toggle.isChecked()
+    win.sidebar.workflow_toggle.click()
+    assert win.sidebar.workflow_toggle.isChecked()
+    assert win.stack.currentIndex() == 1 and win.sidebar.steps.currentRow() == 0  # the Choose playlist page
+
+
+def test_every_workflow_page_has_a_step_bar_that_follows_the_run(win):
+    available = win.step_available()
+    win.refresh_navigation()
+    for frame in win.frames:
+        assert frame.step_bar.current == frame.index
+        for i, node in enumerate(frame.step_bar.nodes):
+            assert node.isEnabled() == (available[i] or i == frame.index)
+    win._set_workflow_navigation_enabled(False)  # e.g. while a cancelled search is still stopping
+    assert all(not frame.step_bar.isEnabled() for frame in win.frames)
+    assert not win.sidebar.workflow_toggle.isEnabled()
+    win._set_workflow_navigation_enabled(True)
+    assert all(frame.step_bar.isEnabled() for frame in win.frames)
+
+
+def test_home_lists_the_transfer_being_set_up_until_it_is_confirmed(win):
+    from s2s.models import AppleTrack, Playlist
+
+    win.ctx.playlist = Playlist("apple:1", "Chill house")
+    win.ctx.tracks = [AppleTrack(f"t{i}", f"Track {i}", "Artist", duration_ms=200000, position=i) for i in range(27)]
+    win.refresh_navigation()
+    assert win.home.draft_row.isHidden()  # no folder chosen yet: just browsing a playlist
+
+    win.ctx.destination = "/music/chill"
+    win.refresh_navigation()
+    assert not win.home.draft_row.isHidden()
+    assert win.home.draft_status.text() == "Ready to search Soulseek"
+
+    win.search._running, win.search._done = True, 20
+    win.search.progress_changed.emit()
+    assert win.home.draft_status.text() == "Searching Soulseek · 20 of 27"
+    assert win.home.draft_bar.value() == 20 and not win.home.progress_empty.isVisibleTo(win.home)
+
+    win.search._running = False
+    win.ctx.results = ["found"]
+    win.ctx.results_policy = win.ctx.settings.match_policy.fingerprint()
+    win.refresh_navigation()
+    assert "ready to review" in win.home.draft_status.text()
+
+    win.ctx.approval_id = "approved"  # confirmed: it is a saved transfer now, listed by its own session
+    win.refresh_navigation()
+    assert win.home.draft_row.isHidden()
+    win.ctx.approval_id = None
+    win.ctx.destination = None
+    win.search._done = 0
+
+
+def test_continue_on_home_reopens_the_step_the_transfer_was_left_on(win):
+    from s2s.models import AppleTrack, Playlist
+
+    win.ctx.playlist = Playlist("apple:1", "Chill house")
+    win.ctx.tracks = [AppleTrack(f"t{i}", f"Track {i}", "Artist", duration_ms=200000, position=i) for i in range(3)]
+    win.ctx.destination = "/music/chill"
+    win.refresh_navigation()
+    win.go_step(1)  # the folder page, then Home
+    win.show_home()
+    assert not win.home.draft_row.isHidden()
+    win.home.draft_button.click()  # the draft says "ready to search", but this is where it was left
+    assert win.stack.currentIndex() == 2 and win.sidebar.steps.currentRow() == 1
+
+    win.show_home()
+    win._last_workflow_step = 4  # that step is not open for this transfer: fall back to what the state points to
+    win._resume_draft(1)
+    assert win.stack.currentIndex() == 2
+    win.ctx.destination = None

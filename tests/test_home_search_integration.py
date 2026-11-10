@@ -129,7 +129,7 @@ def test_my_playlists_browses_saved_tracklist_without_changing_draft(env, monkey
     assert_context_unchanged(win.ctx, before)
 
 
-def test_expanding_workflow_keeps_sidebar_control_sizes(env):
+def test_opening_the_workflow_keeps_sidebar_control_sizes(env):
     win, _, _ = env
     win.show_home()
     win.resize(1100, 850)
@@ -137,10 +137,10 @@ def test_expanding_workflow_keeps_sidebar_control_sizes(env):
     QApplication.processEvents()
     sidebar = win.sidebar
     before = (sidebar._mode, sidebar.services.height(), sidebar.history_btn.height())
-    sidebar._set_workflow_expanded(True)
+    sidebar.show_step(2)
     QApplication.processEvents()
     assert (sidebar._mode, sidebar.services.height(), sidebar.history_btn.height()) == before
-    sidebar._set_workflow_expanded(False)
+    sidebar.show_home()
     QApplication.processEvents()
     assert (sidebar._mode, sidebar.services.height(), sidebar.history_btn.height()) == before
 

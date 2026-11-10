@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
@@ -13,6 +15,7 @@ from .context import AppContext
 from ..track_search import STANDALONE_PREFIX
 from .workers import run_async
 from . import theme
+from .page_header import PageHeader
 from .icons import icon, set_icon
 from .service_identity import BRANDS, logo_renderer
 
@@ -107,8 +110,22 @@ class _ActionArtwork(QWidget):
         icon(self.action, 36).paint(painter, bounds.toRect())
 
 
+@dataclass(frozen=True)
+class DraftTransfer:
+    """A playlist transfer that has been started but not yet confirmed (so it has no saved transfer session):
+    choosing the folder, searching Soulseek, or reviewing what was found."""
+
+    name: str
+    status: str
+    done: int
+    total: int
+    step: int  # the workflow page that continues it
+    searching: bool = False
+
+
 class HomePage(QWidget):
     playlist_requested = Signal()
+    draft_requested = Signal(int)
     quick_search_requested = Signal()
     free_search_requested = Signal()
     recent_requested = Signal(str)
@@ -124,6 +141,8 @@ class HomePage(QWidget):
         self._imports = []
         self._counts = {}
         self._in_progress = ()
+        self._summaries = ()
+        self._draft: DraftTransfer | None = None
 
         scroll = QScrollArea()
         scroll.setObjectName("homePageScroll")
@@ -137,12 +156,11 @@ class HomePage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
         root = QVBoxLayout(page)
-        root.setContentsMargins(28, 24, 28, 24)
+        root.setContentsMargins(28, 18, 28, 24)
         root.setSpacing(16)
 
-        title = QLabel("Home")
-        title.setObjectName("homePageTitle")
-        root.addWidget(title)
+        self.header = PageHeader("Home", "Transfer a playlist, find a single track, or pick up where you left off.")
+        root.addWidget(self.header)
 
         # Shown once, on a first launch (see MainWindow); hidden until then.
         self.welcome = QFrame()
@@ -263,6 +281,29 @@ class HomePage(QWidget):
         history_button.clicked.connect(self.history_requested)
         progress_header.addWidget(history_button)
         progress_layout.addLayout(progress_header)
+        self.draft_row = QWidget()  # the transfer being set up right now; filled in by set_draft
+        draft_layout = QHBoxLayout(self.draft_row)
+        draft_layout.setContentsMargins(0, 0, 0, 0)
+        draft_details = QVBoxLayout()
+        draft_details.setSpacing(3)
+        self.draft_name = QLabel()
+        self.draft_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.draft_name.setWordWrap(True)
+        self.draft_status = QLabel()
+        self.draft_status.setObjectName("mutedText")
+        self.draft_status.setWordWrap(True)
+        self.draft_bar = QProgressBar()
+        self.draft_bar.setTextVisible(False)
+        self.draft_bar.setFixedHeight(8)
+        draft_details.addWidget(self.draft_name)
+        draft_details.addWidget(self.draft_status)
+        draft_details.addWidget(self.draft_bar)
+        draft_layout.addLayout(draft_details, 1)
+        self.draft_button = QPushButton("Continue")
+        self.draft_button.clicked.connect(lambda: self._draft and self.draft_requested.emit(self._draft.step))
+        draft_layout.addWidget(self.draft_button)
+        self.draft_row.hide()
+        progress_layout.addWidget(self.draft_row)
         self.progress_rows = QVBoxLayout()
         progress_layout.addLayout(self.progress_rows)
         self.progress_empty = QWidget()
@@ -272,11 +313,9 @@ class HomePage(QWidget):
         empty_layout.addStretch()
         empty_title = QLabel("No transfers in progress")
         empty_title.setObjectName("sectionTitle")
-        empty_help = theme.subtle(QLabel("Downloads and transfers that need attention will appear here."))
-        for label in (empty_title, empty_help):
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setWordWrap(True)
-            empty_layout.addWidget(label)
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_title.setWordWrap(True)
+        empty_layout.addWidget(empty_title)
         empty_layout.addStretch()
         progress_layout.addWidget(self.progress_empty, 1)
         progress_layout.addStretch()
@@ -387,9 +426,33 @@ class HomePage(QWidget):
         self.recent_layout.addStretch(1)
         self._update_arrows()
 
+    def set_draft(self, draft: DraftTransfer | None) -> None:
+        """Show the transfer that is being set up (before it is confirmed) at the top of In progress."""
+        if draft == self._draft:
+            return
+        changed = (draft is None) != (self._draft is None)
+        self._draft = draft
+        if draft is not None:
+            self.draft_name.setText(draft.name)
+            self.draft_status.setText(draft.status)
+            self.draft_bar.setVisible(draft.searching and draft.total > 0)
+            self.draft_bar.setRange(0, max(draft.total, 1))
+            self.draft_bar.setValue(min(draft.done, max(draft.total, 1)))
+            self.draft_bar.setAccessibleName(f"Search progress for {draft.name}")
+            self.draft_button.setAccessibleName(f"Continue the transfer of {draft.name}")
+        self.draft_row.setVisible(draft is not None)
+        if changed:
+            self._render_sessions()  # the draft takes one of the three rows
+        self.progress_empty.setVisible(not self._in_progress and draft is None)
+
     def set_transfer_sessions(self, summaries) -> None:
-        visible = tuple(s for s in summaries if s.incomplete)[:3]
+        self._summaries = tuple(s for s in summaries if s.incomplete)
+        self._render_sessions()
+
+    def _render_sessions(self) -> None:
+        visible = self._summaries[:3 - (1 if self._draft is not None else 0)]
         if visible == self._in_progress:
+            self.progress_empty.setVisible(not visible and self._draft is None)
             return
         self._in_progress = visible
         while self.progress_rows.count():
@@ -423,7 +486,7 @@ class HomePage(QWidget):
             button.clicked.connect(lambda _checked=False, iid=session.import_id: self.transfer_requested.emit(iid))
             layout.addWidget(button)
             self.progress_rows.addWidget(row)
-        self.progress_empty.setVisible(not visible)
+        self.progress_empty.setVisible(not visible and self._draft is None)
 
     def _update_arrows(self):
         bar = self.recent_scroll.horizontalScrollBar()

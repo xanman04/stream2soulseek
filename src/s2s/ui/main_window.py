@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         self._pending_jobs = 0
         self._tray = None
         self._navigation_generation = 0
+        self._last_workflow_step: int | None = None  # the step page shown last; Home's Continue returns to it
         self._replacement_open = False  # a "Find another source" review is open: Review may be shown again
         self._last_manual_destination = ""
         self.soulseek = SoulseekSession(slskd_service or SlskdService(lambda: self.ctx.settings, secrets), secrets, self)
@@ -201,6 +202,7 @@ class MainWindow(QMainWindow):
         self.frames[STEP_REVIEW].hint_label.setVisible(False)
         self.frames[STEP_REVIEW].footer.setVisible(False)
         for f in self.frames:
+            f.step_requested.connect(self.go_step)
             f.cancel_btn.clicked.connect(self.cancel_playlist_search)
             if f.index == STEP_FINISH:  # the last step's button starts the next playlist
                 f.next_clicked.connect(self.transfers.request_new_import)
@@ -223,6 +225,8 @@ class MainWindow(QMainWindow):
         self.destination.destination_changed.connect(self.refresh_navigation)
         self.destination.settings_requested.connect(self.open_settings)
         self.search.state_changed.connect(self.refresh_navigation)
+        self.search.progress_changed.connect(self._refresh_home_draft)
+        self.home.draft_requested.connect(self._resume_draft)
         self.search.search_finished.connect(self._search_finished)
         self.search.cancel_requested.connect(self.cancel_playlist_search)
         self.review.approved.connect(self._approved)
@@ -446,6 +450,9 @@ class MainWindow(QMainWindow):
         """Update sidebar states and every page's Next button from the current application state."""
         done, avail = self.step_done(), self.step_available()
         self.sidebar.set_step_states(done, avail)
+        for f in self.frames:
+            f.set_steps(done, avail)
+        self._refresh_home_draft()
         self.history.set_open_blocked(self._queueing or self.search._running)
         for key, page in self._service_pages.items():
             self.sidebar.set_service_state(key, page.state_text())
@@ -455,6 +462,35 @@ class MainWindow(QMainWindow):
                 if f.index == STEP_SEARCH and self.search._running:
                     hint = "Search in progress..."
                 f.set_next(done[f.index], hint)
+
+    def _draft_transfer(self):
+        """The playlist transfer being set up, if any: a playlist and folder are chosen but the downloads are not
+        confirmed yet, so there is no saved transfer session for Home to list."""
+        from .home_page import DraftTransfer
+
+        c = self.ctx
+        if c.playlist is None or not c.tracks or c.destination is None or c.approval_id is not None:
+            return None
+        name, total = c.playlist.name, len(c.tracks)
+        if self.search._running:
+            done = min(self.search._done, total)
+            return DraftTransfer(name, f"Searching Soulseek · {done} of {total}", done, total, STEP_SEARCH, True)
+        if not c.results:
+            return DraftTransfer(name, "Ready to search Soulseek", 0, total, STEP_SEARCH)
+        if c.results_policy != c.settings.match_policy.fingerprint():
+            return DraftTransfer(name, "Matching rules changed · search again", 0, total, STEP_SEARCH)
+        return DraftTransfer(name, "Search finished · ready to review and confirm", 0, total, STEP_REVIEW)
+
+    def _resume_draft(self, fallback: int) -> None:
+        """Continue from Home reopens the transfer on the step it was left at, not the next one. Only when that step
+        is no longer open does it go to the step the transfer's state points to."""
+        last = self._last_workflow_step
+        available = self.step_available()
+        self.go_step(last if last is not None and 0 <= last < len(available) and available[last] else fallback)
+
+    def _refresh_home_draft(self) -> None:
+        if not self._closing:
+            self.home.set_draft(self._draft_transfer())
 
     def go_step(self, index: int) -> None:
         if self._closing:
@@ -471,6 +507,7 @@ class MainWindow(QMainWindow):
             self._replacement_open = False  # leaving the replacement review closes Review again
             self.refresh_navigation()
         self.stack.setCurrentIndex(index + 1)
+        self._last_workflow_step = index
         self.sidebar.show_step(index)
         if index == STEP_TRANSFERS:
             self.transfers.start()
@@ -708,7 +745,14 @@ class MainWindow(QMainWindow):
 
             get().info("Update cannot install itself (running from %s)", updater.installed_app())
             target = None
-        dialog = dialog_for(info, target=target, busy_reason=busy, parent=self)
+        preview_client = None
+        if info.channel == "preview":
+            from ..sponsors import SponsorClient
+
+            preview_client = SponsorClient(self.ctx.secrets)
+        # Measured in the background while the popup is open, so it can say how long the update will take.
+        dialog = dialog_for(info, target=target, busy_reason=busy, parent=self,
+                            speed_probe=lambda: updater.measure_download_speed(info, preview_client=preview_client))
         dialog.quit_requested.connect(self._quit_for_update)
         dialog.exec()
         dialog.deleteLater()
@@ -756,8 +800,7 @@ class MainWindow(QMainWindow):
         if self._aborting_search:
             self._aborting_search = False
             self.home.choose_button.setEnabled(True)
-            self.sidebar.workflow_toggle.setEnabled(True)
-            self.sidebar.steps.setEnabled(True)
+            self._set_workflow_navigation_enabled(True)
             self._when_refresh_idle(self._finish_cancelled_search)
             return
         viewing_search = self.stack.currentWidget() is self.frames[STEP_SEARCH]
@@ -849,9 +892,15 @@ class MainWindow(QMainWindow):
         self.search.cancel_btn.setEnabled(False)
         self.show_home()
         self.home.choose_button.setEnabled(False)
-        self.sidebar.workflow_toggle.setEnabled(False)
-        self.sidebar.steps.setEnabled(False)
+        self._set_workflow_navigation_enabled(False)
         self.statusBar().showMessage("Stopping the cancelled search…")
+
+    def _set_workflow_navigation_enabled(self, enabled: bool) -> None:
+        """The ways into the playlist steps: the sidebar button and the step bar on every workflow page."""
+        self.sidebar.workflow_toggle.setEnabled(enabled)
+        self.sidebar.steps.setEnabled(enabled)
+        for frame in self.frames:
+            frame.step_bar.setEnabled(enabled)
 
     def _finish_cancelled_search(self) -> None:
         if self._closing:

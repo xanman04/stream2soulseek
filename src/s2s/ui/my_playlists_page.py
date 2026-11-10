@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from .. import config
 from .destination_page import AUDIO_EXTENSIONS
+from .page_header import PageHeader
 from .theme import polish_table, set_banner, subtle
 from .track_dashboard import inspect_audio
 from .util import SORT_ROLE, ThreeStepSort, fmt_mib, fmt_seconds, show_error
@@ -68,16 +69,11 @@ class MyPlaylistsPage(QWidget):
         self._folders_to_scan = None
         self._snapshots = {}
         self.folder_scanned.connect(self._folder_scanned)
-        title = QLabel("My Playlists")
-        title.setObjectName("pageTitle")
         add = QPushButton("Add folder…")
         add.clicked.connect(self._add_folder)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(lambda: self.refresh(force=True))
-        header = QHBoxLayout()
-        header.addWidget(title, 1)
-        header.addWidget(refresh)
-        header.addWidget(add)
+        header = PageHeader("My Playlists", "The tracklist folders S2S has filled, and any you add.", [refresh, add])
 
         self.folders = QListWidget()
         self.folders.setAccessibleName("Tracklist folders")
@@ -143,8 +139,9 @@ class MyPlaylistsPage(QWidget):
         split.setCollapsible(1, False)
         split.setSizes([230, 740])
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(26, 22, 26, 20)
-        layout.addLayout(header)
+        layout.setContentsMargins(28, 18, 28, 20)
+        layout.setSpacing(14)
+        layout.addWidget(header)
         layout.addWidget(split, 1)
 
     def _selected_path(self) -> str | None:

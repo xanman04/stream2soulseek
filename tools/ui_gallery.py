@@ -10,8 +10,8 @@ from pathlib import Path
 import tempfile
 from unittest.mock import patch
 
-SCENARIOS = ('home-empty', 'home-recent', 'playlist', 'search-results', 'review',
-             'transfers', 'check-files', 'quick-search', 'matching-settings')
+SCENARIOS = ('home-empty', 'home-recent', 'home-searching', 'playlist', 'destination', 'search-results', 'review',
+             'transfers', 'check-files', 'quick-search', 'my-playlists', 'history', 'matching-settings')
 
 
 class MemoryKeychain:
@@ -72,6 +72,11 @@ def populate(window, root, scenario):
     if scenario == 'home-recent':
         window.home.refresh()
         window.stack.setCurrentWidget(window.home)
+    elif scenario == 'home-searching':
+        window.search._running, window.search._done, window.search._total = True, 3, len(tracks)
+        window.refresh_navigation()
+        window.home.refresh()
+        window.stack.setCurrentWidget(window.home)
     elif scenario == 'playlist':
         window.playlists._playlists_loaded([playlist])
         window.playlists._restoring = True
@@ -80,6 +85,16 @@ def populate(window, root, scenario):
         window.playlists.show_resumed(playlist, tracks)
         window.stack.setCurrentWidget(window.frames[0])
         window.sidebar.show_step(0)
+    elif scenario == 'destination':
+        window.stack.setCurrentWidget(window.frames[1])
+        window.sidebar.show_step(1)
+    elif scenario == 'my-playlists':
+        window.stack.setCurrentWidget(window.my_playlists)
+        window.sidebar.show_my_playlists()
+    elif scenario == 'history':
+        window.history.refresh()
+        window.stack.setCurrentWidget(window.history)
+        window.sidebar.show_history()
     elif scenario == 'search-results':
         window.search.show_results(results)
         window.stack.setCurrentWidget(window.frames[2])

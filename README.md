@@ -90,10 +90,17 @@ permissions, library access and unavailable tracks can affect the playlist data 
 ## From playlist to files
 
 S2S opens on **Home**, with recently used S2S playlists and entry points for playlist
-transfers and individual tracks. The playlist steps expand beneath **Playlist transfer** in the sidebar;
-returning Home preserves the current session. Saved unfinished transfers remain available in the sidebar.
+transfers and individual tracks. **Playlist transfer** in the sidebar opens the playlist steps, and a step bar along the top of
+each of those pages shows where you are and lets you go back to any step that is open; returning Home preserves the current session. Saved unfinished transfers remain available in the sidebar.
 Playlist covers come from the connected services and are cached locally. If a service has no cover or its
 image cannot be loaded, S2S shows that service's mark instead. Artwork does not affect track matching.
+
+You can start another playlist while earlier ones download: confirmed transfers keep running in the background and
+appear under **In progress**. Only one playlist is searched at a time, and every search from every transfer shares
+one allowance (30 searches in about 4 minutes, across all S2S windows), so opening several transfers never raises the
+chance of a Soulseek ban; it only means later searches wait their turn. If earlier searches have already used much of
+that allowance when you start a new one, S2S says so in a notice. Moving a stalled download to another uploader is
+paced the same way, so many stalled tracks across several transfers do not all switch at once.
 
 1. **Choose playlist.** Select a source and playlist, then inspect its tracks. Filtering and sorting the
    preview do not modify the original playlist. Sortable lists cycle through ascending, descending and

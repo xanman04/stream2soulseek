@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
@@ -28,21 +27,18 @@ SERVICES = [
     (SOUNDCLOUD_KEY, "SoundCloud", True),
 ]
 
-STEP_HEIGHT = 34
 SERVICE_HEIGHT = 38
 TRANSFER_HEIGHT = 68  # a saved session: three lines and a progress line
 TRANSFER_ROWS_SHOWN = 2  # whole rows only; more sessions scroll inside the panel instead of pushing the groups below
 # The sidebar never scrolls. When the window is too short for everything, it steps down this ladder until it fits:
-# Fewer saved transfers, then a compact transfer summary, then the workflow steps in a menu.
+# fewer saved transfers, then a compact transfer summary. (The playlist steps are not listed here: they are the step
+# bar at the top of each workflow page.)
 _MODES = (
-    dict(transfers=2, compact=False, popup=False),
-    dict(transfers=1, compact=False, popup=False),
-    dict(transfers=1, compact=True, popup=False),
-    dict(transfers=1, compact=True, popup=True),
+    dict(transfers=2, compact=False),
+    dict(transfers=1, compact=False),
+    dict(transfers=1, compact=True),
 )
 TRANSFER_COMPACT_HEIGHT = 34
-_STEP_TEXT = re.compile(r"^(✓ )?(\d+)\. (.*)$")
-_BADGE = 26  # diameter of a step's number badge at scale 1
 MAX_SCALE = 1.8  # the sidebar never grows past this; taller windows keep a little air between the two groups
 BASE_WIDTH = 264
 SCALE_STEP = 0.05  # sizes change in these steps while the window is resized, not continuously
@@ -62,104 +58,9 @@ def _color(key: str, fallback: str) -> QColor:
     return QColor(_colors().get(key, fallback))
 
 
-def _disclosure_icon(expanded: bool) -> QIcon:
-    pixmap = QPixmap(36, 36)
-    pixmap.setDevicePixelRatio(2)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    with QPainter(pixmap) as painter:
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(_color("muted", "#9aa6b4"), 1.7, Qt.PenStyle.SolidLine,
-                            Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        path = QPainterPath()
-        if expanded:
-            path.moveTo(5, 7)
-            path.lineTo(9, 11)
-            path.lineTo(13, 7)
-        else:
-            path.moveTo(7, 5)
-            path.lineTo(11, 9)
-            path.lineTo(7, 13)
-        painter.drawPath(path)
-    return QIcon(pixmap)
-
-
 class _ScaledDelegate(QStyledItemDelegate):
     scale = 1.0  # set by the sidebar whenever its scale changes
     row_height: int | None = None  # set by the sidebar's layout mode; None keeps the default row height
-
-
-class _WorkflowButton(QPushButton):
-    def paintEvent(self, event):  # noqa: N802
-        super().paintEvent(event)
-        with QPainter(self) as painter:
-            _disclosure_icon(self.isChecked()).paint(painter, self.width() - 27,
-                                                    (self.height() - 18) // 2, 18, 18)
-
-
-class _StepDelegate(_ScaledDelegate):
-    """A step row: a number badge (a check once the step is done) and the step's name. The badge column is fixed,
-    so a done step's name lines up with every other step's. The current step is a filled, outlined row."""
-
-    def sizeHint(self, option, index) -> QSize:  # noqa: N802
-        return QSize(0, self.row_height or round(STEP_HEIGHT * self.scale))
-
-    def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
-        match = _STEP_TEXT.match(index.data(Qt.ItemDataRole.DisplayRole) or "")
-        if match is None:
-            super().paint(painter, option, index)
-            return
-        done, number, name = bool(match.group(1)), match.group(2), match.group(3)
-        enabled = bool(option.state & QStyle.StateFlag.State_Enabled)
-        current = bool(option.state & QStyle.StateFlag.State_Selected)
-        hover = bool(option.state & QStyle.StateFlag.State_MouseOver) and enabled and not current
-        focus = bool(option.state & QStyle.StateFlag.State_HasFocus) and current
-        c = lambda key, fallback: _color(key, fallback)  # noqa: E731
-
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        row = QRectF(option.rect).adjusted(2, 1, -2, -1)
-        if current or hover:
-            painter.setPen(QPen(c("focus", "#81a9c9"), 2 if focus else 1) if current else Qt.PenStyle.NoPen)
-            painter.setBrush(c("selection", "#304b63") if current else c("hover", "#2b343f"))
-            painter.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
-
-        size = _BADGE * (1 + (self.scale - 1) * 0.8)
-        badge = QRectF(row.left() + 11 * self.scale, row.center().y() - size / 2, size, size)
-        ink = c("selected", "#f1f6fc") if current else c("text", "#e1e6ec") if enabled else c("disabled", "#73808e")
-        if done:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(theme.accent("ok"))
-            painter.drawEllipse(badge)
-            check = QPainterPath()
-            k = size / _BADGE  # the check mark scales with its badge
-            check.moveTo(badge.left() + 7.5 * k, badge.center().y() + 0.5 * k)
-            check.lineTo(badge.left() + 11.5 * k, badge.center().y() + 4.5 * k)
-            check.lineTo(badge.left() + 18.5 * k, badge.center().y() - 4 * k)
-            painter.setPen(QPen(QColor("#10231a"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
-                                Qt.PenJoinStyle.RoundJoin))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(check)
-        else:
-            if current:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(c("focus", "#81a9c9"))
-            else:
-                painter.setPen(QPen(c("muted", "#9aa6b4") if enabled else c("border", "#37414c"), 1.5))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(badge.adjusted(0.75, 0.75, -0.75, -0.75))
-            number_font = QFont(option.font)
-            number_font.setWeight(QFont.Weight.Bold)
-            number_font.setPointSizeF(max(8.0, option.font.pointSizeF() * 0.86 * type_scale(self.scale)))
-            painter.setFont(number_font)
-            painter.setPen(c("side", "#181d23") if current else ink)
-            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, number)
-
-        painter.setFont(index.data(Qt.ItemDataRole.FontRole) or option.font)
-        painter.setPen(ink)
-        text = QRectF(badge.right() + 12 * self.scale, row.top(), row.right() - badge.right() - 18, row.height())
-        painter.drawText(text, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                         painter.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, int(text.width())))
-        painter.restore()
 
 
 class _ServiceDelegate(_ScaledDelegate):
@@ -370,25 +271,20 @@ class Sidebar(QWidget):
         self.my_playlists_btn.setObjectName("primaryNavigation")
         self.my_playlists_btn.setCheckable(True)
         set_icon(self.my_playlists_btn, "playlist")
-        self.workflow_toggle = _WorkflowButton("Playlist transfer")
-        self.workflow_toggle.setAccessibleName("Expand playlist transfer steps")
+        self.workflow_toggle = QPushButton("Playlist transfer")
+        self.workflow_toggle.setAccessibleName("Playlist transfer")
         self.workflow_toggle.setCheckable(True)
         self.workflow_toggle.setObjectName("primaryNavigation")
         set_icon(self.workflow_toggle, "playlist")
         self.workflow_toggle.setMinimumHeight(38)
 
-        # ---- steps: the primary navigation, at the top
-        self.steps = QListWidget()
+        # ---- the step state: which step is current, done or open. Never shown here: each workflow page shows its
+        # own step bar. Navigation and the tests read it from this list.
+        self.steps = QListWidget(self)
         self.steps.setObjectName("stepList")
-        self._step_delegate = _StepDelegate(self.steps)
-        self.steps.setItemDelegate(self._step_delegate)
-        self.steps.setSpacing(2)
-        self.steps.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.steps.setMouseTracking(True)
+        self.steps.hide()
         for i, (step_name, _t, _e) in enumerate(STEPS):
-            it = QListWidgetItem(f"{i + 1}. {step_name}")
-            it.setSizeHint(QSize(0, STEP_HEIGHT))
-            self.steps.addItem(it)
+            self.steps.addItem(QListWidgetItem(f"{i + 1}. {step_name}"))
 
         # ---- accounts and status, pinned to the bottom
         self.services_header = _header("Streaming services")
@@ -439,12 +335,8 @@ class Sidebar(QWidget):
         self._support_layout.addWidget(self.report_btn, 1)
         self._support_layout.addWidget(self.tools_btn)
 
-        steps_card, self._steps_layout = _card("stepsCard")
-        self._steps_card = steps_card
-        steps_card.hide()
-        self._steps_layout.addWidget(self.steps)
-        self.steps.hide()
-        self._workflow_expanded = False
+        self._last_step = 0  # the step page last shown, which opening Playlist transfer returns to
+        self._workflow_active = False
 
         self.transfer_panel, self._transfer_layout = _card("navCard")
         self.transfers_header = _header("Transfers")
@@ -476,7 +368,7 @@ class Sidebar(QWidget):
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(6)
         lay.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)  # the window may shrink: see minimumSizeHint
-        for widget in (brand, self.home_btn, self.workflow_toggle, steps_card, self.track_search_btn,
+        for widget in (brand, self.home_btn, self.workflow_toggle, self.track_search_btn,
                        self.my_playlists_btn, self.history_btn, self.transfer_panel):
             lay.addWidget(widget)
         lay.addStretch(1)  # free height sits here, between the navigation and the accounts, never as a scroll bar
@@ -485,7 +377,6 @@ class Sidebar(QWidget):
         lay.addWidget(self.settings_btn)
         lay.addWidget(footer)
         self._mode = 0
-        self._steps_menu_mode = False
         self._min_height = 0
         self._fitting = False
         self._mode_heights = ()
@@ -497,7 +388,7 @@ class Sidebar(QWidget):
         # React to deliberate clicks / Enter only. currentRowChanged also fires when a list merely receives
         # focus (Qt selects row 0 on focus-in), which used to open the Apple page - and start its embedded
         # browser - by itself when the window first appeared, intermittently crashing the app.
-        for lst, handler in ((self.services, self._service_row), (self.steps, self._step_row)):
+        for lst, handler in ((self.services, self._service_row),):
             lst.itemClicked.connect(lambda it, lst=lst, handler=handler: handler(lst.row(it)))
             lst.itemActivated.connect(lambda it, lst=lst, handler=handler: handler(lst.row(it)))
             lst.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
@@ -509,7 +400,7 @@ class Sidebar(QWidget):
         self.track_search_btn.clicked.connect(self._track_search)
         self.history_btn.clicked.connect(self.history_requested)
         self.my_playlists_btn.clicked.connect(self.my_playlists_requested)
-        self.workflow_toggle.clicked.connect(self._toggle_workflow)
+        self.workflow_toggle.clicked.connect(self._open_workflow)
 
     # ------------------------------------------------------------ scaling
 
@@ -555,8 +446,6 @@ class Sidebar(QWidget):
             heights = []
             for mode in range(len(_MODES)):
                 self._apply_mode(mode)
-                self._steps_card.setVisible(not self._steps_menu_mode)
-                self.steps.setVisible(not self._steps_menu_mode)
                 self._invalidate()
                 heights.append(self._lay.totalMinimumSize().height())
             self._mode_heights = tuple(heights)
@@ -567,7 +456,7 @@ class Sidebar(QWidget):
 
     def _invalidate(self) -> None:
         """Forget every cached size (the cards' own layouts too) so the next measurement sees the new row heights."""
-        for layout in (self._steps_layout, self._accounts_layout, self._transfer_layout, self._connection_layout,
+        for layout in (self._accounts_layout, self._transfer_layout, self._connection_layout,
                        self._brand_row, self._support_layout):
             layout.invalidate()
             layout.activate()  # recompute now: a card's minimum height would otherwise lag behind its rows
@@ -577,19 +466,7 @@ class Sidebar(QWidget):
         self._mode = mode
         spec = _MODES[mode]
         self._transfer_rows, self._transfer_compact = spec["transfers"], spec["compact"]
-        self._steps_menu_mode = spec["popup"]
         self._apply_scale(1.0)
-        self._steps_card.setVisible(self._workflow_expanded and not self._steps_menu_mode)
-        self.steps.setVisible(self._workflow_expanded and not self._steps_menu_mode)
-        self._update_workflow_label()
-
-    def _update_workflow_label(self) -> None:
-        """In the tightest layout the toggle names the current step and opens the steps as a menu."""
-        row = self.steps.currentRow()
-        if self._steps_menu_mode and 0 <= row < len(STEPS):
-            self.workflow_toggle.setText(f"{row + 1}. {STEPS[row][0]}".replace("&", "&&"))  # "&" would mark a shortcut
-        else:
-            self.workflow_toggle.setText("Playlist transfer")
 
     def _apply_scale(self, scale: float) -> None:
         """Size everything for `scale`: rows, badges, type, padding and gaps together."""
@@ -597,7 +474,7 @@ class Sidebar(QWidget):
         self.setFixedWidth(round(BASE_WIDTH * (1 + (scale - 1) * 0.6)))
         t = type_scale(scale)
         px = lambda base: max(1, round(base * scale))  # noqa: E731 - a measurement that grows with the sidebar
-        for delegate in (self._step_delegate, self._service_delegate, self._transfer_delegate):
+        for delegate in (self._service_delegate, self._transfer_delegate):
             delegate.scale = scale
         for button in (self.home_btn, self.track_search_btn, self.workflow_toggle, self.my_playlists_btn,
                        self.history_btn):
@@ -614,11 +491,11 @@ class Sidebar(QWidget):
         self.brand_btn.setFixedHeight(self._brand_row.minimumSize().height())
         self.services_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
         self.transfers_header.setStyleSheet(f"font-size: {round(11 * t)}px;")
-        for layout, margins in ((self._steps_layout, (4, 2, 4, 2)), (self._accounts_layout, (2, 6, 2, 2)),
+        for layout, margins in ((self._accounts_layout, (2, 6, 2, 2)),
                                 (self._transfer_layout, (6, 4, 6, 6)), (self._connection_layout, (10, 10, 10, 10))):
             layout.setContentsMargins(*(px(m) for m in margins))
             layout.setSpacing(px(2) if layout is not self._connection_layout else px(9))
-        for lst, rows, row_height in ((self.steps, len(STEPS), STEP_HEIGHT), (self.services, len(SERVICES), SERVICE_HEIGHT)):
+        for lst, rows, row_height in ((self.services, len(SERVICES), SERVICE_HEIGHT),):
             height = px(row_height)
             for i in range(lst.count()):
                 lst.item(i).setSizeHint(QSize(0, height))
@@ -668,42 +545,19 @@ class Sidebar(QWidget):
         self._quiet(self.services, -1)
         self.track_search_requested.emit()
 
-    def _toggle_workflow(self, expanded: bool) -> None:
-        if self._steps_menu_mode:
-            self.workflow_toggle.setChecked(self._workflow_expanded)  # the button does not expand here: it opens a menu
-            self._show_steps_menu()
-            return
-        self._set_workflow_expanded(expanded)
+    def _open_workflow(self) -> None:
+        """Playlist transfer opens Choose playlist, or the step this transfer was last on while that step is open."""
+        row = self._last_step
+        item = self.steps.item(row)
+        if item is None or not item.flags() & Qt.ItemFlag.ItemIsEnabled:
+            row = 0
+        self.workflow_toggle.setChecked(self._workflow_active)  # a click toggles the button: show where we are, not that
+        self._step_row(row)
 
-    def _show_steps_menu(self) -> None:
-        """The steps as a menu, for windows too short to list them in the sidebar."""
-        from PySide6.QtGui import QAction
-        from PySide6.QtWidgets import QMenu
-
-        menu = QMenu(self)
-        current = self.steps.currentRow()
-        for i in range(self.steps.count()):
-            item = self.steps.item(i)
-            action = QAction(item.text().replace("&", "&&"), menu)
-            action.setCheckable(True)
-            action.setChecked(i == current)
-            action.setEnabled(bool(item.flags() & Qt.ItemFlag.ItemIsEnabled))
-            action.triggered.connect(lambda _checked=False, row=i: self._step_row(row))
-            menu.addAction(action)
-        menu.exec(self.workflow_toggle.mapToGlobal(self.workflow_toggle.rect().bottomLeft()))
-
-    def _set_workflow_expanded(self, expanded: bool) -> None:
-        expanded = bool(expanded)
-        if expanded == self._workflow_expanded:
-            return
-        self._workflow_expanded = expanded
-        self.workflow_toggle.setChecked(expanded)
-        set_icon(self.workflow_toggle, "playlist")
-        self.workflow_toggle.setAccessibleName(
-            "Collapse playlist transfer steps" if expanded else "Expand playlist transfer steps"
-        )
-        self.steps.setVisible(expanded and not self._steps_menu_mode)
-        self._steps_card.setVisible(expanded and not self._steps_menu_mode)
+    def _set_workflow_active(self, active: bool) -> None:
+        """The button is filled while one of the six workflow pages is showing."""
+        self._workflow_active = bool(active)
+        self.workflow_toggle.setChecked(self._workflow_active)
 
     def _step_row(self, row: int) -> None:
         if row < 0:
@@ -751,7 +605,7 @@ class Sidebar(QWidget):
             if self.services.item(r).data(Qt.ItemDataRole.UserRole) == key:
                 self._quiet(self.services, r)
         self._quiet(self.steps, -1)
-        self._set_workflow_expanded(False)
+        self._set_workflow_active(False)
         self._bold_current()
 
     def show_step(self, index: int) -> None:
@@ -759,18 +613,18 @@ class Sidebar(QWidget):
         self.my_playlists_btn.setChecked(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
-        self._set_workflow_expanded(True)
+        self._set_workflow_active(True)
+        self._last_step = max(index, 0)
         self._quiet(self.steps, index)
         self._quiet(self.services, -1)
         self._bold_current()
-        self._update_workflow_label()
 
     def show_home(self) -> None:
         self.history_btn.setChecked(False)
         self.my_playlists_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
-        self._set_workflow_expanded(False)
+        self._set_workflow_active(False)
         self.home_btn.setCheckable(True)
         self.home_btn.setChecked(True)
         self.track_search_btn.setChecked(False)
@@ -780,7 +634,7 @@ class Sidebar(QWidget):
         self.my_playlists_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
-        self._set_workflow_expanded(False)
+        self._set_workflow_active(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setCheckable(True)
         self.track_search_btn.setChecked(True)
@@ -789,7 +643,7 @@ class Sidebar(QWidget):
         self.history_btn.setChecked(False)
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
-        self._set_workflow_expanded(False)
+        self._set_workflow_active(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
         self.my_playlists_btn.setChecked(True)
@@ -797,7 +651,7 @@ class Sidebar(QWidget):
     def show_history(self) -> None:
         self._quiet(self.steps, -1)
         self._quiet(self.services, -1)
-        self._set_workflow_expanded(False)
+        self._set_workflow_active(False)
         self.home_btn.setChecked(False)
         self.track_search_btn.setChecked(False)
         self.my_playlists_btn.setChecked(False)
@@ -829,17 +683,11 @@ class Sidebar(QWidget):
         self._bold_current()
 
     def _bold_current(self) -> None:
-        for lst in (self.steps, self.services):
-            cur = lst.currentRow()
-            for i in range(lst.count()):
-                f = QFont(lst.font())
-                if lst is self.steps:  # steps are larger and bolder than the rest; the current one boldest
-                    f.setPointSizeF(f.pointSizeF() * type_scale(self._scale))
-                    f.setWeight(QFont.Weight.Bold if i == cur else QFont.Weight.DemiBold)
-                else:
-                    f.setBold(i == cur)
-                lst.item(i).setFont(f)
-        self.steps.viewport().update()
+        current = self.services.currentRow()
+        for i in range(self.services.count()):
+            f = QFont(self.services.font())
+            f.setBold(i == current)
+            self.services.item(i).setFont(f)
         self.services.viewport().update()
 
     def step_texts(self) -> list[str]:

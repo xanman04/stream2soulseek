@@ -23,6 +23,7 @@ from ..slskd import search as search_mod
 from ..slskd.client import SlskdAuthError, SlskdError
 from .context import AppContext
 from .settings_dialog import SettingsDialog
+from . import rate_notice
 from .theme import accent, chip, primary, set_banner, set_chip, subtle, tint
 from .util import item, make_table
 from .workers import run_async
@@ -146,6 +147,7 @@ class SearchPage(QWidget):
     search_finished = Signal(bool)  # cancelled?
     cancel_requested = Signal()
     state_changed = Signal()  # a search started or stopped
+    progress_changed = Signal()  # another track was searched
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -521,6 +523,7 @@ class SearchPage(QWidget):
             self._update_chips()
             self.searching_label.setText(self._progress_text())
             self.pace_label.setText(self._pace_text())
+            self.progress_changed.emit()
 
     def show_results(self, results: list[MatchResult]) -> None:
         self.prepare()
@@ -591,6 +594,7 @@ class SearchPage(QWidget):
         self._done, self._total = 0, len(tracks)
         self._limiter_base = search_mod.LIMITER.total_started
         self._started_at = time.monotonic()
+        rate_notice.maybe_show(self, settings, int(len(tracks) * EXPECTED_SEARCHES_PER_TRACK))
         self._set_running(True)
         self.searching_label.setText("Connecting to Soulseek...")
         self._local_stage = ""

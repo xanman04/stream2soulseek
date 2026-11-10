@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ..history import HistoryRow, import_history_rows
 from . import theme
+from .page_header import PageHeader
 from .context import AppContext
 from .util import make_table
 
@@ -59,12 +60,9 @@ class HistoryPage(QWidget):
         self.rows: list[HistoryRow] = []
         self._open_blocked = open_blocked
 
-        title = QLabel("Transfer history")
-        title.setObjectName("pageTitle")
         self.refresh_button = QPushButton("Refresh")
-        header = QHBoxLayout()
-        header.addWidget(title, 1)
-        header.addWidget(self.refresh_button)
+        header = PageHeader("Transfer history", "Every playlist transfer S2S has saved. Open one to retry or choose another file.",
+                            [self.refresh_button])
 
         self.session_search = QLineEdit()
         self.session_search.setPlaceholderText("Find a playlist or search…")
@@ -185,9 +183,9 @@ class HistoryPage(QWidget):
         footer.addStretch(1)
         footer.addWidget(self.open_button)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
-        layout.addLayout(header)
+        layout.setContentsMargins(28, 18, 28, 20)
+        layout.setSpacing(14)
+        layout.addWidget(header)
         layout.addWidget(self.compact_bar)
         layout.addWidget(self.notice)
         layout.addWidget(self.splitter, 1)

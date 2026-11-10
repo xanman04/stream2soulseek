@@ -225,7 +225,7 @@ def apply_app_style(app: QApplication | None = None, *, dark: bool | None = None
     existing = app.styleSheet().replace(previous, "") if previous else app.styleSheet()
     c = colors
     display = display_font_family()
-    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#homePageTitle, QLabel#sectionTitle, QLabel#settingsPageTitle {{ font-family: "{display}"; }}' + chr(10)
+    display_rules = (f'QLabel#appWordmark, QLabel#pageTitle, QLabel#sectionTitle, QLabel#settingsPageTitle {{ font-family: "{display}"; }}' + chr(10)
                      if display else "")
     stylesheet = display_rules + f"""
 QWidget {{ selection-background-color: {c['selection']}; selection-color: {c['selected']}; }}
@@ -240,16 +240,10 @@ QFrame#connectionPanel {{ background: {c['panel']}; border: 1px solid {c['border
 QFrame#navCard {{ background: transparent; border: none; }}
 QWidget#sidebarBody, QScrollArea#sidebarScroll {{ background: {c['side']}; border: none; }}
 QFrame#connectionPanel QLabel, QFrame#navCard QLabel {{ background: transparent; border: none; }}
-QFrame#stepsCard {{ background: transparent; border: none; }}
-QListWidget#stepList {{ background: transparent; border: none; outline: 0; }}
-QListWidget#stepList::item {{ padding: 4px 8px; border: 1px solid transparent; border-radius: 7px; }}
-QListWidget#stepList::item:hover {{ background: {c['hover']}; }}
-QListWidget#stepList::item:selected {{ background: {c['selection']}; color: {c['selected']};
-    border: 1px solid {c['focus']}; border-left: 4px solid {c['focus']}; }}
-QListWidget#stepList::item:disabled {{ color: {c['disabled']}; }}
 QFrame#accountCard {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 8px; padding: 6px; }}
-QLabel#pageTitle {{ font-size: 26px; font-weight: 600; margin: 0; padding: 0; }}
-QLabel#homePageTitle {{ font-size: 38px; font-weight: 600; padding: 0 0 5px; }}
+QLabel#pageTitle {{ font-size: 30px; font-weight: 600; margin: 0; padding: 0; }}
+QLabel#pageSubtitle {{ font-size: 13px; }}
+QFrame#pageRule {{ background: {c['border']}; border: none; }}
 QLabel#sectionTitle {{ font-size: 17px; font-weight: 600; }}
 QLabel#reportFieldLabel {{ font-weight: 600; }}
 QLabel#historyDetailTitle {{ font-weight: 600; margin-top: 6px; }}
