@@ -246,6 +246,57 @@ def download_update(info: UpdateInfo, folder: Path, *, http_get=None, progress=N
     return archive
 
 
+# Time the installer itself takes once the download is verified: S2S closes, the installer replaces the app
+# (Windows) or the app is copied out of the disk image (macOS), and S2S starts again. Windows is the median of the
+# installs logged on a development PC (42 to 114 s); macOS is not measured yet.
+INSTALL_SECONDS = {"windows": 75.0, "macos": 45.0}
+PROBE_SECONDS = 3.0  # long enough to get past the connection's ramp-up, short enough not to keep the popup waiting
+PROBE_MAX_BYTES = 8 * 1024 * 1024
+PROBE_MIN_BYTES = 128 * 1024
+
+
+def measure_download_speed(info: UpdateInfo, *, preview_client=None, stream=None, clock=time.monotonic,
+                           seconds: float = PROBE_SECONDS) -> float | None:
+    """Bytes per second right now, from the first couple of seconds of the real installer download, or None when
+    that could not be measured. Nothing is saved or verified; the connection is closed once the sample is taken."""
+    try:
+        if stream is not None:
+            opened = stream(info.archive_url)
+        elif info.channel == "preview":
+            if preview_client is None:
+                return None
+            opened = preview_client.stream_download(info.archive_url)
+        else:
+            opened = _stream_get(info.archive_url)
+        with opened as response:
+            chunks = response.iter_bytes(64 * 1024) if hasattr(response, "iter_bytes") else iter(())
+            received = 0
+            started = now = None  # the clock starts at the first bytes, so connecting and redirects do not count
+            for chunk in chunks:
+                now = clock()
+                if started is None:
+                    started = now
+                    continue
+                received += len(chunk)
+                if now - started >= seconds or received >= PROBE_MAX_BYTES:
+                    break
+            if started is None or received < PROBE_MIN_BYTES or now - started <= 0:
+                return None
+            return received / (now - started)
+    except Exception:  # noqa: BLE001 - an estimate must never get in the way of the update
+        return None
+
+
+def estimate_update_seconds(size_bytes: int | None, speed_bps: float | None, *, installs: bool) -> float | None:
+    """Download time at the measured speed, plus the installer's time when S2S can install it by itself."""
+    if not size_bytes or not speed_bps or speed_bps <= 0:
+        return None
+    seconds = size_bytes / speed_bps
+    if installs:
+        seconds += INSTALL_SECONDS["windows" if sys.platform == "win32" else "macos"]
+    return seconds
+
+
 @contextmanager
 def _stream_get(url: str):
     """Keep the response open while downloading; never buffer an entire installer in memory."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import sys
 import time
@@ -32,6 +33,21 @@ def change_headlines(notes: str, limit: int = 4) -> list[str]:
         if line:
             lines.append(line)
     return lines[:limit]
+
+
+def format_size(size_bytes: int) -> str:
+    megabytes = size_bytes / (1024 * 1024)
+    return f"{megabytes / 1024:.1f} GB" if megabytes >= 1000 else f"{max(1, round(megabytes))} MB"
+
+
+def format_duration(seconds: float) -> str:
+    """A planning figure rounded up, so 'about 3 minutes' never turns into four."""
+    if seconds < 60:
+        return "under a minute"
+    minutes = math.ceil(seconds / 60)
+    if minutes > 90:
+        return "over an hour"
+    return f"about {minutes} {'minute' if minutes == 1 else 'minutes'}"
 
 
 class StartupUpdateCheck(QDialog):
@@ -69,11 +85,15 @@ class UpdateDialog(QDialog):
     download_progress = Signal(float)
     phase_changed = Signal(str)
 
-    def __init__(self, info: updater.UpdateInfo, *, target=None, busy_reason: str = "", parent=None) -> None:
+    def __init__(self, info: updater.UpdateInfo, *, target=None, busy_reason: str = "", parent=None,
+                 speed_probe=None) -> None:
+        """speed_probe: a function that returns the download speed in bytes per second (or None); it runs in the
+        background so the popup can say how long the update will take before anyone chooses to install it."""
         super().__init__(parent)
         self.info = info
         self.target = target  # where the new version is installed; None: this copy cannot update itself
         self._installing = False
+        self._had_estimate = False
         self._download_samples: deque[tuple[float, float]] = deque(maxlen=4)
         self._last_progress_at: float | None = None
         self._estimate_timer = QTimer(self)
@@ -108,6 +128,14 @@ class UpdateDialog(QDialog):
             self.changes.setWordWrap(True)
             lay.addSpacing(10)
             lay.addWidget(self.changes)
+
+        self.time_estimate = theme.subtle(QLabel())
+        self.time_estimate.setWordWrap(True)
+        self.time_estimate.setVisible(bool(info.size_bytes))
+        if info.size_bytes:
+            self.time_estimate.setText(self._size_text() + (" Estimating how long it will take…" if speed_probe else ""))
+            lay.addSpacing(6)
+            lay.addWidget(self.time_estimate)
 
         self.status = theme.subtle(QLabel(""))
         self.status.setWordWrap(True)
@@ -151,6 +179,23 @@ class UpdateDialog(QDialog):
         lay.addLayout(row)
         self.update_btn.setDefault(True)
         later.clicked.connect(self.reject)
+        if speed_probe is not None and info.size_bytes:
+            run_async(self, speed_probe, self._probe_done, lambda _exc: self._probe_done(None))
+
+    def _size_text(self) -> str:
+        return f"Download size: {format_size(self.info.size_bytes)}."
+
+    def _probe_done(self, speed) -> None:
+        """Say how long the whole update should take, from the speed measured while the popup was open."""
+        if self._installing:
+            return  # the live estimate has taken over
+        installs = self.target is not None
+        seconds = updater.estimate_update_seconds(self.info.size_bytes, speed, installs=installs)
+        if seconds is None:
+            self.time_estimate.setText(f"{self._size_text()} How long it takes depends on your connection.")
+            return
+        steps = f"{format_size(self.info.size_bytes)} to download" + (", then install" if installs else "")
+        self.time_estimate.setText(f"Estimated time: {format_duration(seconds)} ({steps}).")
 
     def _headline(self) -> str:
         return f"S2S {self.info.version} is available"
@@ -185,11 +230,12 @@ class UpdateDialog(QDialog):
             return
         samples.append((now, fraction))
         if len(samples) < samples.maxlen:
+            self._show_estimate_pending()
             return
         rates = [(end - start) / (later - earlier)
                  for (earlier, start), (later, end) in zip(samples, list(samples)[1:])]
         if min(rates) <= 0 or max(rates) > 1.5 * min(rates):
-            self.estimate.hide()
+            self._show_estimate_pending()
             return
         seconds = (1 - fraction) * (now - samples[0][0]) / (fraction - samples[0][1])
         if seconds < 60:
@@ -198,20 +244,33 @@ class UpdateDialog(QDialog):
         else:
             minutes = round(seconds / 60)
             text = f"About {minutes} {'minute' if minutes == 1 else 'minutes'} left"
+        self._had_estimate = True
         self.estimate.setText(text)
         self.estimate.show()
 
+    def _show_estimate_pending(self) -> None:
+        """While the speed is unsteady the line stays, saying so, rather than disappearing and coming back."""
+        self.estimate.setText("Recalculating time left…" if self._had_estimate else "Estimating time left…")
+        self.estimate.show()
+
     def _reset_estimate(self) -> None:
+        """The download is over or the phase changed: nothing to estimate."""
         self._download_samples.clear()
         self._last_progress_at = None
+        self._had_estimate = False
         self._estimate_timer.stop()
         self.estimate.hide()
 
     def _expire_estimate(self, now: float | None = None) -> None:
+        """No progress for two seconds: forget the old speed and say the estimate is being recalculated."""
         if now is None:
             now = time.monotonic()
         if self._last_progress_at is not None and now - self._last_progress_at >= 2:
-            self._reset_estimate()
+            self._download_samples.clear()
+            self._last_progress_at = None
+            self._estimate_timer.stop()
+            self._had_estimate = True
+            self._show_estimate_pending()
 
     def reject(self) -> None:
         if not self._installing:
@@ -221,6 +280,7 @@ class UpdateDialog(QDialog):
         if self._installing:
             return
         self._installing = True
+        self.time_estimate.hide()  # the live estimate below takes over
         self.later_btn.setEnabled(False)
         self.update_btn.setEnabled(False)
         self.progress.setVisible(True)
@@ -317,8 +377,9 @@ class PreviewUpdateDialog(UpdateDialog):
 
     WINDOW_TITLE = "S2S sponsor preview"
 
-    def __init__(self, info: updater.UpdateInfo, *, target=None, busy_reason: str = "", parent=None) -> None:
-        super().__init__(info, target=target, busy_reason=busy_reason, parent=parent)
+    def __init__(self, info: updater.UpdateInfo, *, target=None, busy_reason: str = "", parent=None,
+                 speed_probe=None) -> None:
+        super().__init__(info, target=target, busy_reason=busy_reason, parent=parent, speed_probe=speed_probe)
         if target is not None and self.update_btn.text() == "Update":
             self.update_btn.setText("Install preview")
         self.later_btn.setText("Not now")
