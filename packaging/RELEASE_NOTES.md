@@ -1,16 +1,18 @@
 ## What's changed
 
-- **Sponsor Preview is open.** Monthly GitHub sponsors can try upcoming builds first: connect GitHub under Settings → Updates and choose Preview. Stable stays the default and needs no account.
-- **Sliders in Settings.** The search timeout, minimum bitrate and length tolerance are now sliders that show their value, and the remaining number boxes have visible arrows.
-- **Clearer dialogs.** What's new lists each change as its own bullet, and About and Credits are tidier.
+- **Home redesign.** Reopen unfinished transfers from Home and see their progress at a glance.
+- **Recently imported playlists.** Open a downloaded tracklist directly from its carousel tile.
+- **Steadier sidebar.** Navigation sizes and padding stay fixed while resizing.
+- **GitHub sign-in.** The popup closes once Preview is available and explains denied access or verification errors.
+- **Download folders.** Choose additional folders with the folder picker and manage them in a read-only list.
 
 ## Downloads
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.8.1/S2S-1.8.1-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
-| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.8.1/S2S-1.8.1-macos-x64.dmg) | Intel processor; macOS 14.4+ |
-| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.8.1/S2S-1.8.1-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
+| Mac — Apple silicon | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.9.0/S2S-1.9.0-macos-arm64.dmg) | M1 or newer; macOS 14.4+ |
+| Mac — Intel | [Download disk image](https://github.com/xanman04/stream2soulseek/releases/download/v1.9.0/S2S-1.9.0-macos-x64.dmg) | Intel processor; macOS 14.4+ |
+| Windows — x64 | [Download installer](https://github.com/xanman04/stream2soulseek/releases/download/v1.9.0/S2S-1.9.0-windows-x64-setup.exe) | Windows 10 (1809+) or Windows 11 |
 
 Python, slskd and FFmpeg are included. The **Source code** archives are for developers.
 
@@ -28,4 +30,4 @@ Sponsor Preview has been checked live with the owner account on Windows; other a
 
 SoundCloud's bot protection may require a slider challenge. Mac builds are ad hoc signed without Developer ID signing or notarization; Windows builds are not publisher-signed, so operating-system security prompts are expected.
 
-[Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) · [Report a problem](https://github.com/xanman04/stream2soulseek/issues) · [Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.8.0...v1.8.1)
+[Full changelog](https://github.com/xanman04/stream2soulseek/blob/main/CHANGELOG.md) · [Report a problem](https://github.com/xanman04/stream2soulseek/issues) · [Compare changes](https://github.com/xanman04/stream2soulseek/compare/v1.8.1...v1.9.0)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.0 — 2026-11-10
+
+- **Home redesign.** A larger heading, a recessed playlist carousel, and illustrated action panels make Home easier to scan.
+- **Recently imported playlists.** The carousel shows playlists that added tracks to your library. Select one to open its downloaded tracklist in My Playlists.
+- **Transfers on Home.** See progress and reopen unfinished transfers directly from Home. Transfer history is available from the same panel.
+- **Steadier sidebar.** The logo, navigation items, and padding keep their size while you resize the window.
+- **GitHub sign-in.** The popup closes after Preview becomes available. If the account is ineligible or verification fails, the popup explains what happened.
+- **Settings and About.** Add other download folders with a folder picker and remove entries from the read-only list. The tray setting and license labels use simpler wording.
+
 ## 1.8.1 — 2026-11-06
 
 - **Sponsor Preview is open.** Monthly GitHub sponsors can try upcoming builds first: connect GitHub under Settings → Updates and choose Preview. Stable stays the default and needs no account.

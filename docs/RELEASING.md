@@ -1,5 +1,17 @@
 # Release process
 
+Use `development` for day-to-day work and `main` as the production branch. Merge a reviewed
+batch from `development` into `main` when it is ready for release validation. A branch push by
+itself does not publish an installer.
+
+For a release that goes through sponsor Preview, build a private prerelease from the selected
+`main` commit. Use a version such as `v1.8.2-rc.1` in the private preview repository. Once that
+candidate passes live checks, publish the corresponding stable version from the same reviewed
+source on public `main`, with the stable version and release notes. If testing reveals a fix,
+land it through `development`, merge it into `main`, and validate a new candidate before promoting
+it. Keep preview version metadata on the private candidate so development and production can
+continue to use normal version numbers.
+
 Use semantic version tags such as `v1.0.1`. Keep `pyproject.toml`, `src/s2s/__init__.py`, the changelog and
 release notes consistent. Published tags are immutable; a correction gets a new patch version.
 
